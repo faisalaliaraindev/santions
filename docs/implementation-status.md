@@ -15,6 +15,8 @@ The plan requires these three to be reported separately (section 1.3).
 | Live source verified | **Not started** — no live source has been contacted                | None. No live call has been made.                                                             |
 | Production approved  | **Not started**                                                    | None.                                                                                         |
 
+The sequenced plan we are executing against is `docs/delivery-plan.md`.
+
 ## Gate status
 
 | Gate                                                        | Status          | Notes                                                                                                                                                                                                                         |
