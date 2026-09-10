@@ -27,6 +27,86 @@ Say what you did about it.
 
 ---
 
+## 2026-09-10 (later still) — Phase B, steps B1–B8 (gate G3 partial)
+
+**Did:**
+
+- **Permissions** (`packages/domain/src/access/permissions.ts`) — pure policy, so it lives in
+  the domain package and is the same decision for an HTTP guard, a worker, an export job or a
+  webhook. All nine roles, explicit permission list, `decideAccess`, four-eyes `canApprove`,
+  break-glass expiry. `platform_operator` genuinely cannot read evidence.
+- **`packages/contracts`** — zod schemas: the error contract with status and retryability
+  mappings, FR-01 subject intake, search creation, the three result dimensions, cursor
+  pagination. Schemas are `.strict()`, so an unknown field is rejected rather than dropped.
+- **`apps/api`** — NestJS. Global `AuthGuard` → `CsrfGuard` → `PermissionGuard`, so a new
+  route is protected by default and must opt out with `@Public()`. Token verifier (jose,
+  asymmetric algorithms only), BFF session service (hashed session IDs, idle + absolute
+  expiry, constant-time CSRF), entitlements with version pinning, subjects, idempotent search
+  creation, reserved 501 routes, health, config guards, and the OIDC login flow.
+- **Tests** — 23 in `tests/security/auth.test.ts` (real generated keys, not a mocked
+  verifier), 25 in `tests/security/tenant-isolation.test.ts` (real API, real MongoDB).
+
+**Verified:**
+
+```
+pnpm lint / typecheck   clean
+pnpm test:unit          191 passed   (+26 permission tests)
+pnpm test:invariants     29 passed
+pnpm test:evaluation     12 passed
+pnpm test:integration    14 passed
+pnpm test:security       48 passed   <- new
+pnpm verify:local        7 of 8 suites ok; only e2e unimplemented (Phase G)
+```
+
+The OIDC flow was verified against the **real Keycloak**, not a stub: `/auth/login` returns a
+302 carrying `code_challenge_method=S256`, sets both handshake cookies, and `/auth/callback`
+with a forged `state` is rejected.
+
+**Left half-done — Phase B is NOT complete:**
+
+- **B1 (part)** — the zod schemas exist, but no OpenAPI document is generated from them yet.
+- **B9** — the panel's `pnpm api:generate` still exits non-zero, because it needs that
+  document. The frontend cannot generate its typed client yet.
+
+Everything else in B1–B8 is done. G3 is marked **Partial** in `implementation-status.md` for
+exactly this reason.
+
+**Found — five problems, all real:**
+
+1. **esbuild does not emit decorator metadata**, so NestJS constructor DI resolved to
+   `undefined` under vitest while working fine under `tsc`. Fixed with explicit `@Inject()`
+   on every injected constructor parameter, which removes the dependency on
+   `emitDecoratorMetadata` entirely rather than papering over it with an SWC plugin.
+2. **Health endpoints were version-prefixed** to `/v1/health/live` by `defaultVersion`, so a
+   load balancer would have had to know the API version — and a version bump would silently
+   turn every probe into a 404, which reads as "the service is down". Health and the auth
+   redirect flow are now `VERSION_NEUTRAL`.
+3. **Circular import crash at startup.** `auth.controller.ts` imported the `APP_CONFIG` DI
+   token from `app.module.ts`, which imports every controller. ESM temporal dead zone, and
+   the error ("Cannot access 'APP_CONFIG' before initialization") pointed at the wrong file.
+   Tokens now live in `apps/api/src/tokens.ts`.
+4. **A brittle integration assertion.** T01 asserted there were _exactly_ two tenants, so it
+   broke the moment the T63 security test created one of its own. It now asserts the two
+   seeded tenants are **present**, which is what the bootstrap actually promises.
+5. **T63's cleanup was not in a `finally`**, so one failed run left a `tenant-nocap-*` behind
+   and broke an unrelated suite afterwards — with the failure pointing at the wrong test.
+   Cleanup is now unconditional.
+
+**Next session should:** finish Phase B — generate the OpenAPI document from the zod schemas
+in `packages/contracts` (B1), then wire the frontend's `pnpm api:generate` to it (B9). After
+that, Phase C. See [`phase-b.md`](./phase-b.md).
+
+**Decisions touched:**
+
+- **D10** (minimum identity data an integrator must supply) is **still open** and now
+  materially matters: the FR-01 subject schema is implemented as the permissive superset —
+  full name required, everything else optional, sparse identity searchable but left
+  unresolved. That is a defensible default and it is recorded here as an assumption, but it
+  should be confirmed by product and Zquence rather than hardened by silence.
+- No other decision closed.
+
+---
+
 ## 2026-09-10 (later) — Phase A complete: the local stack is real (gate G1)
 
 **Did:**

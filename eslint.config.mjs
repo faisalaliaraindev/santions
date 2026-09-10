@@ -23,6 +23,24 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-non-null-assertion': 'off' },
   },
   {
+    /**
+     * HTTP tests assert on supertest response bodies, which are typed `any` by design — the
+     * point is to check what actually came over the wire, before any of our own types have
+     * been applied to it. Casting every assertion would obscure exactly the thing under test,
+     * so the unsafe-* rules are relaxed here and nowhere else.
+     */
+    files: ['tests/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'off',
+    },
+  },
+  {
     // Operator scripts are plain ESM JavaScript. Type-aware rules do not apply, so they are
     // linted with the untyped recommended set rather than pulled into a tsconfig project.
     files: ['scripts/**/*.mjs'],

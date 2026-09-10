@@ -126,8 +126,13 @@ describe('T01 — fresh checkout and local bootstrap', () => {
 
   it('two synthetic tenants are seeded, so cross-tenant denial is testable', async () => {
     const tenants = await mongo.db().collection('tenants').find({}).toArray();
-    const ids = tenants.map((t) => String(t['tenantId'])).sort();
-    expect(ids).toEqual(['tenant-alpha', 'tenant-beta']);
+    const ids = new Set(tenants.map((t) => String(t['tenantId'])));
+
+    // Presence, not exclusivity. Asserting "exactly these two" made this test fail whenever
+    // another suite created a tenant of its own — a brittleness that says nothing about
+    // whether the bootstrap worked.
+    expect(ids.has('tenant-alpha')).toBe(true);
+    expect(ids.has('tenant-beta')).toBe(true);
   });
 
   it('every seeded record is labelled MOCK, so a fixture cannot pass as a live result', async () => {
@@ -188,7 +193,12 @@ describe('T02 — restart and persistence', () => {
     const fresh = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
     try {
       await fresh.connect();
-      const count = await fresh.db().collection('tenants').countDocuments();
+      const count = await fresh
+        .db()
+        .collection('tenants')
+        .countDocuments({
+          tenantId: { $in: ['tenant-alpha', 'tenant-beta'] },
+        });
       expect(count).toBe(2);
     } finally {
       await fresh.close();

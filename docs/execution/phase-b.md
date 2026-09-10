@@ -1,6 +1,6 @@
 # Phase B — Identity, tenancy and the API contract
 
-**Gate:** G3 · **Status:** blocked on Phase A · **Estimated sessions:** 3–4
+**Gate:** G3 · **Status:** IN PROGRESS — B1 (partly), B2–B8 done; B1 OpenAPI and B9 remain
 
 ---
 
@@ -135,18 +135,18 @@ error typing stay hand-written. Only operations and types are generated.
 
 ## Definition of done
 
-- [ ] T03 — missing, expired, wrong-audience and forged tokens rejected without data disclosure
-- [ ] T04 — tenant A denied B's search, evidence, graph, review and export, on **every** route
-- [ ] T05 — forged tenant header or queue payload fails closed; stored ownership prevails
-- [ ] T06 — viewer cannot review; analyst cannot activate a source; operator cannot read evidence
+- [x] T03 — missing, expired, wrong-audience and forged tokens rejected without data disclosure
+- [x] T04 — tenant A denied B's search, evidence, graph, review and export, on **every** route
+- [x] T05 — forged tenant header or queue payload fails closed; stored ownership prevails
+- [x] T06 — viewer cannot review; analyst cannot activate a source; operator cannot read evidence
 - [ ] T07 — logout, revocation and key rotation behave as documented; old access does not persist
 - [ ] T08 — CSRF blocked; no permissive CORS; no token in browser storage or logs
-- [ ] T09 — production startup fails on development issuer, mock source or test credentials
-- [ ] T62 — sandbox key cannot run a live search
-- [ ] T63 — tenant without the capability is refused as an entitlement denial and **no source call occurs**
+- [x] T09 — production startup fails on development issuer, mock source or test credentials
+- [x] T62 — sandbox key cannot run a live search
+- [x] T63 — tenant without the capability is refused as an entitlement denial and **no source call occurs**
 - [ ] T68 — API key secret shown once, stored hashed, rotation and revocation audited
-- [ ] T22, T23 — idempotency: one operation for identical requests, 409 on changed body
-- [ ] Two tenants with deliberately identical external references stay isolated
+- [x] T22, T23 — idempotency: one operation for identical requests, 409 on changed body
+- [x] Two tenants with deliberately identical external references stay isolated
 - [ ] `verify-local.mjs` has `security` marked implemented and the suite genuinely runs
 - [ ] OpenAPI generated; the frontend generates and builds against it
 - [ ] **D10 closed** and recorded in `docs/decisions.md`

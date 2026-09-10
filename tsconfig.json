@@ -9,7 +9,10 @@
     // root package.json declares no "type".
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // Tests import the decorated NestJS sources, so the root project needs decorator support.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
-  "include": ["*.ts", "*.mts", "scripts/**/*", "tests/**/*"]
+  "include": ["*.ts", "*.mts", "scripts/**/*", "tests/**/*", "apps/api/src/types/express.d.ts"]
 }

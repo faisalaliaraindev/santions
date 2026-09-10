@@ -13,7 +13,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc -b tsconfig.build.json && tsc -p packages/domain/tsconfig.json && tsc -p packages/evaluation/tsconfig.json && tsc -p tsconfig.json",
+    "typecheck": "tsc -b tsconfig.build.json && tsc -p packages/domain/tsconfig.json && tsc -p packages/evaluation/tsconfig.json && tsc -p packages/contracts/tsconfig.json && tsc -p apps/api/tsconfig.json && tsc -p tsconfig.json",
     "test:unit": "vitest run --project unit",
     "test:invariants": "vitest run --project invariants",
     "test:evaluation": "vitest run --project evaluation",
@@ -26,10 +26,11 @@
     "local:down": "docker compose -f infra/local/docker-compose.yml down",
     "local:reset": "node scripts/local-reset.mjs",
     "local:bootstrap": "node scripts/local-bootstrap.mjs",
-    "dev": "echo \"[pending G3] api/worker not implemented\" && exit 1",
+    "dev": "node scripts/dev.mjs",
     "demo:api": "echo \"[pending G8] api demo not implemented\" && exit 1",
     "demo:zquence": "echo \"[pending G9] zquence demo not implemented\" && exit 1",
-    "lexicon:audit": "vitest run --project unit packages/domain/test/taxonomy/lexicon-audit.test.ts"
+    "lexicon:audit": "vitest run --project unit packages/domain/test/taxonomy/lexicon-audit.test.ts",
+    "dev:api": "pnpm build && node apps/api/dist/main.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
@@ -40,7 +41,22 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "jose": "^5.9.6",
+    "supertest": "^7.0.0",
+    "@types/supertest": "^6.0.2",
+    "@nestjs/testing": "^11.0.1",
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "cookie-parser": "^1.4.7",
+    "helmet": "^8.0.0",
+    "mongodb": "^6.12.0",
+    "zod": "^3.24.1",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -54,10 +54,10 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, 165 passed, 29 passed, 12 passed.
+Expected today: clean, clean, 191 passed, 29 passed, 12 passed.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration`
-adds 14 passing tests.
+adds 14 integration and 48 security tests.
 
 **At the end — before the session is cleared**
 

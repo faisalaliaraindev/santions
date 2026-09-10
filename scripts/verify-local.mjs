@@ -30,7 +30,7 @@ const SUITES = [
   },
   { name: 'evaluation metrics', script: 'test:evaluation', required: true, implemented: true },
   { name: 'integration', script: 'test:integration', required: true, implemented: true },
-  { name: 'security', script: 'test:security', required: true, implemented: false },
+  { name: 'security', script: 'test:security', required: true, implemented: true },
   { name: 'end-to-end', script: 'test:e2e', required: true, implemented: false },
 ];
 
