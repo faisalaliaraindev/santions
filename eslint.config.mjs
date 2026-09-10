@@ -29,7 +29,16 @@ export default tseslint.config(
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       parserOptions: { projectService: false, project: false },
-      globals: { console: 'readonly', process: 'readonly' },
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        fetch: 'readonly',
+        Response: 'readonly',
+        URLSearchParams: 'readonly',
+        AbortSignal: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+      },
     },
     rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] },
   },

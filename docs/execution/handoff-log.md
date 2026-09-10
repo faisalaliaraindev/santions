@@ -27,6 +27,88 @@ Say what you did about it.
 
 ---
 
+## 2026-09-10 (later) — Phase A complete: the local stack is real (gate G1)
+
+**Did:**
+
+- **A1** `infra/local/keycloak/realm-export.json`: realm `adverse-search-local`, panel client
+  (auth-code + PKCE, confidential, exchanged by the BFF), two machine clients bound to
+  different tenants, all nine roles from section 4.2, and ten synthetic users across
+  `tenant-alpha` and `tenant-beta` — including a `platform_operator` who exists specifically
+  to be denied evidence access in T06.
+- **A2** `scripts/bootstrap/aws.mjs`: idempotent S3 bucket (public access blocked, versioning
+  on) and an SQS jobs queue with a DLQ and redrive policy.
+- **A3** `scripts/bootstrap/search-index.mjs`: `subjects` and `documents` indexes behind the
+  `SEARCH_INDEX_KIND` seam. OpenSearch throws a clear not-implemented error rather than
+  silently doing nothing, so decision D12 stays genuinely open.
+- **A4** `scripts/local-bootstrap.mjs` + `scripts/bootstrap/seed-data.mjs`: idempotent,
+  refuses any non-local endpoint, refuses to run unless `ADVERSE_SEARCH_MODE=mock`, and seeds
+  two tenants, entitlement/taxonomy/policy versions and two fixture sources — every record
+  carrying `mode: "MOCK"` so a fixture cannot pass as a live result (T55).
+- **A5** `tests/integration/local-stack.test.ts`: T01 and T02 as 14 automated tests.
+  `verify-local.mjs` now marks `integration` as implemented.
+- Fixed `scripts/local-up.mjs` so it waits only on long-running services.
+
+**Verified:**
+
+```
+pnpm local:up          7/7 services healthy
+pnpm local:bootstrap   completes; re-running is a clean no-op
+pnpm test:integration  14 passed
+pnpm verify:local      lint, typecheck, unit, invariants, evaluation, integration all ok
+                       security and e2e reported UNIMPLEMENTED (Phase B and G), so it
+                       still exits non-zero - which is the intended behaviour at this gate
+```
+
+T02 was done properly rather than assumed: full `pnpm local:down` (containers removed), then
+`pnpm local:up`, then `pnpm test:integration` **without re-bootstrapping** — 14 passed.
+Seeded state genuinely survives a container recreate.
+
+**Left half-done:** nothing in Phase A.
+
+**Found — five problems that only surface by actually running it:**
+
+1. **Port 27017 was already taken** by another MongoDB on this machine. Rather than fight for
+   default ports on a dev box running several stacks, all host ports moved to a dedicated
+   280xx range: mongo 28017, meilisearch 28700, localstack 28566, keycloak 28080, searxng
+   28888, model runtime 28434, fixtures 28090. Container-internal ports are unchanged.
+2. **Keycloak could not write its H2 volume** — the named volume is root-owned and Keycloak
+   runs as uid 1000. Fixed by removing that volume entirely. That is the better design
+   anyway: the realm is imported from the committed JSON on every start, so a persisted dev
+   database cannot silently diverge from `realm-export.json` when someone edits it in the
+   admin UI.
+3. **The Keycloak healthcheck hung.** The image ships neither curl nor wget, so the check uses
+   bash `/dev/tcp` — but without a `Connection: close` header the read never returns. The
+   container reported unhealthy while serving perfectly. Fixed with the header plus a timeout.
+4. **S3 bucket creation returned a 400** complaining about an "unspecified location
+   constraint". The bootstrap was sending `application/x-www-form-urlencoded` for S3, so
+   LocalStack never parsed the XML body. S3 now gets `application/xml`; SQS keeps the form
+   encoding. Worth noting: the first fix attempt silently did not apply, and only _appeared_
+   to work because the bucket already existed from manual debugging. It was re-verified by
+   deleting the bucket and re-running from a genuinely empty state.
+5. **`pnpm local:up` reported a healthy stack as broken.** `mongo-init` is a one-shot job that
+   initiates the replica set and exits 0, and `docker compose up --wait` treats an exited
+   container as a failure. Now the script starts everything, then waits only on the
+   long-running services. A false alarm here is worse than no check, because it teaches people
+   to ignore the check.
+
+**Next session should:** start Phase B step B1 — create `packages/contracts` with the
+versioned schemas and the generated OpenAPI document. See [`phase-b.md`](./phase-b.md).
+
+**Decisions touched:** none closed.
+
+- **D12** stays open behind the `SEARCH_INDEX_KIND` seam; Meilisearch is running as the
+  working assumption and Phase C's workload test decides it.
+- **D7** stays open. Ollama runs but **no model is pulled**, deliberately — pulling one to
+  make a health check look better would decide D7 by accident. Phase F benchmarks candidates
+  on the labelled set.
+- **D1, D3, D8** have placeholder values seeded (GB only, eight categories, no retention
+  rule), each carrying an `assumption` field on the record so the placeholder cannot quietly
+  become the decision. They still need people outside engineering, and they close in Phase D.
+- **D10** still needs product and Zquence, and it shapes the Phase B subject schema.
+
+---
+
 ## 2026-09-10 — Phases G0 and G2 complete; frontend foundation; planning documents
 
 **Did:**

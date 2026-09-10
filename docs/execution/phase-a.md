@@ -1,6 +1,6 @@
 # Phase A — Make the local stack real
 
-**Gate:** finishes G1 · **Status:** not started · **Estimated sessions:** 1–2
+**Gate:** finishes G1 · **Status:** COMPLETE (2026-09-10) · **Actual:** 1 session
 
 ---
 
@@ -130,18 +130,18 @@ answers — not that a model is loaded. Do not pull one to make the check look b
 
 ## Definition of done
 
-- [ ] A1 — realm JSON exists; Keycloak imports it; login works for a seeded user
-- [ ] A2 — bucket and queues created idempotently; public access blocked
-- [ ] A3 — index created behind the `SEARCH_INDEX_KIND` seam
-- [ ] A4 — `pnpm local:bootstrap` is idempotent, local-guarded, and seeds mock-labelled data
-- [ ] A5 — stack starts from a clean checkout with **no manual database edits**
-- [ ] T01 passes as an automated integration test
-- [ ] T02 passes as an automated integration test
-- [ ] `verify-local.mjs` has `integration` marked implemented, and the suite genuinely runs
-- [ ] A missing prerequisite produces an actionable error, never a security bypass
-- [ ] `docs/implementation-status.md` moves G1 to **Complete**, with the commands as evidence
-- [ ] `START-HERE.md` active-phase pointer moved to Phase B
-- [ ] Handoff entry written
+- [x] A1 — realm JSON exists; Keycloak imports it; login works for a seeded user
+- [x] A2 — bucket and queues created idempotently; public access blocked
+- [x] A3 — index created behind the `SEARCH_INDEX_KIND` seam
+- [x] A4 — `pnpm local:bootstrap` is idempotent, local-guarded, and seeds mock-labelled data
+- [x] A5 — stack starts from a clean checkout with **no manual database edits**
+- [x] T01 passes as an automated integration test
+- [x] T02 passes as an automated integration test
+- [x] `verify-local.mjs` has `integration` marked implemented, and the suite genuinely runs
+- [x] A missing prerequisite produces an actionable error, never a security bypass
+- [x] `docs/implementation-status.md` moves G1 to **Complete**, with the commands as evidence
+- [x] `START-HERE.md` active-phase pointer moved to Phase B
+- [x] Handoff entry written
 
 ## Do not
 

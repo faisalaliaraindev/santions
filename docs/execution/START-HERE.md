@@ -7,9 +7,11 @@ of previous sessions. It is deliberately short.
 
 ## 1. Active phase
 
-> **Phase A — Make the local stack real (finishes gate G1)**
+> **Phase B — Identity, tenancy and the API contract (gate G3)**
 >
-> Brief: [`phase-a.md`](./phase-a.md)
+> Brief: [`phase-b.md`](./phase-b.md)
+>
+> Phase A is complete: the local stack starts, seeds and survives a restart.
 
 Update this pointer when a phase completes. It is the one line every session depends on.
 
@@ -53,6 +55,9 @@ pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm te
 ```
 
 Expected today: clean, clean, 165 passed, 29 passed, 12 passed.
+
+With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration`
+adds 14 passing tests.
 
 **At the end — before the session is cleared**
 
@@ -114,7 +119,7 @@ packages/domain/       PURE. Taxonomy, stages, four axes, banding, clustering, p
 packages/evaluation/   PURE. Labelled dataset, FR-16 metrics, I1-I10 harness
 apps/api/              empty — Phase B
 apps/worker/           empty — Phase C
-infra/local/           Docker Compose stack; keycloak/ is empty (Phase A fixes this)
+infra/local/           Docker Compose stack, host ports in the 280xx range
 scripts/               local-up, local-reset, verify-local
 docs/                  architecture, decisions, open-decisions, traceability, status
 ```

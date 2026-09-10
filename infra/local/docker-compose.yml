@@ -4,6 +4,10 @@
 # zero paid data subscriptions, zero commercial data licences, and a self-hosted extraction
 # model rather than a hosted third-party endpoint.
 #
+# Host ports live in the 280xx range, not the services' defaults. This machine runs other
+# stacks (another MongoDB already holds 27017), and a screening service fighting an unrelated
+# project for a port is a confusing failure to debug. Container-internal ports are unchanged.
+#
 # Named project-local volumes only. `pnpm local:down` stops without deleting them;
 # `pnpm local:reset` deletes them behind an explicit confirmation.
 
@@ -16,7 +20,7 @@ services:
     image: mongo:8.0
     command: ['--replSet', 'rs0', '--bind_ip_all', '--port', '27017']
     ports:
-      - '127.0.0.1:27017:27017'
+      - '127.0.0.1:28017:27017'
     volumes:
       - mongo-data:/data/db
     healthcheck:
@@ -56,7 +60,7 @@ services:
       MEILI_ENV: development
       MEILI_NO_ANALYTICS: 'true'
     ports:
-      - '127.0.0.1:7700:7700'
+      - '127.0.0.1:28700:7700'
     volumes:
       - meili-data:/meili_data
     healthcheck:
@@ -74,7 +78,7 @@ services:
       DEBUG: '0'
       AWS_DEFAULT_REGION: eu-west-2
     ports:
-      - '127.0.0.1:4566:4566'
+      - '127.0.0.1:28566:4566'
     volumes:
       - localstack-data:/var/lib/localstack
     healthcheck:
@@ -93,15 +97,21 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-local-development-only}
       KC_HEALTH_ENABLED: 'true'
     ports:
-      - '127.0.0.1:8080:8080'
+      - '127.0.0.1:28080:8080'
     volumes:
+      # The realm is imported from realm-export.json on every start, and Keycloak's own H2
+      # database is deliberately NOT persisted. Two reasons: the named volume is root-owned
+      # while Keycloak runs as uid 1000, so it cannot write there; and more importantly, a
+      # persisted dev realm silently diverges from the committed realm-export.json the moment
+      # somebody edits it in the admin UI. Declarative import is the source of truth.
       - ./keycloak:/opt/keycloak/data/import:ro
-      - keycloak-data:/opt/keycloak/data/h2
     healthcheck:
-      test:
-        [
+      test: [
           'CMD-SHELL',
-          'exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e "GET /health/ready HTTP/1.1\nhost: localhost\n" >&3 && cat <&3 | grep -q "200 OK"',
+          # The image ships neither curl nor wget, so this uses bash's /dev/tcp. The
+          # 'Connection: close' header and the timeout both matter: without them the read
+          # blocks and the healthcheck fails even though Keycloak is serving correctly.
+          'exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e "GET /health/ready HTTP/1.1\nhost: localhost\nConnection: close\n" >&3 && timeout 3 cat <&3 | grep -q "200 OK"',
         ]
       interval: 10s
       timeout: 5s
@@ -115,7 +125,7 @@ services:
     environment:
       SEARXNG_BASE_URL: http://localhost:8888/
     ports:
-      - '127.0.0.1:8888:8080'
+      - '127.0.0.1:28888:8080'
     volumes:
       - ./searxng:/etc/searxng:rw
     healthcheck:
@@ -130,7 +140,7 @@ services:
   model-runtime:
     image: ollama/ollama:latest
     ports:
-      - '127.0.0.1:11434:11434'
+      - '127.0.0.1:28434:11434'
     volumes:
       - model-data:/root/.ollama
     healthcheck:
@@ -145,7 +155,7 @@ services:
   fixture-server:
     image: nginx:1.27-alpine
     ports:
-      - '127.0.0.1:8090:80'
+      - '127.0.0.1:28090:80'
     volumes:
       - ./fixtures:/usr/share/nginx/html:ro
     healthcheck:
@@ -158,5 +168,4 @@ volumes:
   mongo-data:
   meili-data:
   localstack-data:
-  keycloak-data:
   model-data:

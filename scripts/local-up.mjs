@@ -64,6 +64,31 @@ async function main() {
   console.log(`Docker server ${docker.out.trim()} detected.`);
 
   console.log('Starting the local stack. First run pulls images and can take several minutes.');
+
+  // Start everything, including the one-shot initialisers.
+  const started = await run('docker', ['compose', '-f', composeFile, 'up', '-d']);
+  if (started !== 0) {
+    console.error('\nContainers failed to start. See the output above.');
+    process.exit(started);
+  }
+
+  // Then wait only on the long-running services.
+  //
+  // `mongo-init` is a one-shot job that initiates the replica set and exits 0. `--wait`
+  // treats an exited container as a failure, so including it makes a perfectly healthy stack
+  // report as broken — which is worse than not checking, because it teaches people to ignore
+  // the check.
+  const LONG_RUNNING = [
+    'mongo',
+    'meilisearch',
+    'localstack',
+    'keycloak',
+    'searxng',
+    'model-runtime',
+    'fixture-server',
+  ];
+
+  console.log('Waiting for services to report healthy…');
   const up = await run('docker', [
     'compose',
     '-f',
@@ -73,6 +98,7 @@ async function main() {
     '--wait',
     '--wait-timeout',
     '600',
+    ...LONG_RUNNING,
   ]);
 
   if (up !== 0) {
@@ -95,13 +121,13 @@ async function main() {
     [
       '',
       'Local stack healthy:',
-      '  MongoDB (rs0)   mongodb://127.0.0.1:27017',
-      '  Meilisearch     http://127.0.0.1:7700',
-      '  LocalStack      http://127.0.0.1:4566   (S3, SQS)',
-      '  Keycloak        http://127.0.0.1:8080',
-      '  SearXNG         http://127.0.0.1:8888',
-      '  Model runtime   http://127.0.0.1:11434',
-      '  Fixture server  http://127.0.0.1:8090',
+      '  MongoDB (rs0)   mongodb://127.0.0.1:28017',
+      '  Meilisearch     http://127.0.0.1:28700',
+      '  LocalStack      http://127.0.0.1:28566   (S3, SQS)',
+      '  Keycloak        http://127.0.0.1:28080',
+      '  SearXNG         http://127.0.0.1:28888',
+      '  Model runtime   http://127.0.0.1:28434',
+      '  Fixture server  http://127.0.0.1:28090',
       '',
       'Next:  pnpm local:bootstrap',
       '',

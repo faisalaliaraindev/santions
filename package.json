@@ -25,7 +25,7 @@
     "local:up": "node scripts/local-up.mjs",
     "local:down": "docker compose -f infra/local/docker-compose.yml down",
     "local:reset": "node scripts/local-reset.mjs",
-    "local:bootstrap": "echo \"[pending G3] bootstrap seeds not implemented\" && exit 1",
+    "local:bootstrap": "node scripts/local-bootstrap.mjs",
     "dev": "echo \"[pending G3] api/worker not implemented\" && exit 1",
     "demo:api": "echo \"[pending G8] api demo not implemented\" && exit 1",
     "demo:zquence": "echo \"[pending G9] zquence demo not implemented\" && exit 1",
@@ -46,5 +46,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "dependencies": {
+    "mongodb": "^6.12.0"
   }
 }
