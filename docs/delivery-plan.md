@@ -296,6 +296,24 @@ Named so we notice early rather than discovering them as slippage.
 
 ---
 
+## 6. Executing this plan across sessions
+
+Each phase is executed in its own session, with context cleared between phases. The
+per-phase briefs in [`execution/`](./execution/) exist so a cold session can work a phase
+without reading the ~167KB of source specification.
+
+| File                                                     | Role                                                                            |
+| :------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| [`execution/START-HERE.md`](./execution/START-HERE.md)   | Session entry point: active phase, reading list, session protocol               |
+| [`execution/handoff-log.md`](./execution/handoff-log.md) | The only thing carrying state between sessions                                  |
+| `execution/phase-*.md`                                   | Self-contained brief per phase: goal, narrow reading list, steps, exit evidence |
+
+Briefs for A and B are complete. C through H are outlines, expanded into full briefs at the
+start of their phase — deliberately, because their detail depends on what earlier phases
+reveal.
+
+---
+
 ## 6. Immediate next actions
 
 1. **A1** — write the Keycloak realm JSON (the gap found today).
