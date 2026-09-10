@@ -6,20 +6,20 @@ implementation has surfaced. Each carries an owner and the gate by which it must
 **Nothing here may harden into an accidental default.** Where a working assumption is in
 force, it is stated as such and the code reflects that it is provisional.
 
-| ID      | Decision                                                                                                       | Owner                | Close by | Status                                            |
-| :------ | :------------------------------------------------------------------------------------------------------------- | :------------------- | :------- | :------------------------------------------------ |
-| D1      | Which jurisdictions and languages are enabled first                                                            | Source/policy admin  | G5       | Open                                              |
-| D2      | The declared archive horizon, per source, published on every result                                            | Source/policy admin  | G10      | Open                                              |
-| D3      | Which categories are on by default                                                                             | Taxonomy admin       | G5       | Open                                              |
-| D4      | The exact boundary between adverse media and list matching for designations                                    | Product + compliance | G7       | Open                                              |
-| D5      | The reviewer capacity assumption that thresholds are set against                                               | Product + compliance | G7       | Open                                              |
-| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin         | G6       | Open                                              |
-| D7      | Which open-weight extraction model, benchmarked on the labelled set                                            | Engineering          | G7       | Open                                              |
-| D8      | Retention per source and jurisdiction for evidence text                                                        | Compliance           | G5       | Open                                              |
-| D9      | Whether numeric confidence figures are ever shown (default: no)                                                | Product              | G7       | Open — default no, enforced                       |
-| D10     | The minimum identity data the integrating application must supply                                              | Product + Zquence    | G3       | Open                                              |
-| **D11** | Whether the results list must render procedural stage and outcome status at the same visual weight as the band | Product + design     | G8       | Open                                              |
-| **D12** | Search index: OpenSearch or Meilisearch                                                                        | Engineering          | G4       | Open — decided by the G4 workload test, see D-002 |
+| ID      | Decision                                                                                                       | Owner                | Close by | Status                                                            |
+| :------ | :------------------------------------------------------------------------------------------------------------- | :------------------- | :------- | :---------------------------------------------------------------- |
+| D1      | Which jurisdictions and languages are enabled first                                                            | Source/policy admin  | G5       | **CLOSED 2026-09-11** — Costa Rica; es + en requested (see D-010) |
+| D2      | The declared archive horizon, per source, published on every result                                            | Source/policy admin  | G10      | Open                                                              |
+| D3      | Which categories are on by default                                                                             | Taxonomy admin       | G5       | **CLOSED 2026-09-11** — all seventeen (see D-009)                 |
+| D4      | The exact boundary between adverse media and list matching for designations                                    | Product + compliance | G7       | Open                                                              |
+| D5      | The reviewer capacity assumption that thresholds are set against                                               | Product + compliance | G7       | Open                                                              |
+| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin         | G6       | Open                                                              |
+| D7      | Which open-weight extraction model, benchmarked on the labelled set                                            | Engineering          | G7       | Open                                                              |
+| D8      | Retention per source and jurisdiction for evidence text                                                        | Compliance           | G5       | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)  |
+| D9      | Whether numeric confidence figures are ever shown (default: no)                                                | Product              | G7       | Open — default no, enforced                                       |
+| D10     | The minimum identity data the integrating application must supply                                              | Product + Zquence    | G3       | **CLOSED 2026-09-11** — a name (see D-011)                        |
+| **D11** | Whether the results list must render procedural stage and outcome status at the same visual weight as the band | Product + design     | G8       | Open                                                              |
+| **D12** | Search index: OpenSearch or Meilisearch                                                                        | Engineering          | G4       | Open — decided by the G4 workload test, see D-002                 |
 
 ---
 

@@ -28,9 +28,12 @@ const TENANTS = [
 const CAPABILITIES = [{ capabilityId: 'adverse_media', name: 'Adverse media search' }];
 
 /**
- * Taxonomy version 1. Category enablement is open decision D3 and jurisdiction enablement is
- * D1 — both close in Phase D. What is seeded here is a deliberately conservative starting
- * set, marked as an assumption so it cannot quietly become the decision.
+ * Taxonomy version 1 — all seventeen categories enabled (decision D-009 closes D3).
+ *
+ * All-on is the right default for a first deployment: it is far easier to notice an
+ * irrelevant finding and switch a category off than to discover months later that a whole
+ * class of conduct was never searched for. The FR-03 exclusion list still applies at
+ * classification time regardless, so 'all categories' never means 'anything goes'.
  */
 const SEED_TAXONOMY_CATEGORIES = [
   'FRAUD_FINANCIAL_CRIME',
@@ -39,10 +42,41 @@ const SEED_TAXONOMY_CATEGORIES = [
   'MARKET_ABUSE',
   'SANCTIONS_EVASION_EXPORT_CONTROL',
   'TAX_OFFENCES',
+  'ORGANISED_CRIME',
+  'DRUG_OFFENCES',
+  'HUMAN_TRAFFICKING_MODERN_SLAVERY',
+  'TERRORISM_VIOLENT_EXTREMISM',
+  'VIOLENT_CRIME',
+  'CYBERCRIME',
   'REGULATORY_PROFESSIONAL_MISCONDUCT',
+  'ENVIRONMENTAL_HEALTH_SAFETY',
+  'CONSUMER_HARM_MISSELLING',
   'INSOLVENCY_MISCONDUCT',
+  'GOVERNANCE_INTEGRITY',
 ];
 
+/** Decision D-010 closes D1: Costa Rica first, in Spanish and English. */
+const SEED_COUNTRIES = ['CR'];
+
+/**
+ * Requested languages. NOT the same as enabled languages.
+ *
+ * FR-03: a language is enabled only once it carries a measured recall figure from the
+ * evaluation set. Neither Spanish nor English has one yet, so both are seeded with
+ * measuredRecall null and every coverage statement must declare them unmeasured. Phase H
+ * (G10) measures them; until then this records intent, not capability.
+ */
+const SEED_LANGUAGES = ['es', 'en'];
+
+/**
+ * Evidence retention, in days (decision D-012 closes D8).
+ *
+ * Configurable per policy version rather than compiled in, so it can be revised without a
+ * deployment. Thirty days is the agreed starting figure, not a legal conclusion: a legal
+ * hold overrides it, and deletion must propagate to the search index and to exports, not
+ * only to the primary record (SEC-05).
+ */
+const SEED_EVIDENCE_RETENTION_DAYS = 30;
 /**
  * Source registry entries pointing at the local fixture server only. No live source is
  * configured, and none may be activated without the Phase H (G10) measurement.
@@ -50,24 +84,24 @@ const SEED_TAXONOMY_CATEGORIES = [
 const SEED_SOURCES = [
   {
     sourceId: 'fixture-newsroom',
-    sourceName: 'Fixture Newsroom (mock)',
+    sourceName: 'Fixture Newsroom CR (mock)',
     sourceType: 'NEWS_DISCOVERY',
     authorityTier: 2,
     cascadeRung: 0,
     canonicalDomains: ['fixtures.local'],
-    countries: ['GB'],
-    languages: ['en'],
+    countries: ['CR'],
+    languages: ['es', 'en'],
     approvalState: 'ACTIVE',
   },
   {
     sourceId: 'fixture-court',
-    sourceName: 'Fixture Court Records (mock)',
+    sourceName: 'Fixture Court Records CR (mock)',
     sourceType: 'PRIMARY_SOURCE',
     authorityTier: 1,
     cascadeRung: 1,
     canonicalDomains: ['fixtures.local'],
-    countries: ['GB'],
-    languages: ['en'],
+    countries: ['CR'],
+    languages: ['es', 'en'],
     approvalState: 'ACTIVE',
   },
 ];
@@ -124,19 +158,21 @@ export async function seedData(db) {
         categories: SEED_TAXONOMY_CATEGORIES.map((category) => ({
           category,
           severityWeight: 3,
-          // Open decision D1. GB only, because it is the one jurisdiction with a free-key
-          // register available for Phase D. Not a product decision.
-          enabledCountries: ['GB'],
+          enabledCountries: [...SEED_COUNTRIES],
         })),
-        // FR-03: a language is enabled only with a measured recall figure. None is measured,
-        // so measuredRecall is null and every coverage statement must say the language is
-        // unmeasured. Phase H (G10) fills these in.
-        languages: [{ language: 'en', measuredRecall: null, measuredByEvaluationRunId: null }],
+        // FR-03: a language is enabled only with a measured recall figure. Neither is measured
+        // yet, so both carry null and every coverage statement must declare them unmeasured.
+        // Phase H (G10) fills these in.
+        languages: SEED_LANGUAGES.map((language) => ({
+          language,
+          measuredRecall: null,
+          measuredByEvaluationRunId: null,
+        })),
         lexicon: [],
         proposedBy: 'bootstrap',
         approvedBy: 'bootstrap',
-        assumption:
-          'Category and jurisdiction enablement is a placeholder. Open decisions D1 and D3 close in Phase D.',
+        decisionRef:
+          'Categories: all seventeen (D-009). Jurisdiction: Costa Rica (D-010). Languages es+en requested but NOT enabled until measured at G10.',
         activatedAt: now,
       },
     );
@@ -151,6 +187,8 @@ export async function seedData(db) {
         historicalScopeApproved: false,
         queryPlanCap: 200,
         outcomeUnknownAfterDays: 180,
+        // D-012: configurable, revisable without a deployment. A legal hold overrides it.
+        evidenceRetentionDays: SEED_EVIDENCE_RETENTION_DAYS,
         archiveHorizon: null,
         assumption:
           'Archive horizon is null because no source has been measured. Open decision D2 closes at G10.',

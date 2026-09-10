@@ -27,6 +27,39 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 — four open decisions closed by product
+
+**Did:** recorded D-009 to D-012 in `docs/decisions.md`, marked D1, D3, D8 and D10 closed in
+`docs/open-decisions.md`, and updated the seeded configuration: all seventeen categories,
+Costa Rica as the only jurisdiction, Spanish and English requested, evidence retention
+configurable at 30 days.
+
+**Verified:** `pnpm local:bootstrap` re-run clean; seeded taxonomy reads 17 categories, CR,
+es+en both UNMEASURED, retention 30. `pnpm verify:local` unchanged — 7 of 8 suites ok.
+
+**Left half-done:** nothing from this change. Phase B still needs the OpenAPI document (B1)
+and the panel client generation (B9).
+
+**Found — three consequences of the Costa Rica choice that are now critical path:**
+
+1. **Every free source named in the plan is UK or US.** Companies House, SEC EDGAR and
+   CourtListener do not cover Costa Rica. CR source discovery is now Phase D critical path,
+   not a detail. Candidates listed in decision D-010; none verified, none approved.
+2. **The Spanish lexicon cannot be machine-translated** (strategy §6.2). It needs a
+   Spanish-reading reviewer, and it is a Phase D deliverable rather than a translation task.
+3. **Name-only input means most searches will be unresolved.** Correct behaviour under Axis A,
+   but it sets reviewer workload and feeds open decision D5. A Costa Rican name-frequency
+   distribution is now worth loading, or the FR-08 frequency penalty never fires for common
+   surnames.
+
+**Next session should:** finish Phase B — generate the OpenAPI document, then wire the panel
+client. See [`phase-b.md`](./phase-b.md).
+
+**Decisions touched:** D1, D3, D8, D10 all **closed**. D5 (reviewer capacity) is now more
+load-bearing than before, because name-only input drives the queue.
+
+---
+
 ## 2026-09-10 (later still) — Phase B, steps B1–B8 (gate G3 partial)
 
 **Did:**

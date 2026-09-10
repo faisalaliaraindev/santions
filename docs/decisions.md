@@ -167,3 +167,128 @@ question of whether the results list must therefore render stage and outcome sta
 same visual weight as the band, and it must close at G8.
 
 See `packages/evaluation/src/dataset/seed.ts`, case `C011`.
+
+---
+
+## D-009 — All seventeen adverse categories enabled by default
+
+**Status:** Accepted · **Closes open decision D3** · **Decided by:** product, 2026-09-11
+
+Every category in the FR-03 taxonomy is enabled, rather than a conservative subset.
+
+**Why:** it is far easier to notice an irrelevant finding and switch a category off than to
+discover months later that a whole class of conduct was never searched for. A disabled
+category is invisible in the results — nothing tells a reviewer that violent crime was never
+looked for, only the coverage statement, which is easy to skim past.
+
+**What it does not mean.** "All categories" is not "anything goes". The FR-03 exclusion list is
+enforced at classification time regardless: political opinion and lawful activism, protected
+characteristics, private life absent misconduct, ordinary civil litigation, victim and witness
+status, spent matters, conclusively identified namesakes, and satire all remain excluded. The
+build-gating lexicon audit still fails if any query term maps to a protected characteristic.
+
+**Cost:** more findings per search, so more reviewer time. Revisit per tenant if the review
+queue proves unmanageable — that is a threshold conversation (open decision D5), not a reason
+to disable a category silently.
+
+---
+
+## D-010 — Costa Rica first, in Spanish and English
+
+**Status:** Accepted · **Closes open decision D1** · **Decided by:** product, 2026-09-11
+
+The first clients are in Costa Rica. `CR` is the only enabled jurisdiction; `es` and `en` are
+the requested languages.
+
+**A distinction that matters, and is enforced in the seed data:** _requested_ is not _enabled_.
+FR-03 permits a language only once it carries a measured recall figure from the evaluation set.
+Neither Spanish nor English has one, so both are seeded with `measuredRecall: null`, and every
+coverage statement must declare them unmeasured until Phase H (G10) measures them. This records
+intent, not capability.
+
+### The consequence that needs owning: the free-source stack is UK/US, not Costa Rican
+
+Every free source named in the implementation plan — Companies House, SEC EDGAR, CourtListener
+— is a UK or US source. **None of them covers Costa Rica.** Choosing CR first therefore makes
+Costa Rican source discovery the critical path, not a detail of Phase D.
+
+Candidate sources to investigate and verify at G5/G10 (none verified, none approved):
+
+| Need                                           | Candidate                                          |
+| :--------------------------------------------- | :------------------------------------------------- |
+| Company and officer register                   | Registro Nacional de Costa Rica                    |
+| Court records and judgments                    | Poder Judicial — Nexus PJ                          |
+| Official gazette, insolvency, disqualification | La Gaceta / Imprenta Nacional                      |
+| Financial conduct regulator                    | SUGEF, SUGEVAL, CONASSIF                           |
+| Prosecutor releases                            | Ministerio Público / OIJ                           |
+| Spanish-language press                         | Regional and national mastheads, per FR-05 tiering |
+
+Each needs its contract verified, rate limits measured, robots position confirmed and rights
+approval recorded before activation. **Assume none of them behaves like the UK and US APIs the
+plan was written around**, and treat officer-level data availability as an open question rather
+than an assumption.
+
+### The Spanish lexicon cannot be machine-translated
+
+The Adverse Search Strategy is explicit (§6.2): term lists are authored or reviewed by someone
+who reads the language, because legal register differs — the usable Spanish terms for "charged"
+or "indicted" in Costa Rican reporting are not dictionary translations of the English words.
+This needs a Spanish-reading reviewer, and it is a Phase D deliverable, not a translation task.
+
+---
+
+## D-011 — Minimum identity input is a name
+
+**Status:** Accepted · **Closes open decision D10** · **Decided by:** product, 2026-09-11
+
+An integrating application must supply a full name. Everything else — date of birth, country,
+aliases, known companies — is optional. This is what the FR-01 subject schema already
+implements, so no rework follows; the decision confirms the built behaviour rather than
+changing it.
+
+**What this means in practice, and it should be said plainly:** a name-only search cannot
+resolve identity. Under FR-08 Axis A, a name with no corroborating identifier grades `WEAK` at
+best, which caps the finding at `AMBIGUOUS`. That is the system working correctly — the
+alternative is inventing confidence it has no basis for — but it means **most name-only
+searches will return unresolved potential matches rather than confident ones**, and the review
+burden lands on a human.
+
+Two consequences worth planning for:
+
+1. **Reviewer workload is set by this decision**, more than by any threshold. It feeds directly
+   into open decision D5 (the reviewer capacity assumption thresholds are set against).
+2. **A Costa Rican name-frequency distribution is now worth loading.** `NameFrequencyService`
+   is built and returns `null` honestly when no distribution exists, which applies no penalty.
+   Common Costa Rican surnames — Rodríguez, Jiménez, Vargas, Mora, Solís — will otherwise be
+   treated as no more common than rare ones, and the FR-08 frequency penalty that exists to
+   catch exactly this will never fire. Sourcing that distribution is a Phase D work item.
+
+Anything beyond a name that Zquence _can_ supply materially improves resolution and should be
+sent when available, even though it is not required.
+
+---
+
+## D-012 — Evidence retention is configurable, defaulting to 30 days
+
+**Status:** Accepted · **Closes open decision D8** · **Decided by:** product, 2026-09-11
+
+Retention lives on the policy version as `evidenceRetentionDays`, not in code, so it can be
+revised without a deployment and a historical search still explains itself under the retention
+that applied when it ran. The agreed starting figure is 30 days.
+
+**This is an operational default, not a legal conclusion.** It has not been reviewed against
+Costa Rican data-protection requirements, and SEC-05 requires country enablement to follow
+documented privacy and content-rights approval. That approval is still outstanding.
+
+**What implementing it involves — more than a TTL index (SEC-05):**
+
+- deletion must propagate to the **search index** and to any generated exports, not only the
+  primary record;
+- a **legal hold** overrides expiry, and must be recorded and auditable;
+- backups need expiry too, and restoring one must reapply deletion and suppression records —
+  otherwise restoring a backup silently resurrects deleted evidence;
+- audit records retain minimal permitted facts rather than duplicating evidence text
+  indefinitely.
+
+Thirty days is short enough that this must work correctly early rather than being deferred: it
+becomes load-bearing within a month of the first real search.
