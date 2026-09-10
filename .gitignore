@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+.pnpm-store/
+/infra/local/.volumes/
+/tests/**/__screenshots__/
+/docs/evidence/**/*.json
+playwright-report/
+test-results/

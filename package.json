@@ -1,0 +1,50 @@
+{
+  "name": "erly-adverse-search",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone adverse-media search service. Free and open-source sources only.",
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22.12.0 <25"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -b tsconfig.build.json && tsc -p packages/domain/tsconfig.json && tsc -p packages/evaluation/tsconfig.json && tsc -p tsconfig.json",
+    "test:unit": "vitest run --project unit",
+    "test:invariants": "vitest run --project invariants",
+    "test:evaluation": "vitest run --project evaluation",
+    "test:integration": "vitest run --project integration",
+    "test:security": "vitest run --project security",
+    "test:e2e": "echo \"[pending G8] e2e suite not implemented\" && exit 1",
+    "test:load": "echo \"[pending G11] k6 load suite not implemented\" && exit 1",
+    "verify:local": "node scripts/verify-local.mjs",
+    "local:up": "node scripts/local-up.mjs",
+    "local:down": "docker compose -f infra/local/docker-compose.yml down",
+    "local:reset": "node scripts/local-reset.mjs",
+    "local:bootstrap": "echo \"[pending G3] bootstrap seeds not implemented\" && exit 1",
+    "dev": "echo \"[pending G3] api/worker not implemented\" && exit 1",
+    "demo:api": "echo \"[pending G8] api demo not implemented\" && exit 1",
+    "demo:zquence": "echo \"[pending G9] zquence demo not implemented\" && exit 1",
+    "lexicon:audit": "vitest run --project unit packages/domain/test/taxonomy/lexicon-audit.test.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@types/node": "^22.18.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^9.36.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.44.0",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

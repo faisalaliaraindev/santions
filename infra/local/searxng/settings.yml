@@ -1,0 +1,20 @@
+# Minimal SearXNG configuration for local development (cascade rung 5).
+# The engine mix is deliberately narrow: an approved engine list, not "everything SearXNG
+# supports". Adding an engine is a source-registry decision, not a config convenience.
+use_default_settings: true
+
+server:
+  secret_key: 'local-development-only-change-me'
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  formats:
+    - json
+
+engines:
+  - name: duckduckgo
+    disabled: false
+  - name: wikipedia
+    disabled: false

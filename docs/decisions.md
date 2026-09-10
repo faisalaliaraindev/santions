@@ -1,0 +1,169 @@
+# Decisions
+
+Architecture decisions with their rationale. Every entry names what was decided, why, and
+what it costs. A decision without a cost stated is usually a decision that was not made.
+
+---
+
+## D-001 — Two repositories, not the single monorepo the plan assumes
+
+**Status:** Accepted · **Gate:** G0
+
+The implementation plan (section 3.2) specifies one repository containing `apps/api`,
+`apps/worker`, `apps/control-panel` and `packages/*`. The workspace provided is two
+repositories:
+
+| Repository                       | Contents                                                                |
+| :------------------------------- | :---------------------------------------------------------------------- |
+| `erly-sanction-service-backend`  | `apps/api`, `apps/worker`, all `packages/*`, `infra/*`, `tests`, `docs` |
+| `erly-sanction-service-frontend` | the React control panel (plan's `apps/control-panel`)                   |
+
+**Why:** the repositories already exist with their own remotes and are how the team has
+chosen to split ownership and deployment. Collapsing them into one repository would discard
+that choice for a structural preference in the plan.
+
+**Cost, and how it is paid:** the plan requires the control panel to use "the same business
+API as external clients" and forbids a second matching engine in the browser. Across two
+repositories that is no longer enforced by a shared import — it has to be enforced
+deliberately:
+
+- `packages/contracts` generates the OpenAPI document; the frontend generates its typed
+  client from that document and commits the generated output. The frontend has no other
+  route to the API.
+- The frontend depends on no domain package. Banding, identity resolution and stage logic
+  live only in `packages/domain` and reach the browser only as API responses. A lint rule in
+  the frontend forbids importing `@erly/adverse-domain`.
+- The G9 contract tests run against the generated client, so a backend contract change that
+  breaks the panel fails the backend build rather than being discovered in the browser.
+
+Revisit if contract drift between the repositories causes a released defect.
+
+---
+
+## D-002 — Search index: deferred to G4, with the workload test that decides it
+
+**Status:** Open · **Gate:** G4
+
+The plan requires a self-hosted search index (OpenSearch or Meilisearch) in the mandatory
+local stack, and requires the choice to be recorded here with workload evidence (G4).
+
+The choice is deliberately **not** made yet. Both are free and self-hostable, and the
+deciding factor is the FR-08 matcher-latency workload test, which cannot run before the
+matcher exists. Making the choice now would be a preference dressed as a decision.
+
+What the test must measure (G4): matcher latency against the index, separately from API
+acceptance latency and total search latency, over the FR-16 corpus with the name-form
+expansions of FR-08 (transliterations, phonetic keys, word-order permutations).
+
+Working assumption for local compose, to be confirmed or overturned by that test:
+Meilisearch, for a materially smaller local footprint. OpenSearch is the likelier answer if
+the matcher needs custom analysers or multi-field boolean scoring that Meilisearch cannot
+express.
+
+---
+
+## D-003 — Node 22 LTS, not the Node 24 planning baseline
+
+**Status:** Accepted · **Gate:** G1
+
+The plan names Node 24 as the _planning_ baseline and instructs verification of supported
+status at implementation time. Node 22 is the current Active LTS and is what this project
+pins (`engines: >=22.12.0 <25`).
+
+**Why:** LTS is the supported line for a service that will carry regulated data. The upper
+bound admits Node 24 so the runtime can move without a package change once 24 enters LTS.
+
+---
+
+## D-004 — The domain core and the evaluation harness perform no I/O
+
+**Status:** Accepted · **Gate:** G2
+
+`packages/domain` and `packages/evaluation` contain pure functions and types only: no
+database, no network, no filesystem, and no clock reads (callers pass `asOf` explicitly).
+
+**Why:** the plan requires `pnpm test:invariants` to run the I1-I10 release gate with no I/O
+dependency (section 11), and requires that gate on every pull request (section 10.4). A
+harness that needs a database running is a harness that gets skipped.
+
+**Cost:** ICU transliteration, libpostal and the NER model cannot be imported by the domain
+package. They are injected through ports — see `TransliterationPort` in
+`packages/domain/src/identity/transliteration.ts`. `matchNameForms` therefore cannot match
+across scripts on its own, and its tests assert that it returns `NO_MATCH` rather than
+pretending otherwise.
+
+---
+
+## D-005 — The seed dataset carries axis inputs, not only ground-truth labels
+
+**Status:** Accepted · **Gate:** G2
+
+Each `LabelledCase` carries a `scenario` holding the Axis A/B/C inputs and the clustered
+sources a real pipeline would produce, alongside the label describing what a reviewer
+decided.
+
+**Why:** G2 must execute I1-I10 before any I/O exists, so the harness needs runnable inputs.
+At G7 the same labels are re-applied to axis inputs produced by the real extraction and
+classification path and the identical harness runs against them — which is how the G7 exit
+condition "I1-I10 pass against real pipeline output, not only against the G2 fixtures" is
+actually verified rather than asserted.
+
+---
+
+## D-006 — The event-date cluster bucket is a blocking hint, not cluster identity
+
+**Status:** Accepted · **Gate:** G2
+
+`EventClusterKey.eventDateBucket` is a fixed epoch-aligned bucket used to decide which
+candidates are _compared_. It is excluded from `serialiseClusterKey`, and the merge decision
+uses `withinEventWindow` on the real dates.
+
+**Why:** this was found by a test during G2. Fixed buckets have a boundary problem: two
+reports of the same event dated 14 and 20 May can fall either side of a 30-day boundary and
+never be compared. Using the bucket as identity would silently split events — and a split
+event under-counts independence, which feeds Axis D and therefore the band.
+
+Index lookups must scan `adjacentBuckets(key)` — the bucket and both neighbours — not the
+single bucket.
+
+---
+
+## D-007 — FR-15 commercial layer reduced to structural seams
+
+**Status:** Accepted (carried from the plan) · **Gate:** G3
+
+Per FR-15, this phase builds `Tenant`, `ServiceCapability`, `TenantEntitlementVersion`,
+entitlement pinning, the capability check and environment-scoped API key records. It does
+**not** build plan CRUD, the usage ledger, overage rules, provider commercial screens or
+tenant self-service key management.
+
+Reserved endpoints return `501 Not Implemented`. Tests T61-T70 are retained in
+`docs/requirements-traceability.md` as a named deferred set referencing this decision, so
+the gap stays visible rather than being forgotten.
+
+---
+
+## D-008 — The band is an evidentiary statement, not a statement of adversity
+
+**Status:** Accepted · **Gate:** G2 · **Related open decision:** D11
+
+A well-evidenced acquittal bands as `CORROBORATED`. This looked wrong when the seed dataset
+first disagreed with the banding engine, and it is worth stating explicitly because the label
+is easy to misread.
+
+`CORROBORATED` answers "how well does the evidence support the connection between this
+subject and this reported matter". For an acquittal reported in a Tier 1 court record naming
+the subject with a matching date of birth, the answer is: very well. What is corroborated is
+an acquittal.
+
+The fairness is carried by the two attributes displayed alongside the band — the procedural
+stage (`ACQUITTAL_DISMISSAL_OVERTURNED`, whose mandatory display rule requires equal
+prominence) and the outcome status (`RESOLVED`). Invariant I7 tests that the acquittal
+attaches and is never suppressed.
+
+The residual risk is presentational: a reviewer scanning a list of bands without reading the
+stage could misread `CORROBORATED` as "confirmed adverse". Open decision D11 records the
+question of whether the results list must therefore render stage and outcome status at the
+same visual weight as the band, and it must close at G8.
+
+See `packages/evaluation/src/dataset/seed.ts`, case `C011`.
