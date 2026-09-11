@@ -16,6 +16,7 @@ import { Controller, Get, Inject, Post, Query, Req, Res, VERSION_NEUTRAL } from 
 import type { Request, Response } from 'express';
 
 import { isRole, type Role } from '@erly/adverse-domain';
+import type { SessionInfo } from '@erly/adverse-contracts';
 
 import { ApiException } from '../common/api-exception.js';
 import { APP_CONFIG } from '../tokens.js';
@@ -189,20 +190,17 @@ export class AuthController {
   /** GET /auth/session — who am I. Used by the panel to render its shell. */
   @Get('session')
   @RequirePermission('search:read')
-  session(@Req() req: Request): {
-    subject: string;
-    tenantId: string | null;
-    roles: readonly string[];
-    environment: string;
-  } {
+  session(@Req() req: Request): SessionInfo {
     const principal = req.principal;
     if (principal === undefined) {
       throw new ApiException('UNAUTHENTICATED', 'Authentication is required.');
     }
+    // Typed as the published contract, so adding a field here without publishing it — or
+    // publishing one this never sends — fails the build rather than the integration.
     return {
       subject: principal.subject,
       tenantId: principal.tenantId,
-      roles: principal.roles,
+      roles: [...principal.roles],
       environment: principal.environment,
     };
   }

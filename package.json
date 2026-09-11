@@ -22,6 +22,7 @@
     "test:e2e": "echo \"[pending G8] e2e suite not implemented\" && exit 1",
     "test:load": "echo \"[pending G11] k6 load suite not implemented\" && exit 1",
     "verify:local": "node scripts/verify-local.mjs",
+    "openapi:generate": "pnpm build && node scripts/generate-openapi.mjs",
     "local:up": "node scripts/local-up.mjs",
     "local:down": "docker compose -f infra/local/docker-compose.yml down",
     "local:reset": "node scripts/local-reset.mjs",

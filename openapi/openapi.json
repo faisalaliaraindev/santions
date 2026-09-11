@@ -1,0 +1,1537 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Erly adverse-search API",
+    "version": "0.1.0",
+    "description": "Adverse-media screening. Free and open-source sources only.\n\nThree things about this API are unusual, and all three are deliberate:\n\n- **A result has three independent dimensions, not one status.** `execution`,\n  `findings` and `coverage` answer different questions: whether the run finished,\n  what was found, and whether everything promised was actually searched. A run that\n  succeeded with no findings and a run whose sources were all blocked are not the\n  same result, and no field collapses them.\n- **An entitlement denial is not throttling and not a coverage gap.** It is a 403\n  with a specific code, and it is never retryable.\n- **Sparse identity input is accepted and stays unresolved.** A missing date of birth\n  is never inferred, and a name is never split into given and family parts.",
+    "contact": {
+      "name": "Erly"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3000",
+      "description": "Local development"
+    },
+    {
+      "url": "/",
+      "description": "Same origin as the control panel"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Liveness, readiness and operator-visible dependency state"
+    },
+    {
+      "name": "auth",
+      "description": "Browser sign-in and the backend-for-frontend session"
+    },
+    {
+      "name": "subjects",
+      "description": "FR-01 identity snapshots"
+    },
+    {
+      "name": "searches",
+      "description": "Search creation and the result dimensions"
+    },
+    {
+      "name": "reserved",
+      "description": "Documented, deliberately not implemented (FR-15, D-007)"
+    }
+  ],
+  "security": [
+    {
+      "sessionCookie": []
+    },
+    {
+      "machineToken": []
+    }
+  ],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "healthLive",
+        "tags": ["health"],
+        "summary": "Liveness probe",
+        "description": "Version-neutral and unauthenticated: a load balancer cannot authenticate, and a version bump must not turn every probe into a 404 — which reads as \"the service is down\".",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The process is alive.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "healthReady",
+        "tags": ["health"],
+        "summary": "Readiness probe",
+        "description": "Whether this instance will accept traffic. It deliberately does not say why not.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ready for traffic.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/health/dependencies": {
+      "get": {
+        "operationId": "healthDependencies",
+        "tags": ["health"],
+        "summary": "Dependency detail, for authorised operators",
+        "description": "Separate from the public probes because it discloses which dependency is degraded, which tells an attacker where to push. Requires `platform:read_health`.",
+        "responses": {
+          "200": {
+            "description": "Dependency state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyHealth"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "get": {
+        "operationId": "authLogin",
+        "tags": ["auth"],
+        "summary": "Begin the authorisation-code flow",
+        "description": "Redirects to the identity provider with PKCE (`S256`); the verifier never leaves the service. Version-neutral, because the redirect URI is registered at the provider and must not change with an API version.",
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "Redirect to the identity provider. Sets two short-lived handshake cookies.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/callback": {
+      "get": {
+        "operationId": "authCallback",
+        "tags": ["auth"],
+        "summary": "Complete sign-in and establish the session",
+        "description": "Exchanges the authorisation code, then issues the HTTP-only session cookie and the readable CSRF cookie. A mismatched `state` is rejected.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Signed in; redirect to the panel.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "authLogout",
+        "tags": ["auth"],
+        "summary": "Revoke the session",
+        "description": "POST rather than GET: a GET logout can be fired by any page that embeds an image.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session revoked and cookies cleared."
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "operationId": "authSession",
+        "tags": ["auth"],
+        "summary": "Who am I",
+        "description": "What the panel needs to render its shell. Carries no token and no session identifier.",
+        "responses": {
+          "200": {
+            "description": "The current principal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                },
+                "example": {
+                  "subject": "9f2c1e40-7a5b-4c33-9e21-8d0a1b2c3d4e",
+                  "tenantId": "tenant_demo_cr",
+                  "roles": ["analyst", "reviewer"],
+                  "environment": "sandbox"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/v1/subjects": {
+      "post": {
+        "operationId": "createSubject",
+        "tags": ["subjects"],
+        "summary": "Create a service-owned identity snapshot (FR-01)",
+        "description": "The full name is stored as written, in its original script, and is **never split**\ninto given and family parts. Splitting destroys patronymic chains, mononyms and\nevery naming system that puts the family name first — silently, at intake, before\nany matching can compensate. Normalised comparison forms are derived alongside the\noriginal, never in place of it.\n\nSparse input is accepted. A missing date of birth stays missing; the subject simply\nremains unresolved rather than being completed by inference.\n\n`externalSubjectRef` and `externalCaseRef` are recorded for correlation only. They\nare neither a lookup instruction nor an authorisation credential.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubjectRequest"
+              },
+              "example": {
+                "fullName": "María José Rodríguez Alvarado",
+                "aliases": [
+                  {
+                    "name": "María J. Rodríguez",
+                    "origin": "CUSTOMER_RECORD",
+                    "language": "es"
+                  }
+                ],
+                "dateOfBirth": {
+                  "value": "1984-03-11",
+                  "precision": "DAY"
+                },
+                "countryContext": ["CR"],
+                "knownCompanies": [],
+                "externalCaseRef": "CASE-2026-00471",
+                "purpose": "CUSTOMER_ONBOARDING"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          }
+        }
+      }
+    },
+    "/v1/subjects/{subjectId}/versions/{version}": {
+      "get": {
+        "operationId": "getSubjectVersion",
+        "tags": ["subjects"],
+        "summary": "Read one pinned version of a subject",
+        "description": "Versions are immutable. A data update creates a new one, and a historical search keeps the version it ran against, so a past result can still be explained.",
+        "parameters": [
+          {
+            "name": "subjectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      }
+    },
+    "/v1/searches": {
+      "post": {
+        "operationId": "createSearch",
+        "tags": ["searches"],
+        "summary": "Accept a search for execution",
+        "description": "Returns **202 Accepted** with a status URL, not a result. Returning 200 with a\nresult-shaped body would invite a caller to read \"accepted\" as \"completed, nothing\nfound\".\n\nSend `Idempotency-Key` to make submission safe to retry: an identical request\nreturns the original run with **200**, a changed body under the same key returns\n**409**, and two concurrent identical submissions produce exactly one run.\n\nThe scope in the request is what is being *asked for*. What was actually searched\ncomes back as the coverage statement, and it may be narrower.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Tenant-scoped. Without it there is no duplicate protection, and the caller owns the consequences.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSearchRequest"
+              },
+              "example": {
+                "subjectRef": {
+                  "subjectId": "sub_01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+                  "version": 1
+                },
+                "requestedScope": {
+                  "jurisdictions": ["CR"],
+                  "languages": ["es", "en"],
+                  "includeFormerDirectorships": false,
+                  "fromDate": null
+                },
+                "environment": "sandbox"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay: this exact request was already accepted, and this is the original run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchAccepted"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted and queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchAccepted"
+                },
+                "example": {
+                  "searchId": "srch_01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+                  "statusUrl": "/v1/searches/srch_01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+                  "execution": "QUEUED"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error413"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSearches",
+        "tags": ["searches"],
+        "summary": "List searches for the caller's tenant",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of searches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          }
+        }
+      }
+    },
+    "/v1/searches/{searchId}": {
+      "get": {
+        "operationId": "getSearch",
+        "tags": ["searches"],
+        "summary": "Read a search and its three result dimensions",
+        "description": "`execution`, `findings` and `coverage` are independent and must be read together.\n`SUCCEEDED` with `NO_MATCHES_FOUND` and `INCOMPLETE` coverage means the run\nfinished, found nothing, **and did not search everything it promised** — which is\nnot a clean result, and must never be presented as one.\n\n`progress` never carries a fabricated percentage: it reports stages completed and\nthe cascade rung reached, or nothing.",
+        "parameters": [
+          {
+            "name": "searchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The search.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          }
+        }
+      }
+    },
+    "/v1/admin/plans": {
+      "get": {
+        "operationId": "reservedAdminPlansGet",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Plan management is deferred by decision D-007. This phase builds entitlement seams only.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      },
+      "post": {
+        "operationId": "reservedAdminPlansPost",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Plan management is deferred by decision D-007. This phase builds entitlement seams only.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      }
+    },
+    "/v1/admin/tenants/{tenantId}/usage": {
+      "get": {
+        "operationId": "reservedAdminTenantUsageGet",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Usage metering is deferred by decision D-007. Counters are recorded but not yet exposed or billed.",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      },
+      "post": {
+        "operationId": "reservedAdminTenantUsagePost",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Usage metering is deferred by decision D-007. Counters are recorded but not yet exposed or billed.",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      }
+    },
+    "/v1/tenant/usage": {
+      "get": {
+        "operationId": "reservedTenantUsageGet",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Tenant usage reporting is deferred by decision D-007.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      },
+      "post": {
+        "operationId": "reservedTenantUsagePost",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Tenant usage reporting is deferred by decision D-007.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      }
+    },
+    "/v1/tenant/api-keys": {
+      "get": {
+        "operationId": "reservedTenantApiKeysGet",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Tenant self-service key management is deferred by decision D-007. Keys are provider-managed in this phase.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      },
+      "post": {
+        "operationId": "reservedTenantApiKeysPost",
+        "tags": ["reserved"],
+        "summary": "Reserved — not implemented",
+        "description": "Tenant self-service key management is deferred by decision D-007. Keys are provider-managed in this phase.",
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "VALIDATION_FAILED",
+              "UNKNOWN_FIELD",
+              "INVALID_SCOPE",
+              "INVALID_POLICY",
+              "UNAUTHENTICATED",
+              "SESSION_EXPIRED",
+              "TOKEN_INVALID",
+              "FORBIDDEN",
+              "CROSS_TENANT_DENIED",
+              "ADVERSE_MEDIA_NOT_INCLUDED_IN_PLAN",
+              "SANDBOX_CANNOT_ACCESS_LIVE",
+              "BREAK_GLASS_REQUIRED",
+              "NOT_FOUND",
+              "REVISION_CONFLICT",
+              "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY",
+              "ALREADY_TERMINAL",
+              "PAYLOAD_TOO_LARGE",
+              "INPUT_BOUND_EXCEEDED",
+              "RATE_LIMITED",
+              "NOT_IMPLEMENTED",
+              "INTERNAL"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["path", "message"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["code", "message", "correlationId", "retryable"],
+        "additionalProperties": false
+      },
+      "DatePrecision": {
+        "type": "string",
+        "enum": ["DAY", "MONTH", "YEAR", "UNKNOWN"]
+      },
+      "PreciseDate": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
+          "precision": {
+            "$ref": "#/components/schemas/DatePrecision"
+          }
+        },
+        "required": ["value", "precision"],
+        "additionalProperties": false
+      },
+      "AliasOrigin": {
+        "type": "string",
+        "enum": [
+          "SELF_DECLARED",
+          "CUSTOMER_RECORD",
+          "OFFICIAL_DOCUMENT",
+          "PUBLIC_REGISTER",
+          "MAIDEN_NAME",
+          "MARRIED_NAME",
+          "TRANSLITERATION",
+          "UNKNOWN"
+        ]
+      },
+      "Alias": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "origin": {
+            "$ref": "#/components/schemas/AliasOrigin"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35
+          }
+        },
+        "required": ["name", "origin"],
+        "additionalProperties": false
+      },
+      "CompanyIdentifier": {
+        "type": "object",
+        "properties": {
+          "registrationNumber": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "jurisdiction": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": ["registrationNumber", "jurisdiction"],
+        "additionalProperties": false
+      },
+      "ScreeningPurpose": {
+        "type": "string",
+        "enum": [
+          "CUSTOMER_ONBOARDING",
+          "PERIODIC_REVIEW",
+          "ENHANCED_DUE_DILIGENCE",
+          "TRANSACTION_MONITORING_ESCALATION",
+          "SUPPLIER_DUE_DILIGENCE",
+          "EMPLOYEE_SCREENING"
+        ]
+      },
+      "NameFrequencyPrior": {
+        "type": "object",
+        "properties": {
+          "decile": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "population": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceRef": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["decile", "population", "sourceRef"],
+        "additionalProperties": false
+      },
+      "CreateSubjectRequest": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alias"
+            },
+            "maxItems": 50,
+            "default": []
+          },
+          "dateOfBirth": {
+            "$ref": "#/components/schemas/PreciseDate"
+          },
+          "countryContext": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            },
+            "maxItems": 20,
+            "default": []
+          },
+          "knownCompanies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyIdentifier"
+            },
+            "maxItems": 50,
+            "default": []
+          },
+          "externalSubjectRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "externalCaseRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ScreeningPurpose"
+          }
+        },
+        "required": ["fullName", "purpose"],
+        "additionalProperties": false
+      },
+      "SubjectVersion": {
+        "type": "object",
+        "properties": {
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectVersionId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "exclusiveMinimum": true,
+            "minimum": 0
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "normalised": {
+            "type": "object",
+            "properties": {
+              "folded": {
+                "type": "string"
+              },
+              "sortedCoreKey": {
+                "type": "string"
+              },
+              "phoneticKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scripts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["folded", "sortedCoreKey", "phoneticKeys", "scripts"],
+            "additionalProperties": false
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alias"
+            }
+          },
+          "dateOfBirth": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreciseDate"
+              }
+            ],
+            "nullable": true
+          },
+          "countryContext": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "knownCompanies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "registrationNumber": {
+                  "$ref": "#/components/schemas/CompanyIdentifier/properties/registrationNumber"
+                },
+                "jurisdiction": {
+                  "$ref": "#/components/schemas/CompanyIdentifier/properties/jurisdiction"
+                },
+                "name": {
+                  "$ref": "#/components/schemas/CompanyIdentifier/properties/name"
+                },
+                "verificationStatus": {
+                  "type": "string",
+                  "enum": ["SUPPLIED_UNVERIFIED", "SUPPLIED_REVIEWED", "REGISTRY_VERIFIED"]
+                }
+              },
+              "required": ["registrationNumber", "jurisdiction", "verificationStatus"],
+              "additionalProperties": false
+            }
+          },
+          "externalSubjectRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "externalCaseRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ScreeningPurpose"
+          },
+          "nameFrequencyPrior": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameFrequencyPrior"
+              }
+            ],
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "supersededAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "subjectId",
+          "subjectVersionId",
+          "version",
+          "tenantId",
+          "fullName",
+          "normalised",
+          "aliases",
+          "dateOfBirth",
+          "countryContext",
+          "knownCompanies",
+          "externalSubjectRef",
+          "externalCaseRef",
+          "purpose",
+          "nameFrequencyPrior",
+          "createdAt",
+          "supersededAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExecutionState": {
+        "type": "string",
+        "enum": ["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED", "CANCELLED"]
+      },
+      "FindingsState": {
+        "type": "string",
+        "enum": ["POTENTIAL_MATCHES", "NO_MATCHES_FOUND", "UNRESOLVED", "NOT_EVALUATED"]
+      },
+      "CoverageState": {
+        "type": "string",
+        "enum": ["WITHIN_DECLARED_SCOPE", "INCOMPLETE", "UNKNOWN"]
+      },
+      "CreateSearchRequest": {
+        "type": "object",
+        "properties": {
+          "subjectRef": {
+            "type": "object",
+            "properties": {
+              "subjectId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              }
+            },
+            "required": ["subjectId", "version"],
+            "additionalProperties": false
+          },
+          "subjectSnapshot": {
+            "$ref": "#/components/schemas/CreateSubjectRequest"
+          },
+          "externalCaseRef": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "requestedScope": {
+            "type": "object",
+            "properties": {
+              "jurisdictions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 2
+                },
+                "minItems": 1,
+                "maxItems": 50
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 35
+                },
+                "minItems": 1,
+                "maxItems": 30
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 30
+              },
+              "includeFormerDirectorships": {
+                "type": "boolean",
+                "default": false
+              },
+              "fromDate": {
+                "type": "string",
+                "format": "date",
+                "nullable": true,
+                "default": null
+              }
+            },
+            "required": ["jurisdictions", "languages"],
+            "additionalProperties": false
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["sandbox", "live"],
+            "default": "sandbox"
+          }
+        },
+        "required": ["requestedScope"],
+        "additionalProperties": false
+      },
+      "SearchAccepted": {
+        "type": "object",
+        "properties": {
+          "searchId": {
+            "type": "string"
+          },
+          "statusUrl": {
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionState"
+          }
+        },
+        "required": ["searchId", "statusUrl", "execution"],
+        "additionalProperties": false
+      },
+      "SearchSummary": {
+        "type": "object",
+        "properties": {
+          "searchId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectVersion": {
+            "type": "integer",
+            "exclusiveMinimum": true,
+            "minimum": 0
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["sandbox", "live"]
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionState"
+          },
+          "findings": {
+            "$ref": "#/components/schemas/FindingsState"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageState"
+          },
+          "pinnedVersions": {
+            "type": "object",
+            "properties": {
+              "taxonomyVersion": {
+                "type": "integer"
+              },
+              "policyVersion": {
+                "type": "integer"
+              },
+              "entitlementVersion": {
+                "type": "integer"
+              },
+              "bandingRulesVersion": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "taxonomyVersion",
+              "policyVersion",
+              "entitlementVersion",
+              "bandingRulesVersion"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "refreshOfSearchId": {
+            "type": "string",
+            "nullable": true
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "stagesCompleted": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "stagesTotal": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cascadeRungReached": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 7,
+                "nullable": true
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["stagesCompleted", "stagesTotal", "cascadeRungReached", "warnings"],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "searchId",
+          "tenantId",
+          "subjectId",
+          "subjectVersion",
+          "environment",
+          "execution",
+          "findings",
+          "coverage",
+          "pinnedVersions",
+          "createdAt",
+          "completedAt",
+          "refreshOfSearchId",
+          "progress"
+        ],
+        "additionalProperties": false
+      },
+      "SearchPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchSummary"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": ["items", "nextCursor"],
+        "additionalProperties": false
+      },
+      "SessionInfo": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string",
+            "nullable": true
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["sandbox", "live"]
+          }
+        },
+        "required": ["subject", "tenantId", "roles", "environment"],
+        "additionalProperties": false
+      },
+      "HealthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok"]
+          }
+        },
+        "required": ["status"],
+        "additionalProperties": false
+      },
+      "DependencyHealth": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": ["status", "note"],
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "Error400": {
+        "description": "The request body or query is malformed, or carries an unknown field. Possible codes: VALIDATION_FAILED, UNKNOWN_FIELD.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "VALIDATION_FAILED",
+              "message": "The request body failed validation.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error401": {
+        "description": "No valid credential. The session may have expired. Possible codes: UNAUTHENTICATED, SESSION_EXPIRED, TOKEN_INVALID.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "UNAUTHENTICATED",
+              "message": "Authentication is required.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error403": {
+        "description": "Authenticated, but not permitted. An entitlement denial is reported here and is never retryable (REL-02). Possible codes: FORBIDDEN, CROSS_TENANT_DENIED, ADVERSE_MEDIA_NOT_INCLUDED_IN_PLAN, SANDBOX_CANNOT_ACCESS_LIVE, BREAK_GLASS_REQUIRED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "FORBIDDEN",
+              "message": "Access denied.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error404": {
+        "description": "Not found. Deliberately indistinguishable from an unauthorised read, so IDs cannot be enumerated. Possible codes: NOT_FOUND.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "NOT_FOUND",
+              "message": "Search not found.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error409": {
+        "description": "Conflict: a stale revision, or an idempotency key reused with a different body. Possible codes: REVISION_CONFLICT, IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY, ALREADY_TERMINAL.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "REVISION_CONFLICT",
+              "message": "The record changed since it was read. Re-read it and retry.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error413": {
+        "description": "The request exceeds a documented input bound. Possible codes: PAYLOAD_TOO_LARGE, INPUT_BOUND_EXCEEDED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "PAYLOAD_TOO_LARGE",
+              "message": "The request exceeds the 256 kB body limit.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error422": {
+        "description": "The request is well-formed but the scope or policy it asks for is not valid. Possible codes: INVALID_SCOPE, INVALID_POLICY.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "INVALID_SCOPE",
+              "message": "The requested scope includes a jurisdiction that is not enabled.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      },
+      "Error429": {
+        "description": "Throttled. This is not an entitlement denial and not a coverage gap. Possible codes: RATE_LIMITED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "RATE_LIMITED",
+              "message": "Too many requests. Retry after the interval in the Retry-After header.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": true
+            }
+          }
+        }
+      },
+      "Error500": {
+        "description": "Unexpected failure. The body never carries internal detail (SEC-04). Possible codes: INTERNAL.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "INTERNAL",
+              "message": "The request could not be completed.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": true
+            }
+          }
+        }
+      },
+      "Error501": {
+        "description": "A reserved endpoint that is documented but deliberately not implemented. Possible codes: NOT_IMPLEMENTED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            },
+            "example": {
+              "code": "NOT_IMPLEMENTED",
+              "message": "This endpoint is reserved and not implemented in this release.",
+              "correlationId": "01JB8Z5R3M4Q2N7T9V0X1Y2Z3A",
+              "retryable": false
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size. Defaults to 50.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "description": "Opaque continuation token from the previous page. Clients must not construct or parse one: it encodes a stable ordering key, which is what lets a page neither duplicate nor drop items while the underlying set changes.",
+        "schema": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "CsrfToken": {
+        "name": "X-CSRF-Token",
+        "in": "header",
+        "required": false,
+        "description": "Required for state-changing requests authenticated by the session cookie. Echoes the readable `csrf_token` cookie. Machine callers send no cookie and do not use it.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "adverse_session",
+        "description": "The control panel session (section 4.2). HTTP-only and secure; the browser never holds a provider token. State-changing requests must also send `X-CSRF-Token`, echoing the readable `csrf_token` cookie issued alongside it."
+      },
+      "machineToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Machine-to-machine access (section 4.2). Short-lived, audience-bound and signed with an asymmetric algorithm. Scopes are checked per route, and a `sandbox` credential can never run a live search or reach live evidence."
+      }
+    }
+  }
+}

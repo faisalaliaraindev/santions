@@ -1,6 +1,6 @@
 # Phase B — Identity, tenancy and the API contract
 
-**Gate:** G3 · **Status:** IN PROGRESS — B1 (partly), B2–B8 done; B1 OpenAPI and B9 remain
+**Gate:** G3 · **Status:** IN PROGRESS — B1–B9 done; T07, T08 and T68 remain
 
 ---
 
@@ -147,9 +147,9 @@ error typing stay hand-written. Only operations and types are generated.
 - [ ] T68 — API key secret shown once, stored hashed, rotation and revocation audited
 - [x] T22, T23 — idempotency: one operation for identical requests, 409 on changed body
 - [x] Two tenants with deliberately identical external references stay isolated
-- [ ] `verify-local.mjs` has `security` marked implemented and the suite genuinely runs
-- [ ] OpenAPI generated; the frontend generates and builds against it
-- [ ] **D10 closed** and recorded in `docs/decisions.md`
+- [x] `verify-local.mjs` has `security` marked implemented and the suite genuinely runs
+- [x] OpenAPI generated; the frontend generates and builds against it
+- [x] **D10 closed** and recorded in `docs/decisions.md`
 
 ## Do not
 

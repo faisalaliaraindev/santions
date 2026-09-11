@@ -27,6 +27,107 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (later) — Phase B steps B1 and B9: the OpenAPI document and the panel's client
+
+**Did:**
+
+- **`packages/contracts/src/openapi/`** — the document is _generated from the zod schemas_,
+  never hand-written. `components.ts` converts a registry of twenty schemas in a single pass
+  (one pass matters: converting them separately would inline `Alias` into three parents under
+  three names instead of referencing one component) and builds the error responses from the
+  existing `ERROR_STATUS` map, so nobody chooses a status by hand and a code cannot document
+  itself under the wrong one. `document.ts` carries the paths, both security schemes, the
+  shared parameters and the examples.
+- **Two new contract schemas**, because the panel needs them typed and neither existed:
+  `sessionInfoSchema` (`auth/session.ts`) and `healthStatusSchema` / `dependencyHealthSchema`
+  (`common/health.ts`). The health and auth controllers now declare these as their return
+  types, so a field added to a response without being published fails `pnpm typecheck`.
+- **`pnpm openapi:generate`** writes `openapi/openapi.json`. It is committed: a contract change
+  arrives as a reviewable diff in the pull request that caused it, rather than as a runtime
+  surprise in a consumer.
+- **`apps/api/test/openapi-document.test.ts`** — four checks tying the document to reality: the
+  committed file matches what the builder produces, every route the controllers serve is
+  documented, every method is documented, and nothing is documented that no controller serves.
+  Route metadata is read from the controller classes with `Reflect`, not by booting the app —
+  a contract check that only runs with MongoDB and Keycloak up is a check that stops running.
+- **`packages/contracts/test/openapi.test.ts`** — eleven property checks: every `$ref` resolves,
+  operation IDs are unique, every authenticated operation documents 401 and 403, exactly four
+  operations are public, every error code appears once under the right status, request bodies
+  are strict, and the three result dimensions stay three fields.
+- **Frontend `pnpm api:generate`** now works. It emits `src/lib/api/generated/schema.ts` (via
+  `openapi-typescript`), `operations.ts` (one function per callable operation, emitted by this
+  repository's own script) and `index.ts`, all prettier-formatted and committed. Reserved FR-15
+  routes get **no** function — a typed function for a route that answers 501 is an invitation
+  to call it — and sign-in is exported as `AUTH_LOGIN_PATH` to navigate to, not a function to
+  fetch.
+- **`src/lib/api/generated.test.ts`** — seven tests: every published callable operation has a
+  function, reserved routes have none, business calls go to `/v1`, auth and health do not, path
+  parameters are escaped, and the idempotency key and CSRF token still reach the transport.
+
+**Verified:**
+
+```
+backend:   lint clean · typecheck clean · format:check clean
+           test:unit 206 passed (+15) · test:invariants 29 · test:evaluation 12
+           test:integration 14 passed · test:security 48 passed   (real stack, bootstrapped)
+           verify:local  7 of 8 suites ok; only e2e unimplemented (Phase G)
+frontend:  lint clean · build clean · format:check clean · test:unit 35 passed (+8)
+```
+
+Both new guards were verified by planting a violation, not by assuming they work:
+
+- editing one summary in `openapi/openapi.json` fails the drift test with "run
+  `pnpm openapi:generate`"; restoring it passes.
+- adding an undocumented `@Get('v1/probe')` to `HealthController` fails the route-coverage test
+  naming the route; removing it passes.
+
+**Left half-done — Phase B is still NOT complete.** B1–B9 are done, but three definition-of-done
+items remain, and the previous handoff did not name them:
+
+- **T07** — logout, revocation and key rotation. `POST /auth/logout` exists and revokes the
+  session, but there is **no test** that old access stops working, and no JWKS rotation test.
+- **T08** — CSRF and CORS. The production startup guard rejects a wildcard origin (tested), but
+  there is no test that a state-changing request without `X-CSRF-Token` is refused by the
+  running API.
+- **T68** — environment-scoped API keys do not exist at all. The only API-key surface is the
+  reserved route answering 501. B5 asks for hashed material, one-time secret display, rotation,
+  revocation, expiry, last-used tracking and scopes.
+
+G3 stays **Partial** in `implementation-status.md` for exactly these three.
+
+**Found — four things, all real:**
+
+1. **`GET /auth/session` was documented without a 403.** The property test caught it: the route
+   requires `search:read`, so it can deny. A documented route that omits 401/403 reads as
+   public, and the panel would treat a denial as an unexpected failure rather than offering a
+   way back in. The document was fixed, not the test.
+2. **A zod `.refine` does not survive into JSON Schema.** `createSearchSchema` requires exactly
+   one of `subjectRef` and `subjectSnapshot`; that rule is a refinement, so the generated types
+   let a caller supply neither or both. The API still rejects it at runtime, but the panel will
+   not be stopped at compile time. Worth an explicit runtime check in the page that builds the
+   request, and worth remembering before relying on any other refinement for safety.
+3. **"Document order" for response statuses is not recoverable from parsed JSON.**
+   `Object.keys` returns integer-like keys ascending, so `createSearch` — which declares 202
+   then 200 — generated a client typed on the **200 idempotent replay** as its normal outcome.
+   The emitter now ranks statuses explicitly (202, 201, 200, …). The generated type happened to
+   be identical here, but the documented meaning was the opposite of what the service does.
+4. **The hand-written client could only reach `/v1`.** Auth and health are `VERSION_NEUTRAL` on
+   the service, so `authSession` would have requested `/v1/auth/session` and 404'd, which reads
+   as an outage. `RequestOptions` gained a `basePath` (default `/v1`) and the generated
+   operations for those routes pass an empty one. This is the **only** hand-written change to
+   `client.ts`; transport, session, CSRF and error typing are untouched.
+
+**Next session should:** close the three remaining Phase B items, in this order — T08 first
+(a CSRF-rejection test against the running API, the cheapest and the one protecting a live
+surface), then T07 (assert that a revoked session's cookie stops working, and that a rotated
+signing key invalidates old tokens), then T68 (build the API key lifecycle from B5). Only then
+move the G3 gate to Complete and set the active phase to C.
+
+**Decisions touched:** none closed. D-007 is now visible to integrators rather than implied —
+the four reserved routes are published with their 501 and the decision named in the description.
+
+---
+
 ## 2026-09-11 — four open decisions closed by product
 
 **Did:** recorded D-009 to D-012 in `docs/decisions.md`, marked D1, D3, D8 and D10 closed in

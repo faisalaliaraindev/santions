@@ -1,5 +1,7 @@
 import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
 
+import type { DependencyHealth, HealthStatus } from '@erly/adverse-contracts';
+
 import { Public, RequirePermission } from '../auth/auth.guard.js';
 
 /**
@@ -19,13 +21,13 @@ import { Public, RequirePermission } from '../auth/auth.guard.js';
 export class HealthController {
   @Get('health/live')
   @Public()
-  live(): { status: 'ok' } {
+  live(): HealthStatus {
     return { status: 'ok' };
   }
 
   @Get('health/ready')
   @Public()
-  ready(): { status: 'ok' } {
+  ready(): HealthStatus {
     return { status: 'ok' };
   }
 
@@ -33,7 +35,7 @@ export class HealthController {
   // governed by the same compatibility promise as any other route.
   @Get('v1/health/dependencies')
   @RequirePermission('platform:read_health')
-  dependencies(): { status: string; note: string } {
+  dependencies(): DependencyHealth {
     return {
       status: 'ok',
       note: 'Detailed dependency probes are added with the persistence layer in Phase C.',

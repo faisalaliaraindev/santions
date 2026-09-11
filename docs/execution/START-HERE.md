@@ -11,7 +11,8 @@ of previous sessions. It is deliberately short.
 >
 > Brief: [`phase-b.md`](./phase-b.md)
 >
-> Phase A is complete: the local stack starts, seeds and survives a restart.
+> Phase A is complete: the local stack starts, seeds and survives a restart. Steps B1-B9 are
+> done, including the generated OpenAPI document. What remains in B is T07, T08 and T68.
 
 Update this pointer when a phase completes. It is the one line every session depends on.
 
@@ -54,7 +55,7 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, 191 passed, 29 passed, 12 passed.
+Expected today: clean, clean, 206 passed, 29 passed, 12 passed.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration`
 adds 14 integration and 48 security tests.

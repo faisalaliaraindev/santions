@@ -37,6 +37,7 @@ pnpm test:invariants   # I1-I10 release gate, needs no infrastructure
 pnpm test:unit         # domain unit tests
 pnpm test:evaluation   # FR-16 metrics
 pnpm lint / typecheck
+pnpm openapi:generate  # regenerate openapi/openapi.json from packages/contracts
 pnpm verify:local      # aggregates mandatory non-live checks; currently fails by design
 pnpm local:up          # start the local stack
 ```
