@@ -27,6 +27,74 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (end of session) — Phase C brief expanded; nothing in C started
+
+**Did:**
+
+- **Expanded `docs/execution/phase-c.md` from an outline into a full brief**, in the shape of
+  `phase-a.md`. It was deliberately left an outline until Phase B's real schemas existed, and
+  they do now. The brief adds:
+  - a **"What already exists"** table mapping all eleven collections Phase B created to their
+    §6.3 record names, with honest state notes — `searchRuns` is created but never advanced and
+    its `revision` field is unused, `idempotencyKeys` is only partly an `InboxReceipt`, and
+    `apiKeyAuditEvents` is append-only in practice but not enforced;
+  - the conventions worth keeping, including the **two deliberate exceptions** to
+    tenant-leading indexes and why each exists;
+  - a new **C0 — write the failure-injection matrix first**, ahead of the original C1–C6, as
+    `docs/failure-injection-matrix.md`. The outline already required it before C6; it is now its
+    own step because it is equally the specification for C2 and C5, and a matrix written
+    afterwards describes the code that was written rather than the property that was wanted;
+  - scope discipline made explicit: build the §6.3 records **this** phase needs, not all
+    thirty-five. `AssociationAssertion`, `GraphSnapshot`, `Finding`, `QueryPlan`, `QueryExecution`
+    and `EgressIdentity` are named as Phase D–F's, with "do not build them because the schema felt
+    incomplete" in the Do-not list.
+- **Renamed `api_keys` → `apiKeyCredentials` and `api_key_audit` → `apiKeyAuditEvents`.** That
+  snake_case was introduced earlier the same day and was the only pair not following the
+  convention every other collection uses (the §6.3 record name, camelCase, plural). Fixed now so
+  C1 does not inherit two conventions and then have to pick one.
+- Moved the `START-HERE.md` brief pointer to say the brief is expanded and to start at C0.
+
+**Verified:** `lint`, `typecheck`, `format:check` clean; `test:security` 86 passed after the
+rename; `test:unit` 206. No behaviour changed — the rename is a collection name and its two test
+references.
+
+**Left half-done — nothing. No Phase C code exists.** C0 has not been started: there is no
+`docs/failure-injection-matrix.md` yet. The brief is a plan, not progress, and G4 is still
+**Not started** in `implementation-status.md`.
+
+**Found — two things the brief now carries, that the outline did not:**
+
+1. **SEC-06 rules out the obvious audit implementation.** It states that a hash chain stored with
+   the same unrestricted writer is _not sufficient by itself_, and that business roles must not be
+   able to update or delete entries. So C1's `AuditEvent` needs its integrity checkpoint designed
+   before it is written, and if a local stack cannot protect one properly, the honest output is a
+   recorded statement of what production needs — not a chain that only looks tamper-evident.
+2. **There is no migration runner.** `StartupService` creates indexes idempotently, which is fine
+   for additive indexes and not fine for any change that has to transform existing documents. C1
+   must decide whether Phase C needs a real runner or whether additive-only is honest, and record
+   the answer in `docs/architecture.md`. Right now "we can migrate" is untested.
+
+Also still open from the previous entry, and not addressed: **`POST /v1/subjects` declares a
+permission but no scope**, so a key scoped to `search:read` can create a subject while
+`POST /v1/searches` refuses it. Possibly intended, but currently an accident of which routes
+carry `@RequireScope`. It belongs to whoever owns the machine contract.
+
+**Next session should:** start Phase C at **C0** — write `docs/failure-injection-matrix.md`, one
+row per two-system boundary (after S3 upload / before reference commit; after reference commit /
+before outbox publish; after outbox read / before delivery; after delivery / before receipt write;
+after stage state write / before acknowledgement; after external request / before
+acknowledgement), each with what is orphaned, what reconciles it, and what the user sees while it
+is unreconciled. Then C1. Read `docs/execution/phase-c.md` first — its "Read before starting"
+list is narrow on purpose, and the two source specification documents in the parent directory
+must not be read end to end.
+
+**Decisions touched:** none. **D12 stays open** and is closed by C4's measurement, with numbers
+in `docs/decisions.md` — not by preference, and not by inertia. Meilisearch remains a working
+assumption behind the `SEARCH_INDEX_KIND` seam; if C4 favours OpenSearch, switching is Phase C's
+work rather than a note for later.
+
+---
+
 ## 2026-09-11 (last) — Phase B complete: T08, T07 and T68 closed; gate G3 met
 
 **Did:**
@@ -117,8 +185,8 @@ guesses into instructions.
    decision rather than an accident of which routes carry `@RequireScope`. Not changed here,
    because changing it silently would alter the machine contract.
 
-**Next session should:** expand `docs/execution/phase-c.md` from an outline into a full brief,
-then start C1 — the section 6.3 record schemas, migrations and indexes, with tenant context
+**Next session should:** ~~expand `docs/execution/phase-c.md`~~ — done in the entry above. Start
+at C0, then C1 — the section 6.3 record schemas, migrations and indexes, with tenant context
 leading every key. Note that C4, the matcher-latency workload test, is what settles open
 decision **D12**; Meilisearch is still only a working assumption behind the `SEARCH_INDEX_KIND`
 seam.
