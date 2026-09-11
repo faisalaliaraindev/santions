@@ -9,12 +9,18 @@ of previous sessions. It is deliberately short.
 
 > **Phase C — Persistence, jobs, index and object storage (gate G4)**
 >
-> Brief: [`phase-c.md`](./phase-c.md) — expanded into a full brief on 2026-09-11. Start at C0,
-> the failure-injection matrix; it is the specification for the tests in C2, C5 and C6.
+> Brief: [`phase-c.md`](./phase-c.md). **C0–C3 are done. Start at C4**, the matcher-latency
+> workload test — it is what closes open decision **D12**, with numbers in `docs/decisions.md`
+> rather than a preference. Then C5 (S3 staging) and C6 (retries, DLQ, fencing, cancellation).
+>
+> `docs/failure-injection-matrix.md` (C0) is the specification for the C5 and C6 tests. Read it
+> before writing either.
 >
 > Phases A and B are complete. The stack starts, seeds and survives a restart; auth, tenancy,
 > entitlements, subjects and idempotent search creation are built and tested against it; the
-> OpenAPI document is generated and the panel generates its client from it.
+> OpenAPI document is generated and the panel generates its client from it. C1–C3 added the
+> section 6.3 records, the transaction runner with the outbox, and the search index behind the
+> D12 seam.
 
 Update this pointer when a phase completes. It is the one line every session depends on.
 
@@ -57,10 +63,16 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, 206 passed, 29 passed, 12 passed.
+Expected today: clean, clean, **241 passed, 29 passed, 12 passed**.
 
-With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration`
-adds 14 integration and 86 security tests.
+With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
+**78 integration** tests and `pnpm test:security` **91 security** tests.
+
+Coverage is gated at 85/80 and currently reports 93.74% / 91.33% — but only under CI's own
+invocation, which is
+`pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
+Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by
+the other two projects. Do not "fix" a coverage failure that is really a wrong invocation.
 
 **At the end — before the session is cleared**
 
@@ -118,14 +130,26 @@ Why the phases are ordered this way: [`../delivery-plan.md`](../delivery-plan.md
 ## 6. Where things are
 
 ```
-packages/domain/       PURE. Taxonomy, stages, four axes, banding, clustering, planning
+packages/domain/       PURE. Taxonomy, stages, four axes, banding, clustering, planning,
+                       and the FR-06 failure classification table
 packages/evaluation/   PURE. Labelled dataset, FR-16 metrics, I1-I10 harness
-apps/api/              empty — Phase B
-apps/worker/           empty — Phase C
+packages/contracts/    Versioned schemas; the OpenAPI document is generated from here
+apps/api/              NestJS. auth/ tenancy/ subjects/ searches/ persistence/ jobs/
+                       search-index/ — see below
+apps/worker/           still empty. The consumer loop is C6
 infra/local/           Docker Compose stack, host ports in the 280xx range
-scripts/               local-up, local-reset, verify-local
-docs/                  architecture, decisions, open-decisions, traceability, status
+scripts/               local-up, local-bootstrap, local-reset, verify-local
+docs/                  architecture, decisions, open-decisions, traceability, status,
+                       failure-injection-matrix
 ```
+
+Inside `apps/api/src`, the three directories Phase C added:
+
+| Directory       | What is in it                                                                        |
+| :-------------- | :----------------------------------------------------------------------------------- |
+| `persistence/`  | The section 6.3 records, and `TransactionRunner` — the one place a transaction opens |
+| `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01)          |
+| `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler |
 
 The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint
