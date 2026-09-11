@@ -1,5 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 
+import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
+import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { SessionService } from './auth/session.service.js';
 import { AuditService, LocalAuditCheckpointWriter } from './persistence/audit.service.js';
 import { InboxReceiptService } from './persistence/inbox-receipt.service.js';
@@ -46,6 +48,8 @@ export class StartupService implements OnModuleInit {
     private readonly audit: AuditService,
     private readonly auditCheckpoints: LocalAuditCheckpointWriter,
     private readonly indexer: IndexerService,
+    private readonly adminRecords: VersionedRecordService,
+    private readonly capabilities: CapabilityCoverageService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -63,6 +67,8 @@ export class StartupService implements OnModuleInit {
       this.audit.ensureIndexes(),
       this.auditCheckpoints.ensureIndexes(),
       this.indexer.ensureIndexes(),
+      this.adminRecords.ensureIndexes(),
+      this.capabilities.ensureIndexes(),
     ]);
     this.logger.log('Indexes ensured.');
   }

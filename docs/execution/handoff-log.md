@@ -27,81 +27,116 @@ Say what you did about it.
 
 ---
 
-## 2026-09-11 (late) — Phase D brief expanded, and **step D0 done**: the Costa Rica source dossier. No production code written.
+## 2026-09-11 (late) — Phase D: brief expanded, **D0 done** (CR source dossier), **D1 done** (approval lifecycle + SEC-05 gate + capability coverage)
 
-**Did — two things.**
+**Did — three things.**
 
 **1. Expanded `docs/execution/phase-d.md`** from a ~4KB outline into a full brief in the Phase C
-format. The substantive addition is a step the outline did not have — **D0, write the Costa Rica
-source dossier before any adapter** — because D-010 makes CR the only enabled jurisdiction and
-every free source this plan was written around (Companies House, EDGAR, CourtListener) is UK or
-US. D0 also picks up two work items that were stranded in `docs/decisions.md` and named in no
-brief: the Costa Rican name-frequency distribution (D-011) and the Spanish lexicon needing a
-Spanish-reading reviewer (D-010). Design calls recorded in the brief with reasoning: one
-versioned-approval service for all three record types rather than three; suspension without four
-eyes, re-activation with; the reliability profile kept **off** the immutable `SourceVersion` in a
-separate mutable `SourceHealth`; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` coverage kept distinct;
-SEC-05 rights as a pure default-deny function in `packages/domain/src/rights/`; all six FR-05
-ports defined and mocked here but only `CompanyRegistryPort` given a real adapter.
+format, adding a step the outline did not have — **D0, the Costa Rica source dossier, before any
+adapter** — because D-010 makes CR the only enabled jurisdiction and every free source this plan
+was written around (Companies House, EDGAR, CourtListener) is UK or US.
 
-**2. Executed D0.** `docs/sources/cr-dossier.md`, v1. **No source was contacted** — search-engine
-queries only, no endpoint call, no page fetch, no `robots.txt` read, no rate-limit probe. Every
-claim carries `DOCUMENTED` / `INFERRED` / `UNKNOWN`, and nothing is marked verified. Also raised
-**D14** and **D15** in `docs/open-decisions.md`, each with a non-engineering owner.
+**2. D0 — `docs/sources/cr-dossier.md`, v1.** Desk research only: **no source was contacted** —
+search-engine queries, no endpoint call, no page fetch, no robots.txt read. Every claim labelled
+`DOCUMENTED` / `INFERRED` / `UNKNOWN`; nothing marked verified. Three findings changed the phase:
 
-**Found — three things that change the phase, and they are the reason D0 existed:**
+- **No free automatable officer-level source exists in Costa Rica.** The Registro Nacional
+  publishes company representatives only behind free registration **and a CAPTCHA** — a hard stop
+  under FR-06, not an engineering problem. `api.hacienda.go.cr` is free and machine-readable but
+  returns entity status and economic activity and **nothing about directors**. FR-02 therefore has
+  no data source in the only enabled jurisdiction. Raised as **D14**.
+- **Published CR judgments are probably depersonalised** — the Poder Judicial runs a
+  de-identification protocol, a de-personalising tool and a repository of depersonalised
+  judgments. A judgment with the names stripped is not a weak match; there is no name in it to
+  match. Raised as **D15**.
+- **The TSE padrón electoral solves the D-011 name-frequency gap**, under an aggregate-only
+  constraint: derive the surname counts, **discard the roll**, name the use in the SEC-05 approval.
 
-1. **There is no free automatable officer-level source in Costa Rica.** The Registro Nacional does
-   publish company representatives, but only behind free registration **and a CAPTCHA** — a hard
-   stop under the FR-06 rules, not an engineering problem. The free machine-readable alternative,
-   `api.hacienda.go.cr`, returns entity name, tax status and economic activity and **nothing about
-   directors**. So FR-02 has no data source in the only enabled jurisdiction. Raised as **D14**.
-   The engineering answer needs nobody's permission — build the graph, prove it on a UK adapter,
-   report CR association coverage as `UNKNOWN` — but whether company screening is in scope for CR
-   customers at all is a product and compliance call. D4's `UNKNOWN` branch is now the live CR
-   path rather than a defensive case, so test it as the primary path.
-2. **Published Costa Rican judgments are probably depersonalised.** The Poder Judicial runs a
-   personal-data regulation over its public databases, a de-identification protocol, a
-   de-personalising tool and a repository of depersonalised judgments. A judgment with the party
-   names stripped is not a weak match — there is no name in it to match. If that holds across the
-   board, the tier-1 primary source this product's authority reasoning was designed around does
-   not exist for CR, and the evidence base moves to the Boletín Judicial, La Gaceta, prosecutor
-   and police bulletins, and the press — all lower authority tiers. Raised as **D15**. Whether
-   **any** class of CR judgment names parties is the highest-value open question in the project
-   right now, and it is desk research, not a live call.
-3. **The TSE padrón electoral solves the D-011 name-frequency gap.** Downloadable ZIP containing
-   `PADRON.TXT` with every registered voter's given names and both surnames. With one constraint
-   written into the dossier: it is bulk personal data on millions of living people, so derive the
-   **aggregate counts, discard the roll**, never import it into a collection or let it reach the
-   index, and name the use in the SEC-05 approval rather than assuming it is covered.
+**3. D1 — the administrative spine.** Pure decisions in
+`packages/domain/src/{lifecycle,rights,capability}/`; persistence and routes in
+`apps/api/src/admin/`. Reasoning in `docs/decisions.md` **D-018/D-019/D-020**, mechanics in
+`docs/architecture.md` under "Administrative records and the rights gate".
 
-Two consequences for later phases, cheaper to know now than to discover: the real
-`CompanyRegistryPort` adapter **cannot be Costa Rican** (use UK Companies House as the proving
-ground, and treat `api.hacienda.go.cr` as a genuinely Costa Rican _corroboration_ adapter, which
-is not a registry), and **the CR extraction path is PDF-first** — La Gaceta and the Boletín
-Judicial are PDF publications, not HTML articles, which is a different Phase F pipeline from the
-one the UK/US design assumed.
+- **One lifecycle for three record kinds** — `PROPOSED → AWAITING_APPROVAL → APPROVED →
+ACTIVATING → ACTIVE`, plus `SUSPENDED` / `SUPERSEDED` / `RETIRED` — wiring the existing pure
+  `canApprove` rather than writing a second four-eyes check.
+- **SEC-05 as an enforcement function**, not metadata: `decideRights` returns
+  `ALLOW` / `DENY` / `REQUIRES_APPROVAL` with reason codes and machine-actionable restrictions,
+  over jurisdiction, source, intended use, classification, collection method, retention, raw
+  personal data, approval requirement and approval evidence. Default-deny throughout.
+  `clearForActivation` is the gate in front of `ACTIVE`.
+- **Capability coverage** per jurisdiction — `SUPPORTED` / `PARTIAL` / `UNKNOWN` / `UNSUPPORTED`
+  — stored, surfaced on `GET /v1/admin/coverage/{jurisdiction}`, with one function
+  (`interpretEmptyResult`) deciding what an empty result may be called. **Only `SUPPORTED` yields
+  `NO_FINDINGS`.**
+- **CR constraints are seeded data, not code.** `packages/domain/src/capability` contains no
+  mention of Costa Rica; the nine CR rows live in `scripts/bootstrap/seed-data.mjs` with their
+  rationales and the decision each is blocked by.
+- Routes: `/v1/admin/{sources,taxonomy,policies}` with propose / list / read / edit-draft /
+  transitions / activate, plus the coverage read and declare. OpenAPI regenerated and committed.
 
-**Verified:** health check green before starting — `lint` clean, `typecheck` clean, `test:unit`
-**283 passed**. `npx prettier --check` clean on every file touched. No production code changed, so
-no other suite was run; the last recorded state stands (invariants 29 · evaluation 12 ·
-integration 120 · security 95).
+**Verified:**
 
-**Left half-done:** D0 is v1 and deliberately stops short of enumerating the press mastheads with
-FR-05 authority tiers — a partial masthead list invites someone to treat it as the list. The
-dossier's closing section lists what the next revision must establish in value order, and marks
-which of it is desk research and which belongs to G10.
+```
+lint clean · typecheck clean · format:check clean
+test:unit         338 passed  (was 283: +55 domain tests for lifecycle, rights, capability)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  141 passed  (was 120: +21 in tests/integration/admin-lifecycle.test.ts)
+test:security     106 passed  (was  95: +11 in tests/security/admin-routes.test.ts)
+coverage          94.69% statements / 90.47% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+```
 
-**Next session should:** start **D1** — `apps/api/src/admin/versioned-approval.service.ts`, the
-one propose/approve/activate lifecycle shared by `SourceVersion`, `TaxonomyVersion` and
-`PolicyVersion`, wiring the existing pure `canApprove` rather than writing a second four-eyes
-check. The brief's D1 section has the full `SourceVersion` field list and the suspension rule.
+**Found — five things worth knowing, three of them defects in my own first design:**
 
-**Decisions touched:** none closed. **D14 and D15 opened**, both from D0, both owned outside
-engineering — D14 by G5, D15 by G6. **D6** (robots exceptions for official sources) should be
-raised with a source admin during this phase and not at the start of Phase E: the registry field
-that records an exception must exist before the first source version is approved, or every
-version already approved needs revising.
+1. **A denial audited inside the transaction that refuses is rolled back with it.** The four-eyes
+   refusal returned a correct 403 and left **no audit entry at all** — the opposite of what SEC-06
+   wants, since an attempt to approve one's own version is exactly what an auditor needs to see.
+   Fixed by writing denials in their own transaction after the business one aborts. Found only
+   because the test asserted the audit entry existed rather than asserting the 403.
+2. **A parallel `recordId` scheme collided with the existing unique indexes.** `sourceVersions`
+   keys on `{sourceId, version}` and `taxonomyVersions`/`policyVersions` on `{tenantId, version}`,
+   with the lifecycle in a `status` field. So **a taxonomy's identity is the tenant**, not a free
+   id — `pinVersions` depends on one taxonomy timeline per tenant. The service now writes the
+   shape that already exists, which means the Phase A fixture sources are administrable rather
+   than sitting beside a second registry. (`approvalState` on seeded sources was normalised to
+   `status`; nothing read the old name.)
+3. **`/v1/admin/:collection` shadowed the reserved `/v1/admin/plans`**, turning a documented 501
+   into a 403. Nest matches in registration order: `ReservedController` must be registered first.
+   Test added.
+4. **One route-level permission cannot serve three record kinds.** `@RequirePermission` now
+   accepts alternatives and admits a caller holding any of them, with the service enforcing the
+   exact one against the loaded record; otherwise a `taxonomy_admin` was locked out of taxonomy
+   administration by a `source:propose` gate. Single-permission routes behave exactly as before.
+5. **Records created through the admin API carried no `MOCK` label and broke T55.** A version
+   proposed through the API in a mock stack is as much a fixture as a seeded one, so the service
+   now stamps the operating mode on every version it writes. My security suite also left records
+   in `tenant-alpha` — the same shared-fixture mistake C6 warned about — and now cleans up.
+
+**Left half-done:** D1's FR-05 field list exists as a validated contract schema
+(`sourceContentSchema`, with alpha-2 validation rejecting "EU"/"MENA"/"SEA" and no free-text field
+that becomes a fetch), but the service stores version **content as an opaque object and does not
+yet enforce conformance**. That lands in D2, when the adapters that consume those fields exist and
+can say which are load-bearing. `SourceHealth`, budgets and breaker state are D5 and deliberately
+not on the immutable version.
+
+**Next session should:** start **D2** — define the six FR-05 ports
+(`NewsDiscoveryPort`, `WebDiscoveryPort`, `PrimarySourcePort`, `CompanyRegistryPort`,
+`EvidenceFetchPort`, `ExtractionModelPort`), deterministic mocks for all six, and one real
+`CompanyRegistryPort` adapter. Author the fixtures from T14/T15/T20 **before** writing the
+resolver. Per D0, the real registry adapter cannot be Costa Rican: use UK Companies House as the
+proving ground and label it out-of-jurisdiction.
+
+**Decisions touched:** **D-018, D-019, D-020 recorded** (one lifecycle; SEC-05 as enforcement with
+non-approvable prohibitions; a missing capability is never an empty result). **D14, D15 and D16
+opened.** D16 is new from D1 and needs product and security: any tenant's `source_admin` can
+change shared registry entries that **every** tenant screens against, because source config is
+shared and `decideAccess`'s tenant comparison does not apply to a record owning no tenant. The
+recommendation in `docs/open-decisions.md` is a platform-scoped source role, closing by G8 before
+the panel renders whatever this decides. **D6** (robots exceptions) still wants a source admin
+during this phase; `robotsPosition` is already a field on the source schema, so the record exists
+to carry the answer.
 
 ---
 

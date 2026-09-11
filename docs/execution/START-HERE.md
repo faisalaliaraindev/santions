@@ -9,8 +9,16 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 is done;
-> D1 is next.**
+> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 and D1 are
+> done; D2 is next.**
+>
+> **D1 built the administrative spine:** one propose → approve → activate lifecycle for sources,
+> taxonomy and policy with four-eyes enforcement (T45), the SEC-05 rights engine as an actual
+> gate in front of `ACTIVE` (`ALLOW` / `DENY` / `REQUIRES_APPROVAL`, default-deny, prohibited
+> collection methods non-approvable), and per-jurisdiction capability coverage where only
+> `SUPPORTED` lets an empty result be called "no findings". See `docs/decisions.md` D-018, D-019,
+> D-020. **D16 was opened**: any tenant's `source_admin` can change shared registry entries that
+> every tenant screens against, and narrowing that to a platform role needs product and security.
 >
 > **Read [`../sources/cr-dossier.md`](../sources/cr-dossier.md) before building anything in this
 > phase.** D0 established that there is **no free automatable officer-level company source in
@@ -86,12 +94,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **283 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **338 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**120 integration** tests and `pnpm test:security` **95 security** tests.
+**141 integration** tests and `pnpm test:security` **106 security** tests.
 
-Coverage is gated at 85/80 and currently reports 94.07% / 89.46% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 94.69% / 90.47% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by
@@ -171,6 +179,7 @@ Inside `apps/api/src`, the four directories Phase C added:
 
 | Directory       | What is in it                                                                                                                                                     |
 | :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin/`        | The D1 approval lifecycle, the SEC-05 gate at activation, and capability coverage                                                                                 |
 | `persistence/`  | The section 6.3 records, and `TransactionRunner` — the one place a transaction opens                                                                              |
 | `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01), and C6's `JobConsumer`, `WorkerRuntime`, `DeadLetterPort` and `JobHandler` interface |
 | `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler                                                                              |

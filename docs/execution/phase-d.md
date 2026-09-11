@@ -1,6 +1,6 @@
 # Phase D — Sources, association graph and taxonomy administration
 
-**Gate:** G5 · **Status:** IN PROGRESS — D0 done, D1 next · **Prerequisite:** Phase C complete (it is)
+**Gate:** G5 · **Status:** IN PROGRESS — D0 and D1 done, D2 next · **Prerequisite:** Phase C complete (it is)
 
 ---
 
@@ -219,6 +219,37 @@ one region only. Model disclosure is its own operation because sending evidence 
 extraction model is a disclosure to a third party even when the model runs locally today, and
 Phase F will want that decision to already exist.
 
+**Done (2026-09-11).** `apps/api/src/admin/` holds `VersionedRecordService` (one lifecycle for
+all three kinds), `CapabilityCoverageService` and `AdminController`; the pure decisions are
+`packages/domain/src/lifecycle/versioned-lifecycle.ts`, `rights/rights.ts` and
+`capability/capability.ts`. Reasoning in `docs/decisions.md` **D-018**, **D-019** and **D-020**;
+mechanics in `docs/architecture.md` under "Administrative records and the rights gate".
+
+Six things worth not re-deriving:
+
+1. **The lifecycle writes the records that already exist.** `sourceVersions` keys on
+   `{sourceId, version}` and `taxonomyVersions`/`policyVersions` on `{tenantId, version}`, with
+   the lifecycle in a `status` field. A taxonomy's identity is therefore **the tenant**, not a
+   free-chosen id — `pinVersions` depends on one taxonomy timeline per tenant. A parallel
+   `recordId` scheme was tried first and collided with both unique indexes.
+2. **Activation is two transitions**, so a refused activation leaves the clearance on the record
+   and falls back to `APPROVED` rather than vanishing into an `if`.
+3. **A denial must be audited outside the transaction that refused.** Appending it inside means
+   it is rolled back with the abort, and the refusal leaves no trace — found by asserting the
+   audit entry existed rather than asserting the 403.
+4. **Suspension takes one person, restoring takes two**, and restoring re-enters at `ACTIVATING`
+   so an expired licence cannot be restored past.
+5. **Every version the service writes is stamped `MOCK`/`LIVE`** (T55). A version proposed through
+   the API in a mock stack is as much a fixture as a seeded one.
+6. **`ReservedController` must be registered before `AdminController`** or `/v1/admin/:collection`
+   shadows the reserved `/v1/admin/plans`. There is a test for it.
+
+**What D1 deliberately did not do:** `SourceVersion`'s FR-05 field list exists as a validated
+contract schema (`sourceContentSchema`), but the service stores version content as an opaque
+object and does not yet require sources to conform to it — that lands with D2, when the adapters
+that consume those fields exist and can say which are load-bearing. `SourceHealth`, budgets and
+the breaker are D5, and the reliability profile is deliberately **not** on the immutable version.
+
 ### D2 — The six ports, free adapters, and deterministic mocks
 
 Define **all six** FR-05 seams now — `NewsDiscoveryPort`, `WebDiscoveryPort`,
@@ -371,9 +402,9 @@ configured.
 ## Definition of done
 
 - [x] D0 — `docs/sources/cr-dossier.md` exists; every claim labelled `DOCUMENTED` / `INFERRED` / `UNKNOWN`; no live call made; the CR officer-data question raised as **D14**, and the depersonalised-judgments question as **D15**
-- [ ] D1 — one versioned-approval service serving sources, taxonomy and policy; draft mutable, active immutable, suspend without four eyes, restore with; reason required and audited
-- [ ] D1 — `SourceVersion` carries the full FR-05 field list; alpha-2 country validation rejects "EU" / "MENA" / "SEA"
-- [ ] D1 — `decideFieldUse` in `packages/domain/src/rights/`, default-deny on unknown operations, with model disclosure as its own operation
+- [x] D1 — one versioned-approval service serving sources, taxonomy and policy; draft mutable, active immutable, suspend without four eyes, restore with; reason required and audited
+- [~] D1 — the full FR-05 field list exists as `sourceContentSchema` and alpha-2 validation rejects "EU" / "MENA" / "SEA"; **conformance is not yet enforced on stored content** — D2 does that, with the adapters that consume the fields
+- [x] D1 — the rights engine is `decideRights` / `clearForActivation` in `packages/domain/src/rights/`, default-deny, with model disclosure as its own operation, and prohibited collection methods non-approvable (named `decideFieldUse` in the outline)
 - [ ] D2 — all six ports defined; deterministic mocks for all six; one real `CompanyRegistryPort` adapter; every record carries `mode: "MOCK"` where applicable
 - [ ] D3 — `Company`, `AssociationAssertion`, `GraphSnapshot`; resolution is an identity grade; snapshot frozen and pinned to the run; `GET /v1/searches/{searchId}/associations` serves it
 - [ ] D3 — Costa Rican name-frequency distribution loaded into the shared `nameFrequencyProfiles`, or its absence recorded with what it costs
@@ -386,7 +417,7 @@ configured.
 - [ ] **T15** — all five tenure labels correct, including `YEAR`-precision appointment and missing resignation; approved scope enforced
 - [ ] **T20** — registry outage, zero response and graph limit tested **separately**; person search completes in all three; coverage accurate in all three
 - [ ] **T36** — a source suspended mid-run stops being used within that run; blocked actions and coverage gaps reported; a result produced before suspension is unchanged but reads as sourced from a since-suspended source
-- [ ] **T45** — the proposer of a source, taxonomy or policy version cannot approve it; the denial is audited
+- [x] **T45** — the proposer of a source, taxonomy or policy version cannot approve it; the denial is audited (and the audit survives the aborted transaction)
 - [ ] **T79** — a protected-characteristic term fails the build **and** is refused at activation
 - [ ] `pnpm openapi:generate` re-run and `openapi/openapi.json` committed, so the panel's generated client sees the admin routes
 - [ ] `verify:local` reports every suite green except end-to-end, which stays `[n/i]` and still exits non-zero

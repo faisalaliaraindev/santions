@@ -31,9 +31,20 @@ export const REQUIRED_SCOPE = 'auth:scope';
 /** Marks a route as reachable without authentication. Used only by health and the auth flow. */
 export const Public = (): CustomDecorator => SetMetadata(IS_PUBLIC, true);
 
-/** Declares the permission a route needs. Enforced by `PermissionGuard`. */
-export const RequirePermission = (permission: Permission): CustomDecorator =>
-  SetMetadata(REQUIRED_PERMISSION, permission);
+/**
+ * Declares the permission a route needs. Enforced by `PermissionGuard`.
+ *
+ * More than one may be given, and the route then admits a caller holding **any** of them. That
+ * is for routes serving several record kinds behind one path — `/v1/admin/:collection` needs
+ * `source:propose` for a source and `taxonomy:propose` for a taxonomy, and declaring only one
+ * of them would lock the other kind's administrator out of their own records.
+ *
+ * The alternatives are a coarse gate, never the whole check: a route declaring several must
+ * enforce the exact one in its service, against the record it has actually loaded. With a
+ * single permission — which is every other route — this behaves exactly as it always did.
+ */
+export const RequirePermission = (...permissions: readonly Permission[]): CustomDecorator =>
+  SetMetadata(REQUIRED_PERMISSION, permissions);
 
 /** Declares the scope a machine client needs, in addition to its roles. */
 export const RequireScope = (scope: string): CustomDecorator => SetMetadata(REQUIRED_SCOPE, scope);
@@ -132,13 +143,13 @@ export class PermissionGuard implements CanActivate {
       return true;
     }
 
-    const permission = this.reflector.getAllAndOverride<Permission | undefined>(
+    const declared = this.reflector.getAllAndOverride<readonly Permission[] | undefined>(
       REQUIRED_PERMISSION,
       [context.getHandler(), context.getClass()],
     );
 
     // A protected route that declares no permission is a bug, not a permissive default.
-    if (permission === undefined) {
+    if (declared === undefined || declared.length === 0) {
       throw new ApiException('FORBIDDEN', 'Access denied.', {
         internalDetail:
           'Route is authenticated but declares no @RequirePermission. Refusing rather than defaulting to allow.',
@@ -156,14 +167,29 @@ export class PermissionGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    const decision = decideAccess({
+    // Any one of the declared permissions admits the caller. The last denial is the one
+    // reported, so a single-permission route — every route but the admin ones — reports exactly
+    // what it always did.
+    let decision = decideAccess({
       principal,
-      permission,
+      permission: declared[0] as Permission,
       // Collection-scoped routes act within the caller's own tenant. Resource-scoped routes
       // re-check against the stored owner after loading the record.
       resourceTenantId: principal.tenantId,
       ...(requiredScope === undefined ? {} : { requiredScope }),
     });
+
+    for (const permission of declared.slice(1)) {
+      if (decision.allowed) {
+        break;
+      }
+      decision = decideAccess({
+        principal,
+        permission,
+        resourceTenantId: principal.tenantId,
+        ...(requiredScope === undefined ? {} : { requiredScope }),
+      });
+    }
 
     if (!decision.allowed) {
       throw toApiException(decision.reason, decision.detail);

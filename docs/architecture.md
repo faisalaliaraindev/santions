@@ -449,3 +449,50 @@ attached, because a message this service refused is evidence of a producer bug, 
 error or an attack, and quiet disposal is the one outcome that must not happen to it. That is
 why `JOBS_DEAD_LETTER_QUEUE_URL` is a production startup guard: without it, exactly those
 messages would be held in process memory and lost at restart.
+
+## Administrative records and the rights gate (Phase D)
+
+`apps/api/src/admin/` holds two services and one controller.
+
+**`VersionedRecordService`** applies one lifecycle to three record kinds. It writes the shape the
+Phase A bootstrap already seeded — `{sourceId, version}` for sources, `{tenantId, version}` for
+taxonomy and policy, with the lifecycle in a `status` field — so there is one registry, not an
+administrable one beside a seeded one. Full reasoning in `docs/decisions.md` D-018.
+
+Three things about it are worth knowing before changing it:
+
+- **Every transition is one transaction** carrying the new status, its audit entry, and (on
+  activation) the supersede of the previous active version. There is never a moment with two
+  active versions and never one with none.
+- **A refusal is audited outside that transaction.** A denial appended inside the transaction
+  that then throws is rolled back with it, and the refusal leaves no trace at all — which is the
+  opposite of what SEC-06 wants, since an attempt to approve one's own version is exactly what an
+  auditor needs to see. `auditDenial` therefore runs in a transaction of its own after the
+  business transaction has aborted. This was found by a test that asserted the audit entry
+  existed rather than asserting the 403; the 403 was always correct and the trail was empty.
+- **Every version it writes is stamped with the operating mode** (`MOCK` / `LIVE`). Test T55
+  requires that a fixture cannot pass as a live result, and the label lives on the record rather
+  than in a config flag. A version proposed through the admin API in a mock stack is as much a
+  fixture as a seeded one.
+
+**`CapabilityCoverageService`** stores what the service can and cannot do per jurisdiction, and
+builds the coverage statement. The collection `capabilityCoverage` is **shared, not tenant-owned**
+— it joins `nameFrequencyProfiles` as a documented cross-tenant exception, on the same reasoning:
+what is possible in a country is a property of the service and its approved sources, not of a
+customer, and making it per-tenant invites one tenant's coverage to drift from the truth.
+
+### Route ordering, which is load-bearing
+
+`ReservedController` must be registered **before** `AdminController` in `app.module.ts`. Nest
+matches routes in registration order, and `/v1/admin/:collection` otherwise shadows the reserved
+`/v1/admin/plans`, turning a documented 501 (FR-15, D-007) into a 403 from a permission check on
+a route that was never meant to exist. There is a test for it in `tests/security/admin-routes.test.ts`.
+
+### `@RequirePermission` now accepts alternatives
+
+A route serving several record kinds behind one path needs `source:propose` for a source and
+`taxonomy:propose` for a taxonomy; declaring one of them locks the other kind's administrator out
+of their own records. `RequirePermission(...permissions)` admits a caller holding **any** of the
+declared permissions, and the service then enforces the exact one against the record it has
+loaded. With a single permission — every other route in the service — the behaviour is unchanged.
+The route-level check is a coarse gate, never the whole check.

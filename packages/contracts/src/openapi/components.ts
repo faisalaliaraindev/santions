@@ -30,6 +30,16 @@ import {
   subjectVersionSchema,
 } from '../subjects/subject.js';
 import {
+  coverageStatementSchema,
+  declareCapabilitySchema,
+  lifecycleTransitionSchema,
+  proposeVersionSchema,
+  rightsClearanceSchema,
+  sourceContentSchema,
+  updateDraftSchema,
+  versionSummarySchema,
+} from '../admin/admin.js';
+import {
   cancelSearchSchema,
   coverageStateSchema,
   createSearchSchema,
@@ -70,6 +80,15 @@ export const COMPONENT_SCHEMAS = {
   SearchAccepted: searchAcceptedSchema,
   SearchSummary: searchSummarySchema,
   SearchPage: pageSchema(searchSummarySchema),
+
+  ProposeVersionRequest: proposeVersionSchema,
+  UpdateDraftRequest: updateDraftSchema,
+  LifecycleTransitionRequest: lifecycleTransitionSchema,
+  SourceContent: sourceContentSchema,
+  RightsClearance: rightsClearanceSchema,
+  VersionSummary: versionSummarySchema,
+  CoverageStatement: coverageStatementSchema,
+  DeclareCapabilityRequest: declareCapabilitySchema,
 
   SessionInfo: sessionInfoSchema,
   HealthStatus: healthStatusSchema,

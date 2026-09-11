@@ -466,3 +466,100 @@ we broke.
 **Cost:** one more state for a reader of `StageExecution` to understand — a failed stage whose
 `failureClass` is null. That is a small price for never attributing our bugs to someone else's
 website.
+
+---
+
+## D-018 — One approval lifecycle for sources, taxonomy and policy, with the rights gate inside it
+
+**Status:** Accepted · **Decided at:** Phase D step D1, 2026-09-11
+
+Sources, taxonomy versions and policy versions share a single lifecycle —
+`PROPOSED → AWAITING_APPROVAL → APPROVED → ACTIVATING → ACTIVE`, with `SUSPENDED`, `SUPERSEDED`
+and `RETIRED` — implemented once in `packages/domain/src/lifecycle/versioned-lifecycle.ts` and
+applied once in `apps/api/src/admin/versioned-record.service.ts`.
+
+**Why one and not three.** Three copies of an approval workflow drift, and the copy that drifts
+is the one whose T45 test nobody wrote. The three kinds differ in exactly four declared ways —
+collection, permissions, tenant ownership, and which field carries identity — and in nothing
+else.
+
+**Four properties that are load-bearing, each because of a specific failure:**
+
+1. **Only `PROPOSED` is editable.** Otherwise the approver approves one thing and a different
+   thing activates.
+2. **Only `ACTIVE` is usable.** `APPROVED` is permission to activate, not activation. Anything
+   that reads a version before querying calls `isUsable` rather than comparing to a string.
+3. **Suspension needs no second person; restoring does.** Requiring two people to _stop_ using a
+   source is how a source that is harming someone stays live over a weekend. Restoring re-enters
+   at `ACTIVATING` so a licence that expired during the suspension cannot be restored past.
+4. **Activation is two transitions, not one.** The SEC-05 clearance is evaluated against the
+   recorded `ACTIVATING` state and stored on the version whatever it says. A refusal therefore
+   leaves evidence — the version falls back to `APPROVED` with the clearance attached — where a
+   single-step activation would make the gate an `if` that leaves nothing behind when it says no.
+
+**What this decision replaced.** The seeded collections already keyed on `{sourceId, version}`
+and `{tenantId, version}` with the lifecycle in a `status` field. The service writes that exact
+shape rather than a parallel one beside it, so the registry an administrator sees is the registry
+the system actually uses, and the Phase A fixture sources can be taken through a real approval.
+A source's identity is its `sourceId`; **a taxonomy's and a policy's identity is the tenant**,
+because a tenant has one taxonomy timeline and one policy timeline and `pinVersions` depends on
+that.
+
+---
+
+## D-019 — SEC-05 is an enforcement function, and a DENY is never upgraded by an approval
+
+**Status:** Accepted · **Decided at:** Phase D step D1, 2026-09-11
+
+`decideRights` in `packages/domain/src/rights/rights.ts` is the per-source, per-operation
+content-rights decision, returning `ALLOW` / `DENY` / `REQUIRES_APPROVAL` with reason codes and
+machine-actionable restrictions. It is pure and lives in the domain package because the same
+decision is made by the fetcher, the staging service, the extractor, the exporter and the
+indexer, and a second copy is how the export path comes to permit what the display path forbids.
+
+**Three rules worth stating as decisions rather than as code comments:**
+
+- **Default deny.** An operation, classification, region or intended use the policy does not name
+  is refused. "Publicly accessible" is not approval for every use. An empty policy is the safest
+  possible policy rather than an accidentally permissive one.
+- **A `DENY` is never upgraded by an approval.** `CAPTCHA_GATED`, `LOGIN_GATED` and `PAYWALLED`
+  are listed as **non-approvable**: attaching an approval reference to a prohibited collection
+  method does not make it lawful, and an administrator holding `source:approve` cannot license
+  one. Prohibitions are also evaluated _before_ approval, so a prohibited request reports as
+  prohibited rather than sending someone to obtain an approval that could never help.
+- **A restriction is enforcement, not advice.** `AGGREGATE_ONLY` and `NO_RAW_RECORD_RETENTION`
+  are returned to be honoured by the caller, which is what lets a national electoral roll be a
+  lawful source of a surname-frequency prior (D-011) while never becoming a stored personal
+  record.
+
+**Nothing in the function is jurisdiction-specific**, and that is deliberate: every country
+difference arrives as a versioned `RightsPolicy`, so adding a jurisdiction is a data change and a
+country-specific branch in this file would be a bug.
+
+---
+
+## D-020 — A missing capability is never an empty result
+
+**Status:** Accepted · **Decided at:** Phase D step D1, 2026-09-11
+
+Per-jurisdiction, per-capability coverage is stored configuration with four statuses —
+`SUPPORTED`, `PARTIAL`, `UNKNOWN`, `UNSUPPORTED` — and one function,
+`interpretEmptyResult`, decides what an empty result from that capability may be called.
+**Only `SUPPORTED` yields `NO_FINDINGS`.** Everything else yields `NOT_ESTABLISHED`.
+
+This exists to stop the worst failure this product has: a capability that was never available
+reading as a capability that found nothing. "No officer associations were found" and "we have no
+way to look for officer associations here" are the same empty array, and only one of them is a
+screening result.
+
+**`UNKNOWN` and `UNSUPPORTED` are not merged**, though it is tempting. `UNSUPPORTED` is a
+finished investigation — there is no way to do this here on approved terms. `UNKNOWN` is an
+unfinished one. Merging them either claims knowledge nobody has, or hides a gap somebody could
+close.
+
+**An unrecorded capability defaults to `UNKNOWN`, never to supported.** An absent row is the most
+common way a coverage model ends up claiming capability it does not have.
+
+Costa Rica's rows are seeded from the D0 dossier (`docs/sources/cr-dossier.md`) as data, not
+code: officer associations `UNKNOWN` blocked by D14, company registry `PARTIAL`, court records
+`UNKNOWN` blocked by D15. Nothing in `packages/domain/src/capability` knows what Costa Rica is.

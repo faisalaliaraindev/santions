@@ -2,6 +2,9 @@ import { Logger, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { MongoClient, type Db } from 'mongodb';
 
+import { AdminController } from './admin/admin.controller.js';
+import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
+import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthGuard, PermissionGuard } from './auth/auth.guard.js';
 import { CsrfGuard } from './auth/csrf.guard.js';
@@ -75,7 +78,12 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
     AuthController,
     SubjectsController,
     SearchesController,
+    // ReservedController must be registered BEFORE AdminController. Nest matches routes in
+    // registration order, and AdminController's `/v1/admin/:collection` would otherwise shadow
+    // the reserved `/v1/admin/plans`, turning a documented 501 into a 403 from a permission
+    // check on a route that was never meant to exist (FR-15, decision D-007).
     ReservedController,
+    AdminController,
   ],
   providers: [
     {
@@ -166,6 +174,17 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       useFactory: (db: Db, checkpoints: LocalAuditCheckpointWriter) =>
         new AuditService(db, checkpoints),
       inject: [MONGO_DB, LocalAuditCheckpointWriter],
+    },
+    {
+      provide: VersionedRecordService,
+      useFactory: (db: Db, t: TransactionRunner, a: AuditService, config: AppConfig) =>
+        new VersionedRecordService(db, t, a, config.mode),
+      inject: [MONGO_DB, TransactionRunner, AuditService, APP_CONFIG],
+    },
+    {
+      provide: CapabilityCoverageService,
+      useFactory: (db: Db) => new CapabilityCoverageService(db),
+      inject: [MONGO_DB],
     },
     {
       provide: TransactionRunner,
@@ -388,6 +407,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         audit: AuditService,
         checkpoints: LocalAuditCheckpointWriter,
         indexer: IndexerService,
+        adminRecords: VersionedRecordService,
+        capabilities: CapabilityCoverageService,
       ) =>
         new StartupService(
           sessions,
@@ -403,6 +424,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           audit,
           checkpoints,
           indexer,
+          adminRecords,
+          capabilities,
         ),
       inject: [
         SessionService,
@@ -418,6 +441,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         AuditService,
         LocalAuditCheckpointWriter,
         IndexerService,
+        VersionedRecordService,
+        CapabilityCoverageService,
       ],
     },
 

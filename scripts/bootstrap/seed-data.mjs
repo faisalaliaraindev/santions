@@ -91,7 +91,7 @@ const SEED_SOURCES = [
     canonicalDomains: ['fixtures.local'],
     countries: ['CR'],
     languages: ['es', 'en'],
-    approvalState: 'ACTIVE',
+    status: 'ACTIVE',
   },
   {
     sourceId: 'fixture-court',
@@ -102,7 +102,120 @@ const SEED_SOURCES = [
     canonicalDomains: ['fixtures.local'],
     countries: ['CR'],
     languages: ['es', 'en'],
-    approvalState: 'ACTIVE',
+    status: 'ACTIVE',
+  },
+];
+
+/**
+ * Phase D — per-jurisdiction capability coverage (D1).
+ *
+ * These rows are the D0 dossier's findings expressed as data the service enforces, and they
+ * are the reason nothing in `packages/domain/src/capability` knows what Costa Rica is. Every
+ * one of them can be revised through `PUT /v1/admin/coverage` by a source admin without a
+ * deployment; what cannot be revised is the rule that anything other than SUPPORTED means an
+ * empty result is NOT_ESTABLISHED rather than "no findings".
+ */
+const CAPABILITY_COVERAGE = [
+  {
+    jurisdiction: 'CR',
+    capability: 'OFFICER_ASSOCIATIONS',
+    status: 'UNKNOWN',
+    rationale:
+      'No free automatable officer-level source is known. The Registro Nacional publishes ' +
+      'company representatives only behind free registration and a CAPTCHA, which this ' +
+      'service does not go through by any path; api.hacienda.go.cr returns entity status and ' +
+      'economic activity but no directors.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md#1',
+    blockedByDecision: 'D14',
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'COMPANY_REGISTRY',
+    status: 'PARTIAL',
+    rationale:
+      'Entity existence and tax status are obtainable; ownership and officers are not. ' +
+      'Sufficient to corroborate that a company is real, not to build an association graph.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md#1',
+    blockedByDecision: 'D14',
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'COURT_RECORDS',
+    status: 'UNKNOWN',
+    rationale:
+      'Published judgments are probably depersonalised — the Poder Judicial operates a ' +
+      'de-identification protocol and a repository of depersonalised judgments. Whether any ' +
+      'class of judgment names the parties is not established.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md#2',
+    blockedByDecision: 'D15',
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'GAZETTE_NOTICES',
+    status: 'UNKNOWN',
+    rationale:
+      'La Gaceta and the Boletin Judicial publish as dated PDFs and are the most promising ' +
+      'named-person official channel, but no source has been reviewed or approved.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md',
+    blockedByDecision: 'D15',
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'REGULATOR_ENFORCEMENT',
+    status: 'UNKNOWN',
+    rationale:
+      'The superintendencies hold sanctioning powers, but no standing public register of ' +
+      'sanctioned parties was found; publication appears to route through the gazette.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md',
+    blockedByDecision: null,
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'PROSECUTOR_BULLETINS',
+    status: 'UNKNOWN',
+    rationale:
+      'OIJ and Ministerio Publico publish bulletins, but whether they name people in full or ' +
+      'by initials is not established, and nothing is approved.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md',
+    blockedByDecision: null,
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'NAME_FREQUENCY',
+    status: 'UNKNOWN',
+    rationale:
+      'A national distribution is obtainable from the TSE electoral roll, under an ' +
+      'aggregate-only restriction: derive the surname counts and discard the records. Not ' +
+      'yet loaded, so no frequency prior applies and common surnames score as rare ones.',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md#3',
+    blockedByDecision: null,
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'NEWS_DISCOVERY',
+    status: 'UNKNOWN',
+    rationale:
+      'Spanish-language mastheads have not been enumerated or tiered, and the Spanish ' +
+      'conduct lexicon has not been reviewed by a Spanish reader (D-010).',
+    sourceIds: [],
+    evidenceRef: 'docs/sources/cr-dossier.md',
+    blockedByDecision: null,
+  },
+  {
+    jurisdiction: 'CR',
+    capability: 'SANCTIONS_DESIGNATIONS',
+    status: 'UNKNOWN',
+    rationale: 'Designation lists are leads only (FR-05) and none has been approved.',
+    sourceIds: [],
+    evidenceRef: null,
+    blockedByDecision: null,
   },
 ];
 
@@ -205,7 +318,19 @@ export async function seedData(db) {
     );
   }
 
+  for (const coverage of CAPABILITY_COVERAGE) {
+    await upsert(
+      'capabilityCoverage',
+      { jurisdiction: coverage.jurisdiction, capability: coverage.capability },
+      { ...coverage, assessedAt: new Date(now), declaredBy: 'bootstrap' },
+    );
+  }
+
   log.info(`${String(TENANTS.length)} tenants, ${String(SEED_SOURCES.length)} mock sources`);
+  log.info(
+    `${String(CAPABILITY_COVERAGE.length)} CR capability rows: nothing is SUPPORTED, so an ` +
+      'empty result is never reported as "no findings"',
+  );
   log.info('every seeded record carries mode=MOCK (test T55)');
 }
 
@@ -220,6 +345,9 @@ export async function ensureIndexes(db) {
     ['taxonomyVersions', { tenantId: 1, version: -1 }, { unique: true }],
     ['policyVersions', { tenantId: 1, version: -1 }, { unique: true }],
     ['sourceVersions', { sourceId: 1, version: -1 }, { unique: true }],
+    // Shared, not tenant-owned: what the service can do in a country is a property of the
+    // service and its approved sources, not of a customer.
+    ['capabilityCoverage', { jurisdiction: 1, capability: 1 }, { unique: true }],
   ];
 
   for (const [collection, keys, options] of specs) {

@@ -23,6 +23,7 @@ force, it is stated as such and the code reflects that it is provisional.
 | **D13** | Whether search acceptance waits for the index write (~94ms of its latency)                                     | Engineering + product  | G8       | Open — measured in C4, see D-014                                  |
 | **D14** | What feeds the FR-02 association graph in Costa Rica, given no free automatable officer register               | Product + compliance   | G5       | Open — raised by D0, 2026-09-11                                   |
 | **D15** | What the Costa Rican primary-source evidence base is, given depersonalised judgments                           | Product + source admin | G6       | Open — raised by D0, 2026-09-11                                   |
+| **D16** | Whether shared source-registry administration should need a platform role rather than any `source_admin`       | Product + security     | G8       | Open — raised by D1, 2026-09-11                                   |
 
 ---
 
@@ -145,3 +146,33 @@ Axis D profile of every CR result, and it is a product and compliance judgement,
 engineering one.
 
 **Must close by G6**, because Phase E's cascade rungs and per-source tiers encode the answer.
+
+### D16 — Who may administer the shared source registry
+
+**Raised at:** Phase D step D1, 2026-09-11, while wiring the approval lifecycle.
+
+Taxonomy and policy versions are tenant-owned; **source configuration is shared** (§6.3: shared
+source configuration must never contain customer subjects or queries), because a publisher's
+licence, authority tier and rate limits are properties of the publisher rather than of a
+customer.
+
+That sharing has a consequence the permission model does not currently express. `source_admin`
+is a tenant-scoped role, so a source administrator belonging to one customer can propose,
+approve and suspend registry entries that **every** tenant screens against. Nothing today
+narrows that: `decideAccess`'s tenant comparison does not apply to a record that belongs to no
+tenant, so the permission check is the only gate. Every such change is audited under the actor's
+own tenant, so it is at least attributable — but attribution is not authorisation.
+
+**The options, and none of them is an engineering preference:**
+
+1. Leave it, and rely on the fact that `source_admin` is granted rarely and audited fully.
+2. Add a platform-scoped source administration role, and demote `source_admin` to proposing only.
+3. Make registry entries tenant-scoped, accepting that the same publisher is then configured
+   repeatedly and can be configured inconsistently between customers.
+
+**Recommendation to the decision owner:** option 2. It keeps one registry — which is the thing
+that makes source health, budgets and breaker state meaningful — while making the cross-tenant
+blast radius a deliberate grant rather than a side effect of a tenant-scoped role.
+
+**Must close by G8**, because the control panel will render whatever this decides, and shipping
+the panel against option 1 makes option 2 a migration rather than a configuration change.

@@ -142,12 +142,37 @@ const PARAMETERS: Record<string, SchemaObject> = {
   },
 };
 
-function json(schemaRef: { $ref: string }, example?: unknown): SchemaObject {
+function json(schemaRef: { $ref: string } | SchemaObject, example?: unknown): SchemaObject {
   return {
     'application/json': {
       schema: schemaRef,
       ...(example === undefined ? {} : { example }),
     },
+  };
+}
+
+/** The three path parameters every version-scoped admin route carries. */
+function adminVersionParameters(): Record<string, unknown>[] {
+  return [
+    {
+      name: 'collection',
+      in: 'path',
+      required: true,
+      schema: { type: 'string', enum: ['sources', 'taxonomy', 'policies'] },
+    },
+    { name: 'recordId', in: 'path', required: true, schema: { type: 'string' } },
+    { name: 'version', in: 'path', required: true, schema: { type: 'integer', minimum: 1 } },
+  ];
+}
+
+/** `If-Match` is required on every state-changing admin call, as it is on cancellation. */
+function ifMatchParameter(): Record<string, unknown> {
+  return {
+    name: 'If-Match',
+    in: 'header',
+    required: true,
+    description: 'The revision from the last read, as returned in `ETag`.',
+    schema: { type: 'string' },
   };
 }
 
@@ -510,6 +535,258 @@ function buildPaths(): Record<string, SchemaObject> {
             content: json(ref('ApiError')),
           },
           '422': errorRef(422),
+        },
+      },
+    },
+
+    '/v1/admin/{collection}': {
+      post: {
+        operationId: 'proposeVersion',
+        tags: ['admin'],
+        summary: 'Propose a new version of a source, taxonomy or policy',
+        description: [
+          '`collection` is one of `sources`, `taxonomy` or `policies`. All three share one',
+          'lifecycle: **PROPOSED -> AWAITING_APPROVAL -> APPROVED -> ACTIVATING -> ACTIVE**,',
+          'with `SUSPENDED`, `SUPERSEDED` and `RETIRED` alongside it.',
+          '',
+          'A proposal is always the *next* version. A version past `PROPOSED` is immutable, so',
+          'changing an active source means proposing its successor - which is what lets a',
+          'historical search still explain itself under the version it actually ran on.',
+          '',
+          'Taxonomy and policy versions are identified by the calling **tenant**; a source is',
+          'identified by its `recordId`, and source configuration is shared across tenants.',
+        ].join('\n'),
+        parameters: [
+          {
+            name: 'collection',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', enum: ['sources', 'taxonomy', 'policies'] },
+          },
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: { required: true, content: json(ref('ProposeVersionRequest')) },
+        responses: {
+          '201': { description: 'Proposed.', content: json(ref('VersionSummary')) },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+        },
+      },
+      get: {
+        operationId: 'listVersions',
+        tags: ['admin'],
+        summary: 'List versions',
+        parameters: [
+          {
+            name: 'collection',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', enum: ['sources', 'taxonomy', 'policies'] },
+          },
+          { name: 'recordId', in: 'query', required: false, schema: { type: 'string' } },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Versions, newest first within each record.',
+            content: json({
+              type: 'object',
+              properties: { items: { type: 'array', items: ref('VersionSummary') } },
+              required: ['items'],
+            }),
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+        },
+      },
+    },
+
+    '/v1/admin/{collection}/{recordId}/versions/{version}': {
+      get: {
+        operationId: 'getVersion',
+        tags: ['admin'],
+        summary: 'Read one version',
+        description:
+          'Returns the revision as an `ETag`. Every state-changing admin call requires it in ' +
+          '`If-Match`, so an administrative decision cannot be taken on state the caller has ' +
+          'not seen.',
+        parameters: adminVersionParameters(),
+        responses: {
+          '200': { description: 'The version.', content: json(ref('VersionSummary')) },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+        },
+      },
+      put: {
+        operationId: 'updateDraft',
+        tags: ['admin'],
+        summary: 'Edit a draft',
+        description:
+          'Permitted only while `PROPOSED`. Once submitted, content is frozen - otherwise the ' +
+          'approver approves one thing and a different thing activates.',
+        parameters: [
+          ...adminVersionParameters(),
+          ifMatchParameter(),
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: { required: true, content: json(ref('UpdateDraftRequest')) },
+        responses: {
+          '200': { description: 'Updated.', content: json(ref('VersionSummary')) },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+          '409': errorRef(409),
+        },
+      },
+    },
+
+    '/v1/admin/{collection}/{recordId}/versions/{version}/transitions': {
+      post: {
+        operationId: 'transitionVersion',
+        tags: ['admin'],
+        summary: 'Submit, approve, request changes, suspend, restore or retire',
+        description: [
+          '**Four eyes.** `APPROVE`, `REQUEST_CHANGES` and `RESTORE` must be performed by a',
+          'different authorised user from the one who proposed the version (section 4.2, test',
+          'T45). The refusal is recorded in the audit trail, not only returned as a 403.',
+          '',
+          '**Suspension is deliberately asymmetric.** `SUSPEND` needs no second person -',
+          'requiring one to *stop* using a source is how a harmful source stays live over a',
+          'weekend. `RESTORE` needs both a second person and a fresh rights clearance, and',
+          'lands in `ACTIVATING` rather than going straight back to `ACTIVE`.',
+          '',
+          'A reason is required for every action except `SUBMIT`, and is recorded (SEC-06).',
+        ].join('\n'),
+        parameters: [
+          ...adminVersionParameters(),
+          ifMatchParameter(),
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: { required: true, content: json(ref('LifecycleTransitionRequest')) },
+        responses: {
+          '200': { description: 'Applied.', content: json(ref('VersionSummary')) },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+          '409': errorRef(409),
+        },
+      },
+    },
+
+    '/v1/admin/{collection}/{recordId}/versions/{version}/activate': {
+      post: {
+        operationId: 'activateVersion',
+        tags: ['admin'],
+        summary: 'Activate an approved version, through the SEC-05 rights gate',
+        description: [
+          'Activation is two steps: `APPROVED -> ACTIVATING`, then the rights clearance, then',
+          '`ACTIVATING -> ACTIVE`. The clearance is stored on the version either way.',
+          '',
+          'Returns **200 with the clearance whether or not it passed**, rather than a 403 on',
+          'refusal. A refusal is a result the administrator has to read - which operation,',
+          'which reason code, which policy - and an error body carrying one message would lose',
+          'exactly that. Read `activated` and the version `status` for what happened: `ACTIVE`,',
+          'or back to `APPROVED` with the clearance attached.',
+          '',
+          'A `DENY` is never upgraded by an approval reference: a prohibited collection method',
+          '- a CAPTCHA, a login wall, a paywall - cannot be licensed by anyone.',
+        ].join('\n'),
+        parameters: [
+          ...adminVersionParameters(),
+          ifMatchParameter(),
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        responses: {
+          '200': {
+            description: 'The activation attempt and its clearance.',
+            content: json({
+              type: 'object',
+              properties: {
+                version: ref('VersionSummary'),
+                clearance: ref('RightsClearance'),
+                activated: { type: 'boolean' },
+              },
+              required: ['version', 'clearance', 'activated'],
+            }),
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+          '409': errorRef(409),
+        },
+      },
+    },
+
+    '/v1/admin/coverage/{jurisdiction}': {
+      get: {
+        operationId: 'getCoverage',
+        tags: ['admin'],
+        summary: 'What this service can and cannot do in a jurisdiction',
+        description: [
+          'Every capability carries a status - `SUPPORTED`, `PARTIAL`, `UNKNOWN` or',
+          '`UNSUPPORTED` - and an `emptyResultMeans` field saying what an empty result from it',
+          'may be called. **Only `SUPPORTED` yields `NO_FINDINGS`**; everything else yields',
+          '`NOT_ESTABLISHED`, and must never be rendered as a clean result.',
+          '',
+          '`UNKNOWN` and `UNSUPPORTED` are not the same. `UNSUPPORTED` is a finished',
+          'investigation - there is no way to do this here. `UNKNOWN` is an unfinished one.',
+          '',
+          'Readable by anyone holding `coverage:read`, including an auditor. What the service',
+          'cannot do is not a secret; hiding it is how a reviewer comes to believe an empty',
+          'result was a search.',
+        ].join('\n'),
+        parameters: [
+          {
+            name: 'jurisdiction',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', minLength: 2, maxLength: 2 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The coverage statement.',
+            content: json(ref('CoverageStatement')),
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+        },
+      },
+    },
+
+    '/v1/admin/coverage': {
+      put: {
+        operationId: 'declareCoverage',
+        tags: ['admin'],
+        summary: 'Declare or revise a capability coverage status',
+        description:
+          'A coverage status is an assertion about what this product can do in a country, and ' +
+          'it reaches a reviewer unmediated - so it needs `source:approve`, not merely ' +
+          '`source:propose`, and it records who declared it and what evidence it rests on.',
+        parameters: [{ $ref: '#/components/parameters/CsrfToken' }],
+        requestBody: { required: true, content: json(ref('DeclareCapabilityRequest')) },
+        responses: {
+          '200': {
+            description: 'The revised coverage statement for that jurisdiction.',
+            content: json(ref('CoverageStatement')),
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
         },
       },
     },

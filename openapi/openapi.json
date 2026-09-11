@@ -378,6 +378,329 @@
         }
       }
     },
+    "/v1/admin/{collection}": {
+      "post": {
+        "operationId": "proposeVersion",
+        "tags": ["admin"],
+        "summary": "Propose a new version of a source, taxonomy or policy",
+        "description": "`collection` is one of `sources`, `taxonomy` or `policies`. All three share one\nlifecycle: **PROPOSED -> AWAITING_APPROVAL -> APPROVED -> ACTIVATING -> ACTIVE**,\nwith `SUSPENDED`, `SUPERSEDED` and `RETIRED` alongside it.\n\nA proposal is always the *next* version. A version past `PROPOSED` is immutable, so\nchanging an active source means proposing its successor - which is what lets a\nhistorical search still explain itself under the version it actually ran on.\n\nTaxonomy and policy versions are identified by the calling **tenant**; a source is\nidentified by its `recordId`, and source configuration is shared across tenants.",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["sources", "taxonomy", "policies"] }
+          },
+          { "$ref": "#/components/parameters/CsrfToken" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ProposeVersionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Proposed.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VersionSummary" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" }
+        }
+      },
+      "get": {
+        "operationId": "listVersions",
+        "tags": ["admin"],
+        "summary": "List versions",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["sources", "taxonomy", "policies"] }
+          },
+          { "name": "recordId", "in": "query", "required": false, "schema": { "type": "string" } },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versions, newest first within each record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/VersionSummary" }
+                    }
+                  },
+                  "required": ["items"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" }
+        }
+      }
+    },
+    "/v1/admin/{collection}/{recordId}/versions/{version}": {
+      "get": {
+        "operationId": "getVersion",
+        "tags": ["admin"],
+        "summary": "Read one version",
+        "description": "Returns the revision as an `ETag`. Every state-changing admin call requires it in `If-Match`, so an administrative decision cannot be taken on state the caller has not seen.",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["sources", "taxonomy", "policies"] }
+          },
+          { "name": "recordId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The version.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VersionSummary" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" }
+        }
+      },
+      "put": {
+        "operationId": "updateDraft",
+        "tags": ["admin"],
+        "summary": "Edit a draft",
+        "description": "Permitted only while `PROPOSED`. Once submitted, content is frozen - otherwise the approver approves one thing and a different thing activates.",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["sources", "taxonomy", "policies"] }
+          },
+          { "name": "recordId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "The revision from the last read, as returned in `ETag`.",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/CsrfToken" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UpdateDraftRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VersionSummary" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" },
+          "409": { "$ref": "#/components/responses/Error409" }
+        }
+      }
+    },
+    "/v1/admin/{collection}/{recordId}/versions/{version}/transitions": {
+      "post": {
+        "operationId": "transitionVersion",
+        "tags": ["admin"],
+        "summary": "Submit, approve, request changes, suspend, restore or retire",
+        "description": "**Four eyes.** `APPROVE`, `REQUEST_CHANGES` and `RESTORE` must be performed by a\ndifferent authorised user from the one who proposed the version (section 4.2, test\nT45). The refusal is recorded in the audit trail, not only returned as a 403.\n\n**Suspension is deliberately asymmetric.** `SUSPEND` needs no second person -\nrequiring one to *stop* using a source is how a harmful source stays live over a\nweekend. `RESTORE` needs both a second person and a fresh rights clearance, and\nlands in `ACTIVATING` rather than going straight back to `ACTIVE`.\n\nA reason is required for every action except `SUBMIT`, and is recorded (SEC-06).",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["sources", "taxonomy", "policies"] }
+          },
+          { "name": "recordId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "The revision from the last read, as returned in `ETag`.",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/CsrfToken" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LifecycleTransitionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VersionSummary" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" },
+          "409": { "$ref": "#/components/responses/Error409" }
+        }
+      }
+    },
+    "/v1/admin/{collection}/{recordId}/versions/{version}/activate": {
+      "post": {
+        "operationId": "activateVersion",
+        "tags": ["admin"],
+        "summary": "Activate an approved version, through the SEC-05 rights gate",
+        "description": "Activation is two steps: `APPROVED -> ACTIVATING`, then the rights clearance, then\n`ACTIVATING -> ACTIVE`. The clearance is stored on the version either way.\n\nReturns **200 with the clearance whether or not it passed**, rather than a 403 on\nrefusal. A refusal is a result the administrator has to read - which operation,\nwhich reason code, which policy - and an error body carrying one message would lose\nexactly that. Read `activated` and the version `status` for what happened: `ACTIVE`,\nor back to `APPROVED` with the clearance attached.\n\nA `DENY` is never upgraded by an approval reference: a prohibited collection method\n- a CAPTCHA, a login wall, a paywall - cannot be licensed by anyone.",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "enum": ["sources", "taxonomy", "policies"] }
+          },
+          { "name": "recordId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "The revision from the last read, as returned in `ETag`.",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/CsrfToken" }
+        ],
+        "responses": {
+          "200": {
+            "description": "The activation attempt and its clearance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": { "$ref": "#/components/schemas/VersionSummary" },
+                    "clearance": { "$ref": "#/components/schemas/RightsClearance" },
+                    "activated": { "type": "boolean" }
+                  },
+                  "required": ["version", "clearance", "activated"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" },
+          "409": { "$ref": "#/components/responses/Error409" }
+        }
+      }
+    },
+    "/v1/admin/coverage/{jurisdiction}": {
+      "get": {
+        "operationId": "getCoverage",
+        "tags": ["admin"],
+        "summary": "What this service can and cannot do in a jurisdiction",
+        "description": "Every capability carries a status - `SUPPORTED`, `PARTIAL`, `UNKNOWN` or\n`UNSUPPORTED` - and an `emptyResultMeans` field saying what an empty result from it\nmay be called. **Only `SUPPORTED` yields `NO_FINDINGS`**; everything else yields\n`NOT_ESTABLISHED`, and must never be rendered as a clean result.\n\n`UNKNOWN` and `UNSUPPORTED` are not the same. `UNSUPPORTED` is a finished\ninvestigation - there is no way to do this here. `UNKNOWN` is an unfinished one.\n\nReadable by anyone holding `coverage:read`, including an auditor. What the service\ncannot do is not a secret; hiding it is how a reviewer comes to believe an empty\nresult was a search.",
+        "parameters": [
+          {
+            "name": "jurisdiction",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 2, "maxLength": 2 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The coverage statement.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/CoverageStatement" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" }
+        }
+      }
+    },
+    "/v1/admin/coverage": {
+      "put": {
+        "operationId": "declareCoverage",
+        "tags": ["admin"],
+        "summary": "Declare or revise a capability coverage status",
+        "description": "A coverage status is an assertion about what this product can do in a country, and it reaches a reviewer unmediated - so it needs `source:approve`, not merely `source:propose`, and it records who declared it and what evidence it rests on.",
+        "parameters": [{ "$ref": "#/components/parameters/CsrfToken" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DeclareCapabilityRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The revised coverage statement for that jurisdiction.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/CoverageStatement" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" }
+        }
+      }
+    },
     "/v1/admin/plans": {
       "get": {
         "operationId": "reservedAdminPlansGet",
@@ -850,6 +1173,537 @@
           "nextCursor": { "type": "string", "nullable": true }
         },
         "required": ["items", "nextCursor"],
+        "additionalProperties": false
+      },
+      "ProposeVersionRequest": {
+        "type": "object",
+        "properties": {
+          "recordId": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "content": { "type": "object", "additionalProperties": {} },
+          "rightsPolicy": {
+            "type": "object",
+            "properties": {
+              "policyId": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "jurisdiction": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 2,
+                "pattern": "^[A-Za-z]{2}$"
+              },
+              "permittedOperations": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "COLLECT",
+                    "PROCESS",
+                    "STORE",
+                    "MODEL_DISCLOSURE",
+                    "DISPLAY",
+                    "EXPORT",
+                    "RETAIN"
+                  ]
+                },
+                "maxItems": 7
+              },
+              "permittedClassifications": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "PUBLIC_RECORD",
+                    "PUBLISHED_CONTENT",
+                    "PERSONAL_DATA",
+                    "BULK_PERSONAL_DATA",
+                    "OFFENCE_DATA",
+                    "SPECIAL_CATEGORY"
+                  ]
+                },
+                "maxItems": 6
+              },
+              "permittedIntendedUses": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "ADVERSE_SCREENING",
+                    "IDENTITY_CORROBORATION",
+                    "AGGREGATE_STATISTICS",
+                    "MODEL_EVALUATION"
+                  ]
+                },
+                "maxItems": 4
+              },
+              "permittedCollectionMethods": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "PUBLISHED_API",
+                    "CREDENTIALED_API",
+                    "BULK_DOWNLOAD",
+                    "PUBLISHED_FEED",
+                    "HTML_FETCH",
+                    "MANUAL_UPLOAD",
+                    "CAPTCHA_GATED",
+                    "LOGIN_GATED",
+                    "PAYWALLED"
+                  ]
+                },
+                "maxItems": 9
+              },
+              "permittedRegions": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 2, "maxLength": 40 },
+                "maxItems": 20
+              },
+              "maxRetentionDays": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3650,
+                "nullable": true
+              },
+              "rawPersonalDataRetentionPermitted": { "type": "boolean" },
+              "approvalRequiredFor": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedOperations/items"
+                },
+                "maxItems": 7
+              }
+            },
+            "required": [
+              "policyId",
+              "jurisdiction",
+              "permittedOperations",
+              "permittedClassifications",
+              "permittedIntendedUses",
+              "permittedCollectionMethods",
+              "permittedRegions",
+              "maxRetentionDays",
+              "rawPersonalDataRetentionPermitted",
+              "approvalRequiredFor"
+            ],
+            "additionalProperties": false
+          },
+          "dataProfile": {
+            "type": "object",
+            "properties": {
+              "jurisdiction": {
+                "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/jurisdiction"
+              },
+              "classification": {
+                "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedClassifications/items"
+              },
+              "collectionMethod": {
+                "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedCollectionMethods/items"
+              },
+              "intendedUse": {
+                "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedIntendedUses/items"
+              },
+              "operations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedOperations/items"
+                },
+                "minItems": 1,
+                "maxItems": 7
+              },
+              "requestedRetentionDays": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3650,
+                "nullable": true
+              },
+              "retainsRawPersonalData": { "type": "boolean" },
+              "processingRegion": { "type": "string", "minLength": 2, "maxLength": 40 },
+              "approval": {
+                "type": "object",
+                "properties": {
+                  "approvalRef": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "approvedBy": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "approvedAt": { "type": "string", "format": "date-time" },
+                  "expiresAt": { "type": "string", "format": "date-time", "nullable": true },
+                  "coversOperations": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedOperations/items"
+                    },
+                    "minItems": 1,
+                    "maxItems": 7
+                  },
+                  "coversJurisdictions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/jurisdiction"
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  }
+                },
+                "required": [
+                  "approvalRef",
+                  "approvedBy",
+                  "approvedAt",
+                  "expiresAt",
+                  "coversOperations",
+                  "coversJurisdictions"
+                ],
+                "additionalProperties": false,
+                "nullable": true
+              }
+            },
+            "required": [
+              "jurisdiction",
+              "classification",
+              "collectionMethod",
+              "intendedUse",
+              "operations",
+              "requestedRetentionDays",
+              "retainsRawPersonalData",
+              "processingRegion",
+              "approval"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": ["recordId", "content"],
+        "additionalProperties": false
+      },
+      "UpdateDraftRequest": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "object", "additionalProperties": {} },
+          "rightsPolicy": {
+            "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy"
+          },
+          "dataProfile": {
+            "$ref": "#/components/schemas/ProposeVersionRequest/properties/dataProfile"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LifecycleTransitionRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["SUBMIT", "APPROVE", "REQUEST_CHANGES", "SUSPEND", "RESTORE", "RETIRE"]
+          },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      },
+      "SourceContent": {
+        "type": "object",
+        "properties": {
+          "sourceName": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "publisher": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "connectorType": {
+            "type": "string",
+            "enum": [
+              "NEWS_DISCOVERY_RSS",
+              "WEB_DISCOVERY_SEARX",
+              "PRIMARY_SOURCE_HTTP",
+              "COMPANY_REGISTRY_HTTP",
+              "EVIDENCE_FETCH_HTTP",
+              "GAZETTE_PDF",
+              "FIXTURE_MOCK"
+            ]
+          },
+          "canonicalDomains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 253,
+              "pattern": "^(?!-)[a-z0-9-]{1,63}(?<!-)(\\.(?!-)[a-z0-9-]{1,63}(?<!-))+$"
+            },
+            "minItems": 1,
+            "maxItems": 20
+          },
+          "authorityTier": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "cascadeRung": { "type": "integer", "minimum": 0, "maximum": 7 },
+          "countries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/jurisdiction"
+            },
+            "minItems": 1,
+            "maxItems": 50
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 2, "maxLength": 35 },
+            "minItems": 1,
+            "maxItems": 30
+          },
+          "credentialsRef": { "type": "string", "maxLength": 200, "nullable": true },
+          "freeTierHourlyBudget": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "nullable": true
+          },
+          "freeTierDailyBudget": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000,
+            "nullable": true
+          },
+          "stabilityClass": {
+            "type": "string",
+            "enum": ["DOCUMENTED_STABLE", "UNDOCUMENTED_VOLATILE"]
+          },
+          "parserVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "licenceTermsVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "robotsPosition": {
+            "type": "string",
+            "enum": ["HONOURED", "EXCEPTION_APPROVED", "NOT_ESTABLISHED"]
+          },
+          "contentFormat": {
+            "type": "string",
+            "enum": ["HTML", "PDF", "JSON", "XML_FEED", "MIXED"]
+          },
+          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] }
+        },
+        "required": [
+          "sourceName",
+          "publisher",
+          "connectorType",
+          "canonicalDomains",
+          "authorityTier",
+          "cascadeRung",
+          "countries",
+          "languages",
+          "credentialsRef",
+          "freeTierHourlyBudget",
+          "freeTierDailyBudget",
+          "stabilityClass",
+          "parserVersion",
+          "licenceTermsVersion",
+          "robotsPosition",
+          "contentFormat",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "RightsClearance": {
+        "type": "object",
+        "properties": {
+          "verdict": { "type": "string", "enum": ["ALLOW", "DENY", "REQUIRES_APPROVAL"] },
+          "evaluatedAt": { "type": "string" },
+          "policyId": { "type": "string" },
+          "perOperation": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "operation": {
+                  "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/permittedOperations/items"
+                },
+                "decision": {
+                  "type": "object",
+                  "properties": {
+                    "verdict": { "type": "string", "enum": ["ALLOW", "DENY", "REQUIRES_APPROVAL"] },
+                    "reasons": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": { "type": "string" },
+                          "detail": { "type": "string" }
+                        },
+                        "required": ["code", "detail"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "restrictions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": { "type": "string" },
+                          "detail": { "type": "string" },
+                          "days": { "type": "integer" }
+                        },
+                        "required": ["code", "detail"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["verdict", "reasons", "restrictions"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["operation", "decision"],
+              "additionalProperties": false
+            }
+          },
+          "restrictions": {
+            "$ref": "#/components/schemas/RightsClearance/properties/perOperation/items/properties/decision/properties/restrictions"
+          }
+        },
+        "required": ["verdict", "evaluatedAt", "policyId", "perOperation", "restrictions"],
+        "additionalProperties": false
+      },
+      "VersionSummary": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "enum": ["SOURCE", "TAXONOMY", "POLICY"] },
+          "recordId": { "type": "string" },
+          "versionId": { "type": "string" },
+          "version": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+          "tenantId": { "type": "string", "nullable": true },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PROPOSED",
+              "AWAITING_APPROVAL",
+              "APPROVED",
+              "ACTIVATING",
+              "ACTIVE",
+              "SUSPENDED",
+              "SUPERSEDED",
+              "RETIRED"
+            ]
+          },
+          "content": { "type": "object", "additionalProperties": {} },
+          "rightsPolicy": {
+            "allOf": [
+              { "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy" }
+            ],
+            "nullable": true
+          },
+          "dataProfile": {
+            "allOf": [
+              { "$ref": "#/components/schemas/ProposeVersionRequest/properties/dataProfile" }
+            ],
+            "nullable": true
+          },
+          "rightsClearance": {
+            "allOf": [{ "$ref": "#/components/schemas/RightsClearance" }],
+            "nullable": true
+          },
+          "proposedBy": { "type": "string" },
+          "approvedBy": { "type": "string", "nullable": true },
+          "revision": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string" },
+                "from": { "$ref": "#/components/schemas/VersionSummary/properties/status" },
+                "to": { "$ref": "#/components/schemas/VersionSummary/properties/status" },
+                "actor": { "type": "string" },
+                "reason": { "type": "string", "nullable": true },
+                "at": { "type": "string" }
+              },
+              "required": ["action", "from", "to", "actor", "reason", "at"],
+              "additionalProperties": false
+            }
+          },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": "string" },
+          "activatedAt": { "type": "string", "nullable": true },
+          "supersededAt": { "type": "string", "nullable": true }
+        },
+        "required": [
+          "kind",
+          "recordId",
+          "versionId",
+          "version",
+          "tenantId",
+          "status",
+          "content",
+          "rightsPolicy",
+          "dataProfile",
+          "rightsClearance",
+          "proposedBy",
+          "approvedBy",
+          "revision",
+          "history",
+          "createdAt",
+          "updatedAt",
+          "activatedAt",
+          "supersededAt"
+        ],
+        "additionalProperties": false
+      },
+      "CoverageStatement": {
+        "type": "object",
+        "properties": {
+          "jurisdiction": { "type": "string" },
+          "outcome": { "type": "string", "enum": ["COMPLETE", "INCOMPLETE", "UNKNOWN"] },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "capability": {
+                  "type": "string",
+                  "enum": [
+                    "COMPANY_REGISTRY",
+                    "OFFICER_ASSOCIATIONS",
+                    "COURT_RECORDS",
+                    "GAZETTE_NOTICES",
+                    "REGULATOR_ENFORCEMENT",
+                    "PROSECUTOR_BULLETINS",
+                    "NEWS_DISCOVERY",
+                    "NAME_FREQUENCY",
+                    "SANCTIONS_DESIGNATIONS"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["SUPPORTED", "PARTIAL", "UNKNOWN", "UNSUPPORTED"]
+                },
+                "emptyResultMeans": {
+                  "type": "string",
+                  "enum": ["NO_FINDINGS", "NOT_ESTABLISHED"]
+                },
+                "statement": { "type": "string" },
+                "blockedByDecision": { "type": "string", "nullable": true }
+              },
+              "required": [
+                "capability",
+                "status",
+                "emptyResultMeans",
+                "statement",
+                "blockedByDecision"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "gaps": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["jurisdiction", "outcome", "capabilities", "gaps"],
+        "additionalProperties": false
+      },
+      "DeclareCapabilityRequest": {
+        "type": "object",
+        "properties": {
+          "jurisdiction": {
+            "$ref": "#/components/schemas/ProposeVersionRequest/properties/rightsPolicy/properties/jurisdiction"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/CoverageStatement/properties/capabilities/items/properties/capability"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoverageStatement/properties/capabilities/items/properties/status"
+          },
+          "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "sourceIds": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 120 },
+            "maxItems": 50
+          },
+          "evidenceRef": { "type": "string", "maxLength": 300, "nullable": true },
+          "blockedByDecision": { "type": "string", "maxLength": 40, "nullable": true }
+        },
+        "required": ["jurisdiction", "capability", "status", "rationale"],
         "additionalProperties": false
       },
       "SessionInfo": {
