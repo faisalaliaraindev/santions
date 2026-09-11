@@ -157,7 +157,7 @@ afterAll(async () => {
 describe('T68 — the secret is shown once and stored hashed', () => {
   it('stores no part of the secret, in any field', async () => {
     const key = await issue();
-    const stored = await mongo.db().collection('api_keys').findOne({ keyId: key.keyId });
+    const stored = await mongo.db().collection('apiKeyCredentials').findOne({ keyId: key.keyId });
 
     expect(stored).not.toBeNull();
     // The whole credential, and the secret half on its own. A database dump must not
@@ -194,7 +194,7 @@ describe('T68 — a key authenticates, and a broken one does not', () => {
   it('authenticates a machine caller and records last use', async () => {
     const key = await issue();
 
-    const before = await mongo.db().collection('api_keys').findOne({ keyId: key.keyId });
+    const before = await mongo.db().collection('apiKeyCredentials').findOne({ keyId: key.keyId });
     expect(before?.['lastUsedAt']).toBeNull();
 
     const response = await request(app.getHttpServer())
@@ -205,7 +205,7 @@ describe('T68 — a key authenticates, and a broken one does not', () => {
     expect(response.status).toBe(201);
 
     // Last use is what makes an unused key identifiable, and therefore safe to revoke.
-    const after = await mongo.db().collection('api_keys').findOne({ keyId: key.keyId });
+    const after = await mongo.db().collection('apiKeyCredentials').findOne({ keyId: key.keyId });
     expect(after?.['lastUsedAt']).toBeInstanceOf(Date);
   });
 

@@ -108,9 +108,11 @@ export class ApiKeyService {
   private readonly keys: Collection<ApiKeyRecord>;
   private readonly audit: Collection<ApiKeyAuditRecord>;
 
+  // Collection names follow the section 6.3 record names in camelCase plural, as every other
+  // collection here does. `ApiKeyCredential` is the record; this is where it lives.
   constructor(db: Db) {
-    this.keys = db.collection<ApiKeyRecord>('api_keys');
-    this.audit = db.collection<ApiKeyAuditRecord>('api_key_audit');
+    this.keys = db.collection<ApiKeyRecord>('apiKeyCredentials');
+    this.audit = db.collection<ApiKeyAuditRecord>('apiKeyAuditEvents');
   }
 
   async ensureIndexes(): Promise<void> {

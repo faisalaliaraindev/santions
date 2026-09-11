@@ -9,8 +9,8 @@ of previous sessions. It is deliberately short.
 
 > **Phase C — Persistence, jobs, index and object storage (gate G4)**
 >
-> Brief: [`phase-c.md`](./phase-c.md) — an **outline**. Expanding it into a full brief is the
-> first task of this phase, and the outline says what that involves.
+> Brief: [`phase-c.md`](./phase-c.md) — expanded into a full brief on 2026-09-11. Start at C0,
+> the failure-injection matrix; it is the specification for the tests in C2, C5 and C6.
 >
 > Phases A and B are complete. The stack starts, seeds and survives a restart; auth, tenancy,
 > entitlements, subjects and idempotent search creation are built and tested against it; the
@@ -106,7 +106,7 @@ product that states something untrue about a real person.
 | G     | G8     | Control panel                        | [`phase-g.md`](./phase-g.md) |
 | H     | G9–G11 | Integration, live sources, hardening | [`phase-h.md`](./phase-h.md) |
 
-Briefs for A and B are complete, and both phases are done. C through H are outlines that must be expanded into full
+Briefs for A, B and C are complete; A and B are done. D through H are outlines that must be expanded into full
 briefs **at the start of their phase** — deliberately, because their detail depends on what
 earlier phases reveal. Writing them out now would harden guesses into instructions. Each
 outline says what expanding it involves.
