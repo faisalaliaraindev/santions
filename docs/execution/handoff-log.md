@@ -27,54 +27,81 @@ Say what you did about it.
 
 ---
 
-## 2026-09-11 (late) — Phase D brief expanded from outline. No code written.
+## 2026-09-11 (late) — Phase D brief expanded, and **step D0 done**: the Costa Rica source dossier. No production code written.
 
-**Did:** rewrote `docs/execution/phase-d.md` from a ~4KB outline into a full brief in the Phase C
-format: goal, why-this-order, a narrow read-before-starting list, what already exists, seven
-steps, definition of done, a "do not" list, decisions, risks.
+**Did — two things.**
 
-The substantive change is a **new step D0 that the outline did not have**: write a Costa Rica
-source dossier before any adapter. D-010 makes CR the only enabled jurisdiction, and every free
-source this plan was written around (Companies House, EDGAR, CourtListener) is UK or US. Writing
-`CompanyRegistryPort` first would design the association graph around a registry contract nobody
-has confirmed exists. D0 also picks up two work items that were stranded in `docs/decisions.md`
-and named in no brief: the **Costa Rican name-frequency distribution** (D-011 — without it the
-FR-08 frequency penalty never fires for Rodríguez or Jiménez) and the **Spanish lexicon needing a
-Spanish-reading reviewer** (D-010 — explicitly not a translation task).
+**1. Expanded `docs/execution/phase-d.md`** from a ~4KB outline into a full brief in the Phase C
+format. The substantive addition is a step the outline did not have — **D0, write the Costa Rica
+source dossier before any adapter** — because D-010 makes CR the only enabled jurisdiction and
+every free source this plan was written around (Companies House, EDGAR, CourtListener) is UK or
+US. D0 also picks up two work items that were stranded in `docs/decisions.md` and named in no
+brief: the Costa Rican name-frequency distribution (D-011) and the Spanish lexicon needing a
+Spanish-reading reviewer (D-010). Design calls recorded in the brief with reasoning: one
+versioned-approval service for all three record types rather than three; suspension without four
+eyes, re-activation with; the reliability profile kept **off** the immutable `SourceVersion` in a
+separate mutable `SourceHealth`; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` coverage kept distinct;
+SEC-05 rights as a pure default-deny function in `packages/domain/src/rights/`; all six FR-05
+ports defined and mocked here but only `CompanyRegistryPort` given a real adapter.
 
-Other calls made while expanding, each written into the brief with its reasoning:
+**2. Executed D0.** `docs/sources/cr-dossier.md`, v1. **No source was contacted** — search-engine
+queries only, no endpoint call, no page fetch, no `robots.txt` read, no rate-limit probe. Every
+claim carries `DOCUMENTED` / `INFERRED` / `UNKNOWN`, and nothing is marked verified. Also raised
+**D14** and **D15** in `docs/open-decisions.md`, each with a non-engineering owner.
 
-- **One versioned-approval service** for sources, taxonomy and policy, not three. Suspension does
-  **not** require four eyes (re-activation does) — needing a second person to stop using a bad
-  source is how a bad source stays live over a weekend.
-- **The reliability profile must not live on `SourceVersion`.** It is changing runtime
-  observation; the version is an immutable approved artefact. A separate mutable `SourceHealth`.
-- **`COMPLETE` / `INCOMPLETE` / `UNKNOWN` association coverage kept distinct.** `UNKNOWN` is the
-  likely CR case — never asked, because no approved registry exists — and reporting it as
-  `INCOMPLETE` claims an attempt that never happened.
-- **SEC-05 rights is a pure function in `packages/domain/src/rights/`**, with model disclosure as
-  its own operation, default-deny on unknown ones.
-- Scope fence: Phase D defines all six FR-05 ports and mocks them all, but builds only the
-  `CompanyRegistryPort` real adapter. Discovery and fetch stay in Phase E.
+**Found — three things that change the phase, and they are the reason D0 existed:**
 
-**Verified:** `npx prettier --check docs/execution/phase-d.md` clean. No code changed, so no
-suite was run — the last recorded state stands (unit 283 · invariants 29 · evaluation 12 ·
+1. **There is no free automatable officer-level source in Costa Rica.** The Registro Nacional does
+   publish company representatives, but only behind free registration **and a CAPTCHA** — a hard
+   stop under the FR-06 rules, not an engineering problem. The free machine-readable alternative,
+   `api.hacienda.go.cr`, returns entity name, tax status and economic activity and **nothing about
+   directors**. So FR-02 has no data source in the only enabled jurisdiction. Raised as **D14**.
+   The engineering answer needs nobody's permission — build the graph, prove it on a UK adapter,
+   report CR association coverage as `UNKNOWN` — but whether company screening is in scope for CR
+   customers at all is a product and compliance call. D4's `UNKNOWN` branch is now the live CR
+   path rather than a defensive case, so test it as the primary path.
+2. **Published Costa Rican judgments are probably depersonalised.** The Poder Judicial runs a
+   personal-data regulation over its public databases, a de-identification protocol, a
+   de-personalising tool and a repository of depersonalised judgments. A judgment with the party
+   names stripped is not a weak match — there is no name in it to match. If that holds across the
+   board, the tier-1 primary source this product's authority reasoning was designed around does
+   not exist for CR, and the evidence base moves to the Boletín Judicial, La Gaceta, prosecutor
+   and police bulletins, and the press — all lower authority tiers. Raised as **D15**. Whether
+   **any** class of CR judgment names parties is the highest-value open question in the project
+   right now, and it is desk research, not a live call.
+3. **The TSE padrón electoral solves the D-011 name-frequency gap.** Downloadable ZIP containing
+   `PADRON.TXT` with every registered voter's given names and both surnames. With one constraint
+   written into the dossier: it is bulk personal data on millions of living people, so derive the
+   **aggregate counts, discard the roll**, never import it into a collection or let it reach the
+   index, and name the use in the SEC-05 approval rather than assuming it is covered.
+
+Two consequences for later phases, cheaper to know now than to discover: the real
+`CompanyRegistryPort` adapter **cannot be Costa Rican** (use UK Companies House as the proving
+ground, and treat `api.hacienda.go.cr` as a genuinely Costa Rican _corroboration_ adapter, which
+is not a registry), and **the CR extraction path is PDF-first** — La Gaceta and the Boletín
+Judicial are PDF publications, not HTML articles, which is a different Phase F pipeline from the
+one the UK/US design assumed.
+
+**Verified:** health check green before starting — `lint` clean, `typecheck` clean, `test:unit`
+**283 passed**. `npx prettier --check` clean on every file touched. No production code changed, so
+no other suite was run; the last recorded state stands (invariants 29 · evaluation 12 ·
 integration 120 · security 95).
 
-**Left half-done:** nothing. Phase D itself is not started — the brief is the deliverable here.
+**Left half-done:** D0 is v1 and deliberately stops short of enumerating the press mastheads with
+FR-05 authority tiers — a partial masthead list invites someone to treat it as the list. The
+dossier's closing section lists what the next revision must establish in value order, and marks
+which of it is desk research and which belongs to G10.
 
-**Found:** `START-HERE.md` still told the next session that phase-d.md was an outline whose
-expansion was the first task. Updated to point at D0 instead.
+**Next session should:** start **D1** — `apps/api/src/admin/versioned-approval.service.ts`, the
+one propose/approve/activate lifecycle shared by `SourceVersion`, `TaxonomyVersion` and
+`PolicyVersion`, wiring the existing pure `canApprove` rather than writing a second four-eyes
+check. The brief's D1 section has the full `SourceVersion` field list and the suspension rule.
 
-**Next session should:** start **D0** — create `docs/sources/cr-dossier.md` and work the
-candidate list in `docs/decisions.md` D-010. Every claim labelled `DOCUMENTED` / `INFERRED` /
-`UNKNOWN`; **no live call** (G10 owns live verification).
-
-**Decisions touched:** none closed. Expect D0 to open **D14** — what feeds the association graph
-in Costa Rica if no free officer-level register exists — owner is product, not engineering. D6
-(robots exceptions) should be raised with a source admin during this phase, not at the start of
-Phase E, because the registry field that records it must exist before the first source version is
-approved.
+**Decisions touched:** none closed. **D14 and D15 opened**, both from D0, both owned outside
+engineering — D14 by G5, D15 by G6. **D6** (robots exceptions for official sources) should be
+raised with a source admin during this phase and not at the start of Phase E: the registry field
+that records an exception must exist before the first source version is approved, or every
+version already approved needs revising.
 
 ---
 

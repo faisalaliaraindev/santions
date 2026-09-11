@@ -9,10 +9,17 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-d.md`](./phase-d.md). **Expanded into a full brief on 2026-09-11** — six steps
-> plus a **D0** that did not exist in the outline: a Costa Rica source dossier written before
-> any adapter, because D-010 means none of the free sources this plan was written around covers
-> the only enabled jurisdiction. Start there, not at D1.
+> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 is done;
+> D1 is next.**
+>
+> **Read [`../sources/cr-dossier.md`](../sources/cr-dossier.md) before building anything in this
+> phase.** D0 established that there is **no free automatable officer-level company source in
+> Costa Rica** — the Registro Nacional is behind a CAPTCHA, and `api.hacienda.go.cr` returns no
+> directors — so FR-02's association graph has no data source in the only enabled jurisdiction
+> (**D14**), and that published CR judgments are probably depersonalised, which moves the
+> evidence base off court records onto lower-authority channels (**D15**). Both are open, both
+> owned outside engineering. It also found a real free source for the D-011 name-frequency
+> prior. No source was contacted to establish any of it.
 >
 > **No decision is due at G5.** D1, D3 and D8 were the three this phase was meant to close, and
 > all three closed on 2026-09-11 (see `docs/decisions.md` D-010, D-009, D-012) — Costa Rica with

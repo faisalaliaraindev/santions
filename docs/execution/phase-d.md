@@ -1,6 +1,6 @@
 # Phase D — Sources, association graph and taxonomy administration
 
-**Gate:** G5 · **Status:** brief — not started · **Prerequisite:** Phase C complete (it is)
+**Gate:** G5 · **Status:** IN PROGRESS — D0 done, D1 next · **Prerequisite:** Phase C complete (it is)
 
 ---
 
@@ -141,6 +141,35 @@ Also record here: the **name-frequency distribution for Costa Rican surnames** (
 applies no penalty — meaning Rodríguez currently scores like a rare name and the FR-08
 frequency penalty that exists to catch exactly this never fires. The dossier names a candidate
 public source for that distribution; D3 loads it.
+
+**Done (2026-09-11), v1.** [`docs/sources/cr-dossier.md`](../sources/cr-dossier.md). No source
+was contacted: search-engine queries only, no endpoint call, no page fetch, no `robots.txt`
+read. Three findings change the rest of the phase, and each is written up there with its label:
+
+1. **No free automatable officer-level source exists.** The Registro Nacional publishes
+   representatives only behind free registration **and a CAPTCHA**, which is a hard stop, not an
+   engineering problem. `api.hacienda.go.cr` is free and machine-readable but returns entity
+   status and economic activity — **nothing about directors**. So FR-02 has no data source in
+   the only enabled jurisdiction. Raised as **D14**; D4's `UNKNOWN` coverage outcome is now the
+   live CR path, not a defensive branch.
+2. **Published CR judgments are likely depersonalised** — the Poder Judicial runs a
+   de-identification protocol, a de-personalising tool and a repository of depersonalised
+   judgments. A judgment with no name in it is not a weak match, it is not a match. Raised as
+   **D15**; whether any class of judgment names parties is the highest-value open question.
+3. **The TSE padrón electoral is a real free source for the D-011 name-frequency prior** — with
+   the constraint that it is bulk personal data: derive the aggregate counts, **discard the
+   roll**, and name the use in the SEC-05 approval.
+
+Two consequences for later phases, cheaper to know now: the real `CompanyRegistryPort` adapter
+cannot be Costa Rican (use UK Companies House as the proving ground, exactly as D2 anticipated,
+and consider `api.hacienda.go.cr` as a genuinely Costa Rican **corroboration** adapter — which
+is not a registry), and the CR extraction path is **PDF-first**, because La Gaceta and the
+Boletín Judicial are PDF publications rather than HTML articles.
+
+**What v1 deliberately did not do:** enumerate the press mastheads with FR-05 authority tiers.
+A partial masthead list invites someone to treat it as the list. The dossier's closing section
+lists what the next revision must establish, in value order, and marks which of it is desk
+research and which belongs to G10.
 
 ### D1 — Versioned approval: draft → propose → approve → activate, with four eyes
 
@@ -341,7 +370,7 @@ configured.
 
 ## Definition of done
 
-- [ ] D0 — `docs/sources/cr-dossier.md` exists; every claim labelled `DOCUMENTED` / `INFERRED` / `UNKNOWN`; no live call made; the CR officer-data question resolved or raised as **D14** in `docs/open-decisions.md`
+- [x] D0 — `docs/sources/cr-dossier.md` exists; every claim labelled `DOCUMENTED` / `INFERRED` / `UNKNOWN`; no live call made; the CR officer-data question raised as **D14**, and the depersonalised-judgments question as **D15**
 - [ ] D1 — one versioned-approval service serving sources, taxonomy and policy; draft mutable, active immutable, suspend without four eyes, restore with; reason required and audited
 - [ ] D1 — `SourceVersion` carries the full FR-05 field list; alpha-2 country validation rejects "EU" / "MENA" / "SEA"
 - [ ] D1 — `decideFieldUse` in `packages/domain/src/rights/`, default-deny on unknown operations, with model disclosure as its own operation

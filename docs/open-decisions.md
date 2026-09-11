@@ -6,21 +6,23 @@ implementation has surfaced. Each carries an owner and the gate by which it must
 **Nothing here may harden into an accidental default.** Where a working assumption is in
 force, it is stated as such and the code reflects that it is provisional.
 
-| ID      | Decision                                                                                                       | Owner                 | Close by | Status                                                            |
-| :------ | :------------------------------------------------------------------------------------------------------------- | :-------------------- | :------- | :---------------------------------------------------------------- |
-| D1      | Which jurisdictions and languages are enabled first                                                            | Source/policy admin   | G5       | **CLOSED 2026-09-11** — Costa Rica; es + en requested (see D-010) |
-| D2      | The declared archive horizon, per source, published on every result                                            | Source/policy admin   | G10      | Open                                                              |
-| D3      | Which categories are on by default                                                                             | Taxonomy admin        | G5       | **CLOSED 2026-09-11** — all seventeen (see D-009)                 |
-| D4      | The exact boundary between adverse media and list matching for designations                                    | Product + compliance  | G7       | Open                                                              |
-| D5      | The reviewer capacity assumption that thresholds are set against                                               | Product + compliance  | G7       | Open                                                              |
-| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin          | G6       | Open                                                              |
-| D7      | Which open-weight extraction model, benchmarked on the labelled set                                            | Engineering           | G7       | Open                                                              |
-| D8      | Retention per source and jurisdiction for evidence text                                                        | Compliance            | G5       | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)  |
-| D9      | Whether numeric confidence figures are ever shown (default: no)                                                | Product               | G7       | Open — default no, enforced                                       |
-| D10     | The minimum identity data the integrating application must supply                                              | Product + Zquence     | G3       | **CLOSED 2026-09-11** — a name (see D-011)                        |
-| **D11** | Whether the results list must render procedural stage and outcome status at the same visual weight as the band | Product + design      | G8       | Open                                                              |
-| **D12** | Search index: OpenSearch or Meilisearch                                                                        | Engineering           | G4       | **CLOSED 2026-09-11** — Meilisearch, on C4's figures (see D-002)  |
-| **D13** | Whether search acceptance waits for the index write (~94ms of its latency)                                     | Engineering + product | G8       | Open — measured in C4, see D-014                                  |
+| ID      | Decision                                                                                                       | Owner                  | Close by | Status                                                            |
+| :------ | :------------------------------------------------------------------------------------------------------------- | :--------------------- | :------- | :---------------------------------------------------------------- |
+| D1      | Which jurisdictions and languages are enabled first                                                            | Source/policy admin    | G5       | **CLOSED 2026-09-11** — Costa Rica; es + en requested (see D-010) |
+| D2      | The declared archive horizon, per source, published on every result                                            | Source/policy admin    | G10      | Open                                                              |
+| D3      | Which categories are on by default                                                                             | Taxonomy admin         | G5       | **CLOSED 2026-09-11** — all seventeen (see D-009)                 |
+| D4      | The exact boundary between adverse media and list matching for designations                                    | Product + compliance   | G7       | Open                                                              |
+| D5      | The reviewer capacity assumption that thresholds are set against                                               | Product + compliance   | G7       | Open                                                              |
+| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin           | G6       | Open                                                              |
+| D7      | Which open-weight extraction model, benchmarked on the labelled set                                            | Engineering            | G7       | Open                                                              |
+| D8      | Retention per source and jurisdiction for evidence text                                                        | Compliance             | G5       | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)  |
+| D9      | Whether numeric confidence figures are ever shown (default: no)                                                | Product                | G7       | Open — default no, enforced                                       |
+| D10     | The minimum identity data the integrating application must supply                                              | Product + Zquence      | G3       | **CLOSED 2026-09-11** — a name (see D-011)                        |
+| **D11** | Whether the results list must render procedural stage and outcome status at the same visual weight as the band | Product + design       | G8       | Open                                                              |
+| **D12** | Search index: OpenSearch or Meilisearch                                                                        | Engineering            | G4       | **CLOSED 2026-09-11** — Meilisearch, on C4's figures (see D-002)  |
+| **D13** | Whether search acceptance waits for the index write (~94ms of its latency)                                     | Engineering + product  | G8       | Open — measured in C4, see D-014                                  |
+| **D14** | What feeds the FR-02 association graph in Costa Rica, given no free automatable officer register               | Product + compliance   | G5       | Open — raised by D0, 2026-09-11                                   |
+| **D15** | What the Costa Rican primary-source evidence base is, given depersonalised judgments                           | Product + source admin | G6       | Open — raised by D0, 2026-09-11                                   |
 
 ---
 
@@ -86,3 +88,60 @@ accepted search is not yet matchable. Which is safe depends on whether anything 
 between acceptance and the run completing.
 
 **Must close by G8**, with Phase F, because the consumer's ordering is what decides it.
+
+### D14 — What feeds the association graph in Costa Rica
+
+**Raised at:** Phase D step D0, 2026-09-11. Evidence in
+[`sources/cr-dossier.md`](./sources/cr-dossier.md).
+
+There is no known free, automatable, officer-level company source in Costa Rica. The Registro
+Nacional publishes representatives, but only behind free registration **and a CAPTCHA**, which
+this project will not bypass by any path. The free machine-readable alternative,
+`api.hacienda.go.cr`, confirms that a company exists and is active and says **nothing about who
+directs it**.
+
+So FR-02 — resolve the person to officer records before dispatching company queries — has no
+data source in the only enabled jurisdiction.
+
+**The engineering answer is already decided and needs no one's permission:** build the graph,
+prove it against a UK adapter, and report CR association coverage as `UNKNOWN` — never asked,
+because nothing approved could be asked. That is honest and it is what Phase D will do.
+
+**What actually needs deciding, by someone other than engineering:**
+
+- whether company association screening is in scope for CR customers at all in the first
+  release, given that it will return `UNKNOWN` every time;
+- whether a paid register is acceptable, which would breach the zero-paid-subscription
+  constraint this whole service is built on and is therefore a business decision, not a
+  procurement one;
+- whether user-supplied companies — which FR-01 already accepts as candidate associations
+  labelled as supplied and unverified — are the intended CR path, and if so whether the product
+  says so plainly to the reviewer.
+
+**Must close by G5.** Until it does, the CR coverage statement says association coverage is
+`UNKNOWN` and why.
+
+### D15 — The Costa Rican primary-source evidence base
+
+**Raised at:** Phase D step D0, 2026-09-11. Evidence in
+[`sources/cr-dossier.md`](./sources/cr-dossier.md).
+
+The Poder Judicial runs a personal-data regulation over its public databases, a de-identification
+protocol, a de-personalising tool and a **Repositorio Único de Sentencias Judiciales
+Despersonalizadas**. The likely consequence is that published CR judgments do not carry the names
+of the parties.
+
+A depersonalised judgment is not a weak match — it is not a match at all, because there is no
+name in it to match against. If that holds across the board, the tier-1 primary source this
+product's authority reasoning was designed around does not exist for Costa Rica, and CR adverse
+search rests on the Boletín Judicial, La Gaceta, prosecutor and police bulletins, and the press.
+
+**What must be established first, and it is desk research, not a decision:** whether any class of
+CR judgment is published with parties named. Do that before deciding anything.
+
+**Then the decision:** whether a CR offering whose highest-authority named evidence is an official
+gazette notice or a police bulletin meets the standard this product claims. It changes the FR-08
+Axis D profile of every CR result, and it is a product and compliance judgement, not an
+engineering one.
+
+**Must close by G6**, because Phase E's cascade rungs and per-source tiers encode the answer.
