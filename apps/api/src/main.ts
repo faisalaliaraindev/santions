@@ -15,6 +15,7 @@ import helmet from 'helmet';
 
 import { AppModule, APP_CONFIG } from './app.module.js';
 import { correlationMiddleware } from './common/correlation.js';
+import { corsOptions } from './common/cors.js';
 import type { AppConfig } from './config/config.js';
 
 async function bootstrap(): Promise<void> {
@@ -48,13 +49,8 @@ async function bootstrap(): Promise<void> {
 
   // Explicit allowlist. `credentials: true` is only safe with a fixed origin list — never
   // with a reflected origin, which would let any site drive an authenticated session (T08).
-  app.enableCors({
-    origin: config.corsOrigins.length > 0 ? [...config.corsOrigins] : false,
-    credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-CSRF-Token'],
-    maxAge: 600,
-  });
+  // The policy lives in ./common/cors.ts so a test can assert this exact object.
+  app.enableCors(corsOptions(config));
 
   // Bounded request size (section 6.1, 413).
   app.useBodyParser('json', { limit: '256kb' });

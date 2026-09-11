@@ -20,6 +20,7 @@ import type { Request } from 'express';
 import { decideAccess, type Permission } from '@erly/adverse-domain';
 
 import { ApiException } from '../common/api-exception.js';
+import { ApiKeyError, ApiKeyService } from '../tenancy/api-key.service.js';
 import { SessionService } from './session.service.js';
 import { TokenVerificationError, TokenVerifier } from './token-verifier.js';
 
@@ -43,6 +44,7 @@ export class AuthGuard implements CanActivate {
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(TokenVerifier) private readonly tokenVerifier: TokenVerifier,
     @Inject(SessionService) private readonly sessions: SessionService,
+    @Inject(ApiKeyService) private readonly apiKeys: ApiKeyService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -56,12 +58,12 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
 
-    // Two credential shapes, in a deliberate order.
+    // Three credential shapes, in a deliberate order.
     //
-    // The BFF session cookie is checked first, because that is how humans arrive. A machine
-    // bearer token is checked second. A request carrying both is not special-cased: the
-    // session wins, and the token is ignored rather than merged, so a stolen token cannot
-    // escalate an existing session.
+    // The BFF session cookie is checked first, because that is how humans arrive. Machine
+    // credentials — an API key, then a bearer token — are checked after. A request carrying
+    // more than one is not special-cased: the first match wins and the rest are ignored rather
+    // than merged, so a stolen credential cannot escalate an existing session.
     const sessionId = readSessionCookie(request);
     if (sessionId !== null) {
       const principal = await this.sessions.resolve(sessionId);
@@ -70,6 +72,23 @@ export class AuthGuard implements CanActivate {
       }
       request.principal = principal;
       return true;
+    }
+
+    const apiKey = readApiKey(request);
+    if (apiKey !== undefined) {
+      try {
+        request.principal = await this.apiKeys.verify(apiKey);
+        return true;
+      } catch (error) {
+        if (error instanceof ApiKeyError) {
+          // One opaque answer for every rejection. Telling a caller that the key exists but
+          // the secret is wrong halves the work of guessing (test T68).
+          throw new ApiException('UNAUTHENTICATED', 'Authentication is required.', {
+            internalDetail: `API key ${error.rejection}: ${error.message}`,
+          });
+        }
+        throw error;
+      }
     }
 
     const bearer = readBearerToken(request);
@@ -186,6 +205,22 @@ function readBearerToken(request: Request): string | undefined {
   }
   const [scheme, value] = header.split(' ');
   return scheme?.toLowerCase() === 'bearer' ? value : undefined;
+}
+
+/**
+ * `Authorization: ApiKey erly_live_…`.
+ *
+ * A distinct scheme rather than reusing `Bearer`, so a key is never fed to the JWT verifier and
+ * a token is never fed to the key store. Sharing one scheme means every failed verification has
+ * to be attempted twice, and the logs stop saying which credential the caller actually meant.
+ */
+function readApiKey(request: Request): string | undefined {
+  const header = request.headers.authorization;
+  if (typeof header !== 'string') {
+    return undefined;
+  }
+  const [scheme, value] = header.split(' ');
+  return scheme?.toLowerCase() === 'apikey' ? value : undefined;
 }
 
 export const SESSION_COOKIE = 'adverse_session';

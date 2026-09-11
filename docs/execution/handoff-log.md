@@ -27,6 +27,106 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (last) — Phase B complete: T08, T07 and T68 closed; gate G3 met
+
+**Did:**
+
+- **T08 — CSRF and CORS, as executable checks.** The CSRF guard already existed; what did not
+  exist was any test that it fires. `tests/security/session-lifecycle.test.ts` drives the
+  assembled application with real cookies: a write with a valid session and no token is refused,
+  so is one carrying **another session's** token, and so is one carrying a token truncated by a
+  single character (which would pass a length-insensitive or short-circuiting comparison). The
+  same write succeeds once the matching token is sent — without that control, the four refusals
+  above would also pass if writes were simply broken. A bearer-authenticated machine client is
+  deliberately **not** asked for a CSRF token, because a browser cannot set an `Authorization`
+  header on its own and demanding one would be theatre that breaks integrators.
+- **CORS moved out of the bootstrap** into `apps/api/src/common/cors.ts`, so the exact object
+  the application installs can be asserted: origins are always an explicit list, never `true`,
+  never `'*'`, never a function that could reflect the request, and **`false` when nothing is
+  configured**. A missing configuration must fail closed, or the development convenience is what
+  ships.
+- **T07 — logout, revocation, expiry and key rotation.** Fourteen tests covering the property
+  that actually matters: old access stops working. A logged-out cookie is refused; a revoked
+  session is refused on writes as well as reads (401, not 403 — the credential is gone, so it is
+  not a CSRF failure); `revokeAllForSubject` kills every session a person holds, not just the
+  browser they signed out of; an idle-expired and an absolutely-expired session are both
+  refused, the latter even while actively used; and an unknown session ID is answered
+  identically to a revoked one, so session IDs cannot be probed. Rotation is tested in
+  `auth.test.ts`: during provider overlap both keys verify, and once the retired key is
+  withdrawn a token signed with it fails on the **signature** — a verifier that keeps honouring
+  a retired key makes rotation meaningless, since the compromised key is still a signing key.
+- **T68 — the API key lifecycle**, `apps/api/src/tenancy/api-key.service.ts`, and it is wired
+  into `AuthGuard` rather than left as unreachable code. Keys look like
+  `erly_<environment>_<keyId>_<secret>`: the environment is in the credential so a live key
+  pasted into a sandbox configuration is visible as a mistake, and the key ID makes verification
+  one indexed lookup instead of hashing the presented secret against every key a tenant owns.
+  The secret is returned **once**, from `create`, and only a SHA-256 hash is stored — there is
+  deliberately no method that returns a secret, because an API that can show a key again will be
+  asked to. Rotation keeps the key's identity and invalidates the previous secret with no grace
+  period; revocation is immediate, idempotent and permanent; a revoked key cannot be rotated back
+  into service; and creation, rotation and revocation each write an audit entry with an actor and
+  a reason. `lastUsedAt` is updated on every successful verification, which is what makes an
+  unused key identifiable and therefore safe to revoke.
+- **The API key is a documented credential.** `apiKey` was added to the OpenAPI security schemes
+  with its own `ApiKey` scheme rather than a second flavour of `Bearer`, and the panel's client
+  was regenerated.
+- Registered `ApiKeyService` in the module and its indexes in `StartupService`.
+
+**Verified:**
+
+```
+backend:   lint clean · typecheck clean · format:check clean
+           test:unit 206 passed · test:invariants 29 · test:evaluation 12
+           test:integration 14 passed
+           test:security 86 passed  (was 48: +4 rotation/CORS, +14 session, +18 API key)
+           verify:local 7 of 8 ok; only e2e unimplemented (Phase G)
+frontend:  lint clean · build clean · format:check clean · test:unit 35 passed
+```
+
+Three guards verified by planting a violation rather than by assuming:
+
+- making `CsrfGuard.canActivate` return `true` unconditionally fails exactly the three CSRF
+  refusal tests;
+- deleting the revocation check in `ApiKeyService.verify` fails "refuses immediately after
+  revocation";
+- (from the earlier session) editing the committed OpenAPI document, and adding an undocumented
+  route, each fail their own guard.
+
+**Left half-done:** nothing in Phase B. Gate G3 is **Complete** and the active phase pointer now
+reads **C**. `phase-c.md` is still an outline; expanding it is the first task of that phase, by
+design — its detail depends on what Phase B revealed, and writing it earlier would harden
+guesses into instructions.
+
+**Found — three things:**
+
+1. **`format:check` and the OpenAPI drift test contradicted each other.** The generator wrote
+   `JSON.stringify(…, null, 2)`, prettier wanted its own layout for the same file, and no
+   committed file satisfied both — each check demanded the other's failure. The generator now
+   formats its output with the repository's prettier configuration, so there is one right answer.
+   Worth remembering for any future generated artefact that prettier also globs.
+2. **A test tenant needs more than an entitlement to create a search.** The API key tests first
+   failed at 403, then at 422: a tenant must also have an **active taxonomy version and policy
+   version**, which only `local:bootstrap` seeds. The tests now use the seeded `tenant-alpha` and
+   `tenant-beta` wherever they create a search — inventing a tenant produced a 422 that said
+   nothing about the key under test, which would have made a green result meaningless.
+3. **`POST /v1/subjects` declares a permission but no scope.** So a key scoped to `search:read`
+   can still create a subject, while `POST /v1/searches` correctly refuses it. That may be
+   intentional — creating a subject is not running a search — but it is worth a deliberate
+   decision rather than an accident of which routes carry `@RequireScope`. Not changed here,
+   because changing it silently would alter the machine contract.
+
+**Next session should:** expand `docs/execution/phase-c.md` from an outline into a full brief,
+then start C1 — the section 6.3 record schemas, migrations and indexes, with tenant context
+leading every key. Note that C4, the matcher-latency workload test, is what settles open
+decision **D12**; Meilisearch is still only a working assumption behind the `SEARCH_INDEX_KIND`
+seam.
+
+**Decisions touched:** none closed. D-007 is respected — the API key service is provider-side,
+and tenant self-service key management still answers 501. The scope question in **Found 3** is
+new and unrecorded; it belongs to whoever owns the machine contract.
+
+---
+
 ## 2026-09-11 (later) — Phase B steps B1 and B9: the OpenAPI document and the panel's client
 
 **Did:**

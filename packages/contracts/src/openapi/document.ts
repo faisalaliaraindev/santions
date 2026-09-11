@@ -57,7 +57,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
       { name: 'searches', description: 'Search creation and the result dimensions' },
       { name: 'reserved', description: 'Documented, deliberately not implemented (FR-15, D-007)' },
     ],
-    security: [{ sessionCookie: [] }, { machineToken: [] }],
+    security: [{ sessionCookie: [] }, { machineToken: [] }, { apiKey: [] }],
     paths: buildPaths(),
     components: {
       schemas: buildComponentSchemas(),
@@ -69,11 +69,16 @@ export function buildOpenApiDocument(): Record<string, unknown> {
 }
 
 /**
- * Two credentials, never mixed.
+ * Three credentials, never mixed.
  *
  * The browser gets a session cookie and no token: a bearer token readable by page script is
- * exfiltratable by page script. Machine callers get an audience-bound bearer token and no
- * cookie, so a machine credential cannot be ridden by a cross-site request.
+ * exfiltratable by page script. Machine callers get either an audience-bound bearer token or an
+ * environment-scoped API key, and no cookie, so a machine credential cannot be ridden by a
+ * cross-site request.
+ *
+ * The API key uses its own `ApiKey` scheme rather than sharing `Bearer`. A shared scheme means
+ * every credential has to be tried against both verifiers, and a rejection can no longer say
+ * which credential the caller meant.
  */
 const SECURITY_SCHEMES: Record<string, SchemaObject> = {
   sessionCookie: {
@@ -94,6 +99,19 @@ const SECURITY_SCHEMES: Record<string, SchemaObject> = {
       'Machine-to-machine access (section 4.2). Short-lived, audience-bound and signed with an',
       'asymmetric algorithm. Scopes are checked per route, and a `sandbox` credential can never',
       'run a live search or reach live evidence.',
+    ].join(' '),
+  },
+  apiKey: {
+    type: 'apiKey',
+    in: 'header',
+    name: 'Authorization',
+    description: [
+      'An environment-scoped API key, sent as `Authorization: ApiKey erly_<environment>_…`.',
+      'The secret is shown once at issue and stored only as a hash, so a lost key is rotated',
+      'rather than recovered. Rotation invalidates the previous secret immediately, with no',
+      'grace period, and both rotation and revocation are audited. A `sandbox` key can never',
+      'run a live search or reach live evidence, whatever its roles say. Tenant self-service',
+      'management of these keys is deferred by decision D-007; keys are provider-issued.',
     ].join(' '),
   },
 };

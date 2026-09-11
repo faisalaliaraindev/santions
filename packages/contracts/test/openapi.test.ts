@@ -155,11 +155,14 @@ describe('the OpenAPI document', () => {
     expect(properties?.['status']).toBeUndefined();
   });
 
-  it('declares both credentials and never suggests a token in the browser', () => {
+  it('declares all three credentials and never suggests a token in the browser', () => {
     const schemes = components['securitySchemes'] ?? {};
-    expect(Object.keys(schemes).toSorted()).toEqual(['machineToken', 'sessionCookie']);
+    expect(Object.keys(schemes).toSorted()).toEqual(['apiKey', 'machineToken', 'sessionCookie']);
     expect(schemes['sessionCookie']?.['in']).toBe('cookie');
     expect(schemes['machineToken']?.['scheme']).toBe('bearer');
+    // Its own scheme, not a second kind of Bearer: see the note in document.ts.
+    expect(schemes['apiKey']?.['in']).toBe('header');
+    expect(schemes['apiKey']?.['name']).toBe('Authorization');
   });
 
   it('documents the reserved FR-15 routes with a 501 and a reason', () => {

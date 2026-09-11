@@ -1,6 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 
 import { SessionService } from './auth/session.service.js';
+import { ApiKeyService } from './tenancy/api-key.service.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
 import { SearchesService } from './searches/searches.service.js';
 import { NameFrequencyService } from './subjects/name-frequency.service.js';
@@ -22,6 +23,7 @@ export class StartupService implements OnModuleInit {
 
   constructor(
     private readonly sessions: SessionService,
+    private readonly apiKeys: ApiKeyService,
     private readonly subjects: SubjectsService,
     private readonly nameFrequency: NameFrequencyService,
     private readonly idempotency: IdempotencyService,
@@ -31,6 +33,7 @@ export class StartupService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     await Promise.all([
       this.sessions.ensureIndexes(),
+      this.apiKeys.ensureIndexes(),
       this.subjects.ensureIndexes(),
       this.nameFrequency.ensureIndexes(),
       this.idempotency.ensureIndexes(),

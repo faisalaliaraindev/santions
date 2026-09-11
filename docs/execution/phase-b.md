@@ -1,6 +1,6 @@
 # Phase B — Identity, tenancy and the API contract
 
-**Gate:** G3 · **Status:** IN PROGRESS — B1–B9 done; T07, T08 and T68 remain
+**Gate:** G3 · **Status:** COMPLETE — B1–B9 done, every definition-of-done item met
 
 ---
 
@@ -139,12 +139,12 @@ error typing stay hand-written. Only operations and types are generated.
 - [x] T04 — tenant A denied B's search, evidence, graph, review and export, on **every** route
 - [x] T05 — forged tenant header or queue payload fails closed; stored ownership prevails
 - [x] T06 — viewer cannot review; analyst cannot activate a source; operator cannot read evidence
-- [ ] T07 — logout, revocation and key rotation behave as documented; old access does not persist
-- [ ] T08 — CSRF blocked; no permissive CORS; no token in browser storage or logs
+- [x] T07 — logout, revocation and key rotation behave as documented; old access does not persist
+- [x] T08 — CSRF blocked; no permissive CORS; no token in browser storage or logs
 - [x] T09 — production startup fails on development issuer, mock source or test credentials
 - [x] T62 — sandbox key cannot run a live search
 - [x] T63 — tenant without the capability is refused as an entitlement denial and **no source call occurs**
-- [ ] T68 — API key secret shown once, stored hashed, rotation and revocation audited
+- [x] T68 — API key secret shown once, stored hashed, rotation and revocation audited
 - [x] T22, T23 — idempotency: one operation for identical requests, 409 on changed body
 - [x] Two tenants with deliberately identical external references stay isolated
 - [x] `verify-local.mjs` has `security` marked implemented and the suite genuinely runs

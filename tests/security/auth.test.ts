@@ -9,7 +9,12 @@ import { SignJWT, exportJWK, generateKeyPair, type JWK, type KeyLike } from 'jos
 import { createLocalJWKSet } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { TokenVerificationError, TokenVerifier } from '../../apps/api/src/auth/token-verifier.js';
+import {
+  TokenVerificationError,
+  TokenVerifier,
+  type TokenRejection,
+} from '../../apps/api/src/auth/token-verifier.js';
+import { corsOptions } from '../../apps/api/src/common/cors.js';
 import { ConfigurationError, loadConfig } from '../../apps/api/src/config/config.js';
 
 const ISSUER = 'https://issuer.test/realms/adverse-search';
@@ -275,5 +280,140 @@ describe('T09 — production startup guards', () => {
       expect(message).toMatch(/OIDC_CLIENT_SECRET/);
       expect(message).toMatch(/SESSION_COOKIE_SECURE/);
     }
+  });
+});
+
+/**
+ * T07 — signing-key rotation.
+ *
+ * The property that matters is not that a new key works; it is that the **old one stops
+ * working**. A verifier that keeps honouring a retired key turns rotation into theatre: the
+ * compromised key it was rotated away from is still a valid signing key.
+ */
+describe('T07 — signing-key rotation', () => {
+  it('accepts the new key and rejects the retired one once rotation completes', async () => {
+    const retired = await generateKeyPair('RS256');
+    const current = await generateKeyPair('RS256');
+
+    const retiredJwk: JWK = { ...(await exportJWK(retired.publicKey)), kid: 'key-1', alg: 'RS256' };
+    const currentJwk: JWK = { ...(await exportJWK(current.publicKey)), kid: 'key-2', alg: 'RS256' };
+
+    async function mintWith(key: KeyLike, kid: string): Promise<string> {
+      return new SignJWT({ realm_access: { roles: ['analyst'] }, tenant_id: 'tenant-a' })
+        .setProtectedHeader({ alg: 'RS256', kid })
+        .setSubject('user-1')
+        .setIssuer(ISSUER)
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(key);
+    }
+
+    // During overlap the provider publishes both keys, and tokens from either verify. This is
+    // what makes rotation deployable without signing everybody out mid-request.
+    const overlapping = new TokenVerifier({
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      keyResolver: createLocalJWKSet({ keys: [retiredJwk, currentJwk] }),
+    });
+
+    await expect(
+      overlapping.verify(await mintWith(retired.privateKey, 'key-1'), 'MACHINE'),
+    ).resolves.toMatchObject({ subject: 'user-1' });
+    await expect(
+      overlapping.verify(await mintWith(current.privateKey, 'key-2'), 'MACHINE'),
+    ).resolves.toMatchObject({ subject: 'user-1' });
+
+    // After the retired key is withdrawn, a token signed with it must fail — and fail on the
+    // signature, not merely because its `kid` is unknown.
+    const rotated = new TokenVerifier({
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      keyResolver: createLocalJWKSet({ keys: [currentJwk] }),
+    });
+
+    await expect(
+      rotated.verify(await mintWith(current.privateKey, 'key-2'), 'MACHINE'),
+    ).resolves.toMatchObject({ subject: 'user-1' });
+
+    let rejected: TokenRejection | 'ACCEPTED' = 'ACCEPTED';
+    try {
+      await rotated.verify(await mintWith(retired.privateKey, 'key-1'), 'MACHINE');
+    } catch (error) {
+      rejected = error instanceof TokenVerificationError ? error.rejection : 'ACCEPTED';
+    }
+    expect(rejected).toBe('BAD_SIGNATURE');
+  });
+
+  it('does not accept a token whose kid matches a live key but whose signature does not', async () => {
+    // The kid is a hint for key lookup, never evidence. Trusting it is how a forged token
+    // signed with an attacker's key gets verified against a legitimate public key's identity.
+    const forged = await new SignJWT({ realm_access: { roles: ['analyst'] } })
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
+      .setSubject('user-1')
+      .setIssuer(ISSUER)
+      .setAudience(AUDIENCE)
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(attackerKey);
+
+    expect(await rejection(forged)).toBe('BAD_SIGNATURE');
+  });
+});
+
+/**
+ * T08 — the CORS policy, asserted on the object the application actually installs.
+ *
+ * `credentials: true` with a reflected origin would let any site drive an authenticated
+ * session. That is the one CORS mistake that matters here, so it is checked directly rather
+ * than trusted to a comment in the bootstrap.
+ */
+describe('T08 — CORS policy', () => {
+  const base: NodeJS.ProcessEnv = {
+    NODE_ENV: 'test',
+    ADVERSE_SEARCH_MODE: 'mock',
+    MONGODB_URI: 'mongodb://127.0.0.1:28017/adverse_search',
+    OIDC_ISSUER: ISSUER,
+    OIDC_CLIENT_ID: 'adverse-search-panel',
+    OIDC_CLIENT_SECRET: 'test-only-secret-value',
+    OIDC_AUDIENCE: AUDIENCE,
+    SESSION_SECRET: 'test-only-session-secret-value',
+    SESSION_COOKIE_SECURE: 'false',
+  };
+
+  it('allows only the configured origins, as a list', () => {
+    const options = corsOptions(
+      loadConfig({ ...base, CORS_ORIGINS: 'http://localhost:5173,https://panel.example' }),
+    );
+
+    expect(options.origin).toEqual(['http://localhost:5173', 'https://panel.example']);
+    expect(options.credentials).toBe(true);
+  });
+
+  it('never reflects the request origin', () => {
+    const options = corsOptions(loadConfig({ ...base, CORS_ORIGINS: 'http://localhost:5173' }));
+
+    // `true` means "reflect whatever the caller sent", and a function could compute the same.
+    // Either would make `credentials: true` unsafe.
+    expect(options.origin).not.toBe(true);
+    expect(options.origin).not.toBe('*');
+    expect(typeof options.origin).not.toBe('function');
+  });
+
+  it('allows no browser origin at all when none is configured', () => {
+    // Not "any" — a missing configuration must fail closed, or a development convenience
+    // reaches production as a wildcard.
+    const options = corsOptions(loadConfig({ ...base, CORS_ORIGINS: '' }));
+    expect(options.origin).toBe(false);
+  });
+
+  it('exposes no header the API does not read', () => {
+    const options = corsOptions(loadConfig({ ...base, CORS_ORIGINS: 'http://localhost:5173' }));
+    expect(options.allowedHeaders).toEqual([
+      'Content-Type',
+      'Authorization',
+      'Idempotency-Key',
+      'X-CSRF-Token',
+    ]);
   });
 });

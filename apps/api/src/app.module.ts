@@ -19,6 +19,7 @@ import { NameFrequencyService } from './subjects/name-frequency.service.js';
 import { SubjectsController } from './subjects/subjects.controller.js';
 import { SubjectsService } from './subjects/subjects.service.js';
 import { StartupService } from './startup.service.js';
+import { ApiKeyService } from './tenancy/api-key.service.js';
 import { EntitlementsService } from './tenancy/entitlements.service.js';
 
 // Re-exported for convenience; defined in ./tokens.js to avoid a circular import.
@@ -80,6 +81,11 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [MONGO_DB, NameFrequencyService],
     },
     {
+      provide: ApiKeyService,
+      useFactory: (db: Db) => new ApiKeyService(db),
+      inject: [MONGO_DB],
+    },
+    {
       provide: EntitlementsService,
       useFactory: (db: Db) => new EntitlementsService(db),
       inject: [MONGO_DB],
@@ -100,13 +106,15 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       provide: StartupService,
       useFactory: (
         sessions: SessionService,
+        apiKeys: ApiKeyService,
         subjects: SubjectsService,
         nameFrequency: NameFrequencyService,
         idempotency: IdempotencyService,
         searches: SearchesService,
-      ) => new StartupService(sessions, subjects, nameFrequency, idempotency, searches),
+      ) => new StartupService(sessions, apiKeys, subjects, nameFrequency, idempotency, searches),
       inject: [
         SessionService,
+        ApiKeyService,
         SubjectsService,
         NameFrequencyService,
         IdempotencyService,

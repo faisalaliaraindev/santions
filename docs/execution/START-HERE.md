@@ -7,12 +7,14 @@ of previous sessions. It is deliberately short.
 
 ## 1. Active phase
 
-> **Phase B — Identity, tenancy and the API contract (gate G3)**
+> **Phase C — Persistence, jobs, index and object storage (gate G4)**
 >
-> Brief: [`phase-b.md`](./phase-b.md)
+> Brief: [`phase-c.md`](./phase-c.md) — an **outline**. Expanding it into a full brief is the
+> first task of this phase, and the outline says what that involves.
 >
-> Phase A is complete: the local stack starts, seeds and survives a restart. Steps B1-B9 are
-> done, including the generated OpenAPI document. What remains in B is T07, T08 and T68.
+> Phases A and B are complete. The stack starts, seeds and survives a restart; auth, tenancy,
+> entitlements, subjects and idempotent search creation are built and tested against it; the
+> OpenAPI document is generated and the panel generates its client from it.
 
 Update this pointer when a phase completes. It is the one line every session depends on.
 
@@ -58,7 +60,7 @@ pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm te
 Expected today: clean, clean, 206 passed, 29 passed, 12 passed.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration`
-adds 14 integration and 48 security tests.
+adds 14 integration and 86 security tests.
 
 **At the end — before the session is cleared**
 
@@ -95,16 +97,16 @@ product that states something untrue about a real person.
 
 | Phase | Gate   | Focus                                | Brief                        |
 | :---- | :----- | :----------------------------------- | :--------------------------- |
-| **A** | G1     | Make the local stack real            | [`phase-a.md`](./phase-a.md) |
+| A     | G1     | Make the local stack real            | [`phase-a.md`](./phase-a.md) |
 | B     | G3     | Identity, tenancy, API contract      | [`phase-b.md`](./phase-b.md) |
-| C     | G4     | Persistence, jobs, index, storage    | [`phase-c.md`](./phase-c.md) |
+| **C** | G4     | Persistence, jobs, index, storage    | [`phase-c.md`](./phase-c.md) |
 | D     | G5     | Sources, graph, taxonomy admin       | [`phase-d.md`](./phase-d.md) |
 | E     | G6     | Planning, cascade, fetch             | [`phase-e.md`](./phase-e.md) |
 | F     | G7     | Extraction and the full pipeline     | [`phase-f.md`](./phase-f.md) |
 | G     | G8     | Control panel                        | [`phase-g.md`](./phase-g.md) |
 | H     | G9–G11 | Integration, live sources, hardening | [`phase-h.md`](./phase-h.md) |
 
-Briefs for A and B are complete. C through H are outlines that must be expanded into full
+Briefs for A and B are complete, and both phases are done. C through H are outlines that must be expanded into full
 briefs **at the start of their phase** — deliberately, because their detail depends on what
 earlier phases reveal. Writing them out now would harden guesses into instructions. Each
 outline says what expanding it involves.
