@@ -202,7 +202,10 @@ describe('T09 — production startup guards', () => {
     SESSION_COOKIE_SECURE: 'true',
     CORS_ORIGINS: 'https://panel.example.com',
     JOBS_QUEUE_URL: 'https://sqs.eu-west-2.amazonaws.com/123456789012/adverse-search-jobs',
+    JOBS_DEAD_LETTER_QUEUE_URL:
+      'https://sqs.eu-west-2.amazonaws.com/123456789012/adverse-search-jobs-dlq',
     MEILI_HOST: 'https://search.internal.example.com',
+    S3_EVIDENCE_BUCKET: 'adverse-search-evidence-prod',
   };
 
   it('accepts a properly configured production environment', () => {
@@ -285,6 +288,37 @@ describe('T09 — production startup guards', () => {
     expect(() => loadConfig({ ...productionBase, SEARCH_INDEX_KIND: 'in-memory' })).toThrow(
       /in-memory is a development stand-in/u,
     );
+  });
+
+  it('rejects the in-process evidence store in production', () => {
+    // It would accept evidence, verify it against itself, and lose every byte at restart —
+    // while the committed references survive. That is a bucket full of dangling successes,
+    // which is the single thing FI-03 exists to prevent.
+    expect(() => loadConfig({ ...productionBase, OBJECT_STORE_KIND: 'in-memory' })).toThrow(
+      /in-memory is a development stand-in/u,
+    );
+  });
+
+  it('rejects a configured object store with no bucket to write to', () => {
+    const withoutBucket = { ...productionBase, S3_EVIDENCE_BUCKET: undefined };
+    expect(() => loadConfig(withoutBucket)).toThrow(/S3_EVIDENCE_BUCKET is not set/u);
+  });
+
+  it('rejects a production worker with nowhere to put a message it refused', () => {
+    // Without a DLQ, a forged tenant or an unreadable body is held in process memory and lost
+    // at restart. That is the one class of message whose loss destroys the evidence — of a
+    // producer bug, or of an attempted cross-tenant crossing (SEC-01).
+    const withoutDlq = { ...productionBase, JOBS_DEAD_LETTER_QUEUE_URL: undefined };
+    expect(() => loadConfig(withoutDlq)).toThrow(/JOBS_DEAD_LETTER_QUEUE_URL is not set/u);
+  });
+
+  it('rejects an execution bound shorter than one lease', () => {
+    // Every long job would be abandoned at its first heartbeat: the renewal refuses past the
+    // deadline, and the deadline would already have passed. The symptom is stages that fail
+    // for no visible reason, which is a long way from the configuration that caused it.
+    expect(() =>
+      loadConfig({ ...productionBase, JOB_LEASE_MS: '60000', JOB_MAX_EXECUTION_MS: '30000' }),
+    ).toThrow(/JOB_MAX_EXECUTION_MS must exceed JOB_LEASE_MS/u);
   });
 
   it('rejects a configured index with no host to reach it at', () => {

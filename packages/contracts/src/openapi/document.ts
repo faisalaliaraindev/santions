@@ -435,10 +435,81 @@ function buildPaths(): Record<string, SchemaObject> {
         ].join('\n'),
         parameters: [{ name: 'searchId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
-          '200': { description: 'The search.', content: json(ref('SearchSummary')) },
+          '200': {
+            description:
+              'The search. The `ETag` header carries the current revision; quote it in ' +
+              '`If-Match` on any action that changes the run.',
+            headers: {
+              ETag: {
+                description: 'The current revision, quoted. Send back as `If-Match`.',
+                schema: { type: 'string' },
+              },
+            },
+            content: json(ref('SearchSummary')),
+          },
           '401': errorRef(401),
           '403': errorRef(403),
           '404': errorRef(404),
+        },
+      },
+    },
+
+    '/v1/searches/{searchId}/cancel': {
+      post: {
+        operationId: 'cancelSearch',
+        tags: ['searches'],
+        summary: 'Cancel a search that is still running',
+        description: [
+          'Requires `If-Match` carrying the revision the caller last read. Without it the',
+          'request is rejected: a cancellation issued against a run whose state has since',
+          'changed is a decision made on information that is no longer true.',
+          '',
+          'A stale `If-Match` returns **409** with a `conflict` object carrying the current',
+          'revision and the current execution state, so the caller can see what changed and',
+          're-submit deliberately rather than retrying blindly.',
+          '',
+          'Cancellation is **final and does not rewrite history**. Stages that had already',
+          'succeeded stay succeeded, and a worker that completes after the cancellation has',
+          'its result discarded rather than applied — the run is not re-opened by work that',
+          'arrives late.',
+          '',
+          'Cancelling an already-terminal run returns **409 `ALREADY_TERMINAL`**, not a',
+          'silent success. "Nothing to do" and "done" are different answers.',
+        ].join('\n'),
+        parameters: [
+          { name: 'searchId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'If-Match',
+            in: 'header',
+            required: true,
+            description: 'The revision from the last read, as returned in `ETag`.',
+            schema: { type: 'string' },
+          },
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: {
+          required: true,
+          content: json(ref('CancelSearchRequest'), {
+            reason: 'Requested by the client; screening no longer required.',
+          }),
+        },
+        responses: {
+          '200': {
+            description: 'Cancelled. The run is terminal and its revision has advanced.',
+            content: json(ref('SearchSummary')),
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+          '409': {
+            description:
+              'Either the revision was stale (`REVISION_CONFLICT`, with a `conflict` object ' +
+              'naming the current revision and state) or the run is already terminal ' +
+              '(`ALREADY_TERMINAL`).',
+            content: json(ref('ApiError')),
+          },
+          '422': errorRef(422),
         },
       },
     },

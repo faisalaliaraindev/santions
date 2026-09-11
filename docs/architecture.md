@@ -310,3 +310,142 @@ Two rules follow from that and are easy to lose:
 Deletion propagates here too. SEC-05 requires restriction and erasure to reach indexes as well as
 evidence objects and exports: a restricted record that is still searchable is still disclosed,
 whatever the record says.
+
+### Evidence objects: stage, verify, commit — and never the inverse
+
+MongoDB holds the reference; S3 holds the bytes. They cannot be committed together — S3 cannot
+join a MongoDB transaction — so the **ordering** is what stands in for one, and a reconciler is
+what makes the ordering safe. The rule runs in both directions:
+
+| Direction        | Order                                    | Worst case if it crashes half-way             |
+| :--------------- | :--------------------------------------- | :-------------------------------------------- |
+| Writing (FI-03)  | stage object → verify → commit reference | an object nobody references — swept after 6 h |
+| Deleting (FI-15) | mark reference expired → delete object   | an object past its expiry — swept, retried    |
+
+Both leave the _object_ wrong and the _reference_ right, and never the reverse. That asymmetry is
+the entire point: an orphaned object costs a few kilobytes and is invisible to every user, while
+a reference to bytes that are not there is a screening product telling a reviewer that evidence
+exists when it does not. One of those failure modes gets investigated; the other gets believed.
+
+Three properties hold it up:
+
+1. **Verification is the store's arithmetic, not ours.** After the write the object is read back
+   and S3's own SHA-256 and byte count are compared against what we intended to store. Trusting
+   the checksum we computed would confirm that we can hash a buffer, which was never the risk —
+   the risk is a truncated or corrupted transfer, and only the far end can see that.
+2. **`verifiedAt` is set in one place and required in another.** `EvidenceStagingService` is the
+   only writer of it, and `SourceDocumentService.commit` refuses a reference without it. Two
+   locks on the same door, so a future caller assembling a reference by hand fails loudly rather
+   than committing a plausible-looking lie.
+3. **An action is not closed until the object is confirmed gone.** "I asked for a delete" is not
+   "the object is gone". The retention sweeper re-reads after deleting and leaves the action open
+   if anything is still there.
+
+#### Object keys, and what the sweep is allowed to delete
+
+Keys are built in exactly one function (`keyFor`) and have exactly one shape:
+
+```
+evidence/<region>/<tenantId>/<YYYY-MM-DD>/<uuid>
+```
+
+No caller input appears anywhere in it (SEC-03). A key derived from a publisher name or a source
+URL would leak the subject of a screening into object metadata, and a key carrying a
+caller-supplied path is a traversal waiting to be found. Tenant leads, as it leads every
+tenant-owned index key, which is what makes the orphan sweep a prefix listing rather than a
+full-bucket scan.
+
+The orphan sweep deletes **only objects whose keys match that shape**, and counts everything else
+as unattributable. This matters more than it looks: the sweep lists a tenant prefix, so every key
+it sees starts with that prefix by construction — a guard that only re-checked the prefix would
+be unreachable, which is a guard that does nothing. The question worth asking is narrower: _did
+this system create this object?_ Anything else under the prefix — uploaded by hand, left by an
+older layout, or named with a literal `..` (S3 treats it as text, not traversal) — is left alone.
+A scheduled job that deletes objects it did not create is a bucket-wide delete wearing a prefix
+filter, and it only has to be wrong once.
+
+The sweep also reads the committed key set **after** listing the bucket, never before. An object
+staged during the sweep appears in a later listing but its reference is already in the set, so it
+is protected. The inverse order has a window in which a just-committed object looks like an
+orphan — and deleting it would produce the exact failure FI-03 exists to prevent, caused by the
+reconciler for it.
+
+### A batched sweep over shared state needs a bounded drain
+
+This has now been paid for three times, in three different components, and it is written here so
+there is not a fourth:
+
+| Component                          | Sweep                               | Batch |
+| :--------------------------------- | :---------------------------------- | ----: |
+| `IndexerService.reconcile` (C3)    | unindexed documents, cross-tenant   |   100 |
+| `OutboxPublisher.publishOnce` (C2) | unpublished events, cross-tenant    |    50 |
+| `RetentionSweeper.sweepOnce` (C5)  | due retention actions, cross-tenant |   100 |
+
+Each is batched so one backlog cannot monopolise the process, and each is **cross-tenant by
+design** because the obligation it discharges is. Two consequences follow, and both have bitten:
+
+1. **"Everything is done" is only true after the sweep has run to completion.** A caller — a test,
+   or a gate check — that calls the sweep once and asserts on the result is asserting that its own
+   record happened to fall in the first batch. Drain in a bounded loop; bounded, so a broken
+   sweeper fails rather than hangs.
+2. **A global sweep run in a test will act on other tests' fixtures.** Integration files run in
+   parallel against one database, so a sweeper started by one file completes records another file
+   is still asserting on. `RetentionSweeper.sweepOnce` therefore accepts an optional `tenantId`.
+   The scheduled sweeper omits it — retention is an obligation across every tenant, and a
+   per-tenant schedule is a list of tenants to forget to add to — but a targeted run passes it,
+   which is also what an erasure request wants.
+
+### Consuming a message: one sequence, and why it is in that order
+
+Every queued message goes through `JobConsumer.handle` in one fixed order, and the order is not
+a style choice — each guard only holds if the ones before it ran.
+
+```
+parse → poison check → ownership (SEC-01) → receipt (FI-07) → stage identity (FI-07)
+      → lease (FI-11) → work → fenced write (FI-11/FI-12) → acknowledge
+```
+
+**Ownership precedes everything that touches data.** The envelope's `tenantId` is a routing
+hint. The tenant the code acts on comes from the persisted record, loaded by aggregate ID with
+no tenant filter — a loader scoped by the envelope's own claim would turn the check into a
+tautology, reporting a forged tenant as a harmless replay rather than as an attempted crossing.
+
+**Two layers of duplicate protection, not one.** The `InboxReceipt` is cheap and expires; stage
+identity — `(tenantId, runId, stageKey)`, unique — does not. The second layer is what §6.3 means
+by "persisted run/stage identity remains the final guard", and it is tested by deleting the
+receipt outright and redelivering.
+
+**Handling returns a disposition; it performs no transport call.** `ACKNOWLEDGE`, `RETRY_LATER`
+with a delay, or `DEAD_LETTER` with a reason. The runtime carries it out. This is what makes the
+cases that matter assertable without a queue: "a cancelled run's late completion is discarded"
+is a returned value, not an inference from which SQS calls were observed.
+
+**A refused fence is never retried.** If the lease moved or the revision changed, this worker's
+result is not wanted — something else is authoritative now. Retrying is precisely how a stale
+worker eventually wins. The message is acknowledged and the refusal is counted on the record as
+a discarded attempt, because "we threw away work" is a fact an operator may need and a reviewer
+must never see presented as a finding.
+
+**The backoff is served by the transport, not by sleeping.** `RETRY_LATER` sets the message's
+visibility timeout. A worker that slept for sixty seconds would be a worker doing nothing for
+sixty seconds, and a process that died mid-sleep would lose the retry. The delay belongs to the
+message, not to whoever was holding it. `Retry-After` is passed through exactly: a source that
+says "wait 30 seconds" has told us the answer.
+
+### Two dead-letter mechanisms, because they answer different questions
+
+SQS has a redrive policy (`maxReceiveCount: 5`) and the consumer also sends explicitly. Both are
+wanted:
+
+- **Redrive is a backstop** for a message the consumer keeps failing on for reasons nobody has
+  classified. It takes five deliveries to notice and records nothing about why.
+- **An explicit dead-letter is a decision.** A forged tenant, an unparsable body, an event type
+  nothing handles — each will fail identically on every future delivery. Waiting for the
+  backstop costs four more attempts at something already judged, and produces a DLQ entry with
+  no reason attached, so the operator who finds it starts from nothing.
+
+A dead-letter is never a delete. The original body is preserved byte for byte with a reason
+attached, because a message this service refused is evidence of a producer bug, a configuration
+error or an attack, and quiet disposal is the one outcome that must not happen to it. That is
+why `JOBS_DEAD_LETTER_QUEUE_URL` is a production startup guard: without it, exactly those
+messages would be held in process memory and lost at restart.

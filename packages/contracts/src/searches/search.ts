@@ -118,10 +118,35 @@ export const searchSummarySchema = z
         warnings: z.array(z.string()),
       })
       .strict(),
+
+    /**
+     * The revision a state-changing action must quote (FR-12, matrix row FI-13).
+     *
+     * Exposed rather than kept internal because an optimistic-concurrency scheme the client
+     * cannot see is one the client cannot participate in: without the current revision, a
+     * reviewer has nothing to put in `If-Match` and the only available behaviour is to
+     * overwrite whatever is there. It is also returned as the `ETag` of a single search.
+     */
+    revision: z.number().int().positive(),
   })
   .strict();
 
 export type SearchSummary = z.infer<typeof searchSummarySchema>;
+
+/**
+ * FR-12 — cancelling a run in flight.
+ *
+ * The reason is required and is not decoration: a cancelled run is a permanent part of the
+ * audit trail, and "why did this screening stop?" is a question a regulator asks about the
+ * run that was abandoned rather than the ones that finished.
+ */
+export const cancelSearchSchema = z
+  .object({
+    reason: z.string().min(1).max(500),
+  })
+  .strict();
+
+export type CancelSearchInput = z.infer<typeof cancelSearchSchema>;
 
 export const searchAcceptedSchema = z
   .object({

@@ -56,10 +56,21 @@ export interface JobEnvelope {
 }
 
 export interface ReceivedMessage {
-  readonly envelope: JobEnvelope;
+  /**
+   * `null` when the body is not a valid envelope.
+   *
+   * Surfaced rather than dropped in the adapter. What to do with a message this service cannot
+   * understand is a policy decision — dead-letter it with a reason, or leave it for the redrive
+   * policy — and a transport adapter that quietly skipped it would be making that decision
+   * invisibly, in the one case where an operator most needs to be told something arrived that
+   * nothing here can read.
+   */
+  readonly envelope: JobEnvelope | null;
+  /** The raw body as received. The dead letter carries this, not a re-serialisation. */
+  readonly body: string;
   /** Opaque transport handle used to acknowledge. Never persisted, never logged. */
   readonly receiptHandle: string;
-  /** How many times the transport has delivered this message. Feeds DLQ decisions in C6. */
+  /** How many times the transport has delivered this message. Feeds the poison-message rule. */
   readonly approximateReceiveCount: number;
 }
 
@@ -76,9 +87,27 @@ export interface QueuePort {
     readonly waitSeconds: number;
   }): Promise<readonly ReceivedMessage[]>;
   acknowledge(receiptHandle: string): Promise<void>;
-  /** Return a message to the queue immediately instead of waiting out its visibility timeout. */
-  release(receiptHandle: string): Promise<void>;
+  /**
+   * Return a message to the queue.
+   *
+   * `delaySeconds` is how the FR-06 backoff is actually served: the message becomes invisible
+   * for that long and the transport redelivers it when it is due. Doing it this way rather
+   * than sleeping in the worker matters — a worker holding a message for sixty seconds is a
+   * worker doing nothing for sixty seconds, and a process that dies mid-sleep loses the retry
+   * entirely. The delay lives with the message, not with whoever was holding it.
+   *
+   * Zero (the default) returns it immediately, so a worker that cannot proceed does not keep a
+   * message hostage for the rest of its visibility timeout.
+   */
+  release(receiptHandle: string, delaySeconds?: number): Promise<void>;
 }
+
+/**
+ * SQS caps a visibility timeout at twelve hours. Every backoff in the FR-06 table is far
+ * inside that; the clamp exists so a future policy change cannot turn into a transport error
+ * that looks like the queue is broken.
+ */
+export const MAX_VISIBILITY_SECONDS = 43_200;
 
 export const QUEUE_PORT = 'QUEUE_PORT';
 
@@ -154,6 +183,7 @@ export function parseEnvelope(body: string): JobEnvelope | null {
 export class InMemoryQueueAdapter implements QueuePort {
   private readonly messages = new Map<string, ReceivedMessage>();
   private readonly inFlight = new Map<string, ReceivedMessage>();
+  private readonly releaseDelays: { receiptHandle: string; delaySeconds: number }[] = [];
   /** Set by a test to make a publish fail, so the outbox's retry path can be exercised. */
   failNextPublish: string | null = null;
 
@@ -167,7 +197,12 @@ export class InMemoryQueueAdapter implements QueuePort {
         continue;
       }
       const handle = randomUUID();
-      this.messages.set(handle, { envelope, receiptHandle: handle, approximateReceiveCount: 0 });
+      this.messages.set(handle, {
+        envelope,
+        body: JSON.stringify(envelope),
+        receiptHandle: handle,
+        approximateReceiveCount: 0,
+      });
       published.push(envelope.eventId);
     }
 
@@ -196,17 +231,40 @@ export class InMemoryQueueAdapter implements QueuePort {
     await Promise.resolve();
   }
 
-  async release(receiptHandle: string): Promise<void> {
+  async release(receiptHandle: string, delaySeconds = 0): Promise<void> {
     const message = this.inFlight.get(receiptHandle);
     if (message !== undefined) {
       this.inFlight.delete(receiptHandle);
       this.messages.set(receiptHandle, message);
+      // Recorded rather than slept: a test asserting the FR-06 backoff needs the number that
+      // was asked for, and a test that actually waited sixty seconds would be deleted by the
+      // third person who ran the suite.
+      this.releaseDelays.push({ receiptHandle, delaySeconds });
     }
     await Promise.resolve();
   }
 
   /** Test helper: everything currently waiting to be received. */
   pending(): readonly JobEnvelope[] {
-    return [...this.messages.values()].map((m) => m.envelope);
+    return [...this.messages.values()]
+      .map((m) => m.envelope)
+      .filter((e): e is JobEnvelope => e !== null);
+  }
+
+  /** Test helper: put a raw body on the queue, including one that is not a valid envelope. */
+  injectRaw(body: string, approximateReceiveCount = 0): string {
+    const handle = randomUUID();
+    this.messages.set(handle, {
+      envelope: parseEnvelope(body),
+      body,
+      receiptHandle: handle,
+      approximateReceiveCount,
+    });
+    return handle;
+  }
+
+  /** Test helper: the delays this queue was asked for, in order. */
+  delays(): readonly { receiptHandle: string; delaySeconds: number }[] {
+    return [...this.releaseDelays];
   }
 }

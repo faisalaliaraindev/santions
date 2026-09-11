@@ -40,25 +40,55 @@ Revisit if contract drift between the repositories causes a released defect.
 
 ---
 
-## D-002 — Search index: deferred to G4, with the workload test that decides it
+## D-002 — Search index: Meilisearch, confirmed by the C4 workload measurement
 
-**Status:** Open · **Gate:** G4
+**Status:** Accepted · **Gate:** G4 · **Closed:** 2026-09-11 · **Closes D12**
 
-The plan requires a self-hosted search index (OpenSearch or Meilisearch) in the mandatory
-local stack, and requires the choice to be recorded here with workload evidence (G4).
+The plan requires a self-hosted search index (OpenSearch or Meilisearch) and requires the choice
+to be recorded here **with workload evidence**. Meilisearch was carried from G1 as a working
+assumption for its smaller local footprint, explicitly not as a decision.
 
-The choice is deliberately **not** made yet. Both are free and self-hostable, and the
-deciding factor is the FR-08 matcher-latency workload test, which cannot run before the
-matcher exists. Making the choice now would be a preference dressed as a decision.
+The switch condition this entry set for itself was specific: **OpenSearch if the matcher needs
+custom analysers or multi-field boolean scoring that Meilisearch cannot express.** That condition
+was tested in C4 and **was not met**.
 
-What the test must measure (G4): matcher latency against the index, separately from API
-acceptance latency and total search latency, over the FR-16 corpus with the name-form
-expansions of FR-08 (transliterations, phonetic keys, word-order permutations).
+Full report: [`docs/measurements/c4-search-index.md`](./measurements/c4-search-index.md). Rerun
+with `pnpm bench:search-index`. The figures, at 100,000 subjects, 1,050 samples per strategy:
 
-Working assumption for local compose, to be confirmed or overturned by that test:
-Meilisearch, for a materially smaller local footprint. OpenSearch is the likelier answer if
-the matcher needs custom analysers or multi-field boolean scoring that Meilisearch cannot
-express.
+| Strategy                                  | matcher p95 |    recall |
+| :---------------------------------------- | ----------: | --------: |
+| naive (raw name, one query)               |      4.33ms |     67.6% |
+| expanded (FR-08 forms, one at a time)     |     11.20ms |     95.2% |
+| **batched (FR-08 forms, one round trip)** |  **7.05ms** | **95.2%** |
+
+What decided it:
+
+1. **The matcher does need multi-field retrieval.** Retrieving on the raw name loses recall as
+   the population grows — 81.9% at a thousand subjects, 67.6% at a hundred thousand — because
+   the top _k_ fills with lookalikes. `PARTICLE` recall collapses from 100% to 6.3% over that
+   range, and `INITIAL_EXPANSION` sits at 6.3% at every size.
+2. **Meilisearch expresses it.** The FR-08 forms issued as one batch hold recall flat at 95.2%
+   for 6.35ms p95 retrieval, and that figure is flat from 1,000 to 100,000 subjects (5.65 →
+   6.35ms). No custom analyser was needed; the derived name forms the index already stores are
+   what supplies the behaviour.
+3. **The index is not the cost.** Composed total search latency at 100,000 subjects is ≈132ms,
+   of which the matcher is 5.23ms — **4%**. The rest is API acceptance, and three quarters of
+   _that_ is the request waiting on the index write (see D-014).
+
+**Cost of the decision:** measured over 100,000 subjects, not 10⁷; single-client latency with no
+concurrency test; the `documents` index untested because nothing extracts text yet (Phase F); and
+the non-Latin path unmeasured, because the only `TransliterationPort` implementation is
+`identityTransliteration` and a Cyrillic or Arabic query is therefore never expanded into the
+Latin forms the index holds. `TRANSLITERATION` recall is 0% for every strategy and **that figure
+says nothing about Meilisearch.** D12 is closed on the seven name forms that could be measured.
+
+**Re-open if:** a real transliteration provider lands and non-Latin recall is poor (the likeliest
+and most consequential); the `documents` index needs analysers or field boosting Meilisearch
+cannot express; or a population beyond ~10⁶ subjects or a concurrency test shows degradation the
+flat curve does not predict.
+
+The `SearchIndexPort` seam stays exactly as it is. It cost little, it made this decision
+measurable rather than theoretical, and the re-open triggers above are real.
 
 ---
 
@@ -292,3 +322,147 @@ documented privacy and content-rights approval. That approval is still outstandi
 
 Thirty days is short enough that this must work correctly early rather than being deferred: it
 becomes load-bearing within a month of the first real search.
+
+---
+
+## D-013 — The search index gets a batch query, because the measurement asked for one
+
+**Status:** Accepted · **Gate:** G4
+
+`SearchIndexPort.searchSubjectsBatch` issues several subject queries in one round trip, results
+returned **positionally**.
+
+Added as a consequence of C4 rather than in anticipation of it. The FR-08 matcher cannot use a
+single query — see D-002 — so its real access pattern is one query per name form, every time.
+Issued sequentially those cost a round trip each (11.20ms p95 matcher); batched they cost 7.05ms
+for identical results, so the sequential version spends 40% of matcher latency on round trips
+that buy nothing.
+
+Positional rather than merged: which form produced a hit is evidence the matcher uses to decide
+what the agreement is worth (FR-08). Merging here would discard it and force every caller that
+needs it to issue the queries separately again.
+
+**Cost:** a third search method on the port, which every adapter must implement. `InMemorySearchIndex`
+implements it as a loop — there is no round trip to save in process — but keeps the positional
+shape exactly, because a test that passes against a fake with a different shape proves nothing
+about the adapter it stands in for.
+
+---
+
+## D-014 — Search acceptance waits for the index write, and that is now a known 94ms
+
+**Status:** Open · **Gate:** G8 · **Raised by:** C4
+
+`POST /v1/searches` takes **127ms p50** against Meilisearch and **33ms p50** against the
+in-process index. The difference — roughly 94ms, about three quarters of acceptance latency — is
+the request waiting for the post-commit index write to become searchable.
+
+Nothing here is a defect. C3 established that a write is not `INDEXED` until the index confirms
+it is searchable (marking on enqueue would record a document as indexed while the matcher cannot
+see it — the FI-10 symptom). `SearchesService.create` honours that, after the commit and outside
+the transaction, and does not fail the request if the index is unreachable.
+
+But the request still _waits_ for something it is explicitly allowed to lose, and which the FI-10
+reconciler already covers. The options are a genuine trade, which is why C4 measured it and did
+not decide it:
+
+1. **Keep the wait.** Acceptance costs ~94ms, and a search that has been accepted is guaranteed
+   to have its pinned subject version searchable immediately.
+2. **Return on commit, leave `indexState: 'PENDING'`, let the reconciler confirm.** Acceptance
+   drops to ~33ms, and a search accepted at T may not be matchable until T+ε. Whether that is
+   acceptable depends on whether anything reads the index between acceptance and the run
+   completing — which Phase F's consumer decides.
+
+**Must close by G8**, with Phase F, because option 2 is only safe once the consumer's ordering is
+known. Recorded now so the 94ms has an owner rather than sitting in a measurement with none.
+
+---
+
+---
+
+## D-015 — The orphan sweep deletes only objects this system created
+
+**Status:** Accepted · **Gate:** G4
+
+The FI-03 orphan sweep lists a tenant's object prefix and deletes what no committed reference
+names. The question is what "what" means, and the answer is narrower than it first looks: **only
+keys matching the exact shape `keyFor` produces** — `evidence/<region>/<tenantId>/<date>/<uuid>`.
+Everything else under the prefix is counted as unattributable and left alone.
+
+The first implementation checked only that the key carried the tenant prefix. Writing the test
+for it showed why that is worthless: the sweep lists the tenant prefix, so _every_ key it sees
+carries that prefix by construction. The guard could never fire. Worse, it would have passed a
+test asserting it did fire, because the test's own "foreign" key was itself under the prefix —
+the guard and the test were wrong in the same direction, which is how a safety property becomes
+decorative.
+
+The useful question is not "is this key under the right prefix" but "**did this system create this
+object**". Only `keyFor` creates evidence objects, so only what `keyFor` can produce is eligible
+for deletion. An object uploaded by hand, one left by an older key layout, or one whose name
+contains a literal `..` (S3 treats key names as opaque text, so this is a real object and not
+traversal) is now skipped and counted.
+
+**Cost:** an object written by a future version of this service under a different key layout will
+not be swept, and will accumulate until someone notices. That is the right way round — the
+alternative failure is a scheduled job deleting objects it did not create, which is a bucket-wide
+delete wearing a prefix filter and only has to be wrong once. A key-layout change must therefore
+update `tenantOfKey` alongside `keyFor`; they are two halves of one decision and are adjacent in
+the file for that reason.
+
+There is also no way to supply the object id to `keyFor`. A test that could pin a key could pin
+one `tenantOfKey` does not recognise, and the sweep would then quietly decline to collect exactly
+the objects the test created — a hole in the reconciler opened for the convenience of a fixture.
+
+---
+
+## D-016 — The worker is a second entrypoint, not a second application
+
+**Status:** Accepted · **Gate:** G4
+
+The delivery plan named `apps/worker` as a package. It is instead a second entrypoint into
+`apps/api`: `worker-main.ts`, which builds the same DI graph with `createApplicationContext`
+and starts the polling loop, with no HTTP server.
+
+The worker needs the same configuration, the same Mongo client, the same section 6.3 records,
+the same transaction runner and the same ports as the API. A separate package would either
+import all of that across an app boundary — a dependency that makes the split cosmetic — or
+grow its own copy. The copy is the real cost: tenant scoping, lease fencing and the FR-06
+classification would have two homes, and a divergence between them would not fail a test. It
+would show up as a worker doing something the API's own tests prove cannot happen.
+
+What is actually wanted from "a separate worker" is operational, and all of it still holds:
+separate processes, separate scaling, separate failure domains, and a crash that cannot take
+the API down. One image with two entrypoints gives all four.
+
+**Cost:** the API image carries the worker's code and the worker carries the API's. That is
+bytes, not risk — the worker never calls `listen`, so no route is reachable from it, and the
+process-level separation is unchanged.
+
+**The worker refuses to start today,** because no handler is registered until Phase E. That is
+not a placeholder: a handler-less consumer receives every queued search and dead-letters it as
+unroutable, so a process that looked healthy would be draining the queue into the DLQ. Refusing
+to start and saying why is the honest behaviour, and it matches the rule that an unimplemented
+command exits non-zero rather than passing vacuously.
+
+---
+
+## D-017 — An internal defect is not an FR-06 failure class
+
+**Status:** Accepted · **Gate:** G4
+
+The FR-06 table classifies what a **source** did: it refused us, it rate-limited us, it served
+something unparsable. When a handler throws something that is not a described failure — a type
+error, a null dereference, a bug of ours — the consumer records it with a **null** failure class
+and a plain detail, retries it at most three times in case it was environmental, and then
+abandons the stage visibly.
+
+The tempting alternative is to map it onto `CONTENT_ERROR`, which is the non-retrying default
+for an unrecognised _source_ signal. That would be wrong in a way that reaches the customer:
+the coverage statement is assembled from failure classes, so our own defect would be reported
+as a fact about the source — a dead lead, with provenance, for a failure the source had no part
+in. The publisher would be recorded as having served us something broken when the truth is that
+we broke.
+
+**Cost:** one more state for a reader of `StageExecution` to understand — a failed stage whose
+`failureClass` is null. That is a small price for never attributing our bugs to someone else's
+website.

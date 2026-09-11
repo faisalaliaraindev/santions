@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { CreateSearchInput, SearchSummary } from '@erly/adverse-contracts';
+import type { CancelSearchInput, CreateSearchInput, SearchSummary } from '@erly/adverse-contracts';
 import type { Principal } from '@erly/adverse-domain';
 
 import { ApiException } from '../common/api-exception.js';
@@ -22,6 +22,7 @@ import {
 } from '../tenancy/entitlements.service.js';
 import { AuditService } from '../persistence/audit.service.js';
 import { OutboxService } from '../persistence/outbox.service.js';
+import { StageExecutionService } from '../persistence/stage-execution.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';
 import { IndexerService } from '../search-index/indexer.service.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
@@ -61,6 +62,7 @@ export class SearchesService {
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
     private readonly indexer: IndexerService,
+    private readonly stages: StageExecutionService,
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
   }
@@ -295,6 +297,178 @@ export class SearchesService {
     );
   }
 
+  /**
+   * FR-12 — cancel a run in flight, against the revision the caller last read.
+   *
+   * Three things happen in one transaction, and the order inside it does not matter because
+   * a transaction has no partial outcome — but the **fence** does, and it is the first
+   * statement for a reason: every later write in the body is conditional on this one having
+   * matched, so a stale caller never causes a stage cancellation, an audit entry or an event.
+   *
+   * What a cancellation is **not** allowed to do (matrix row FI-12, T30):
+   *
+   * - re-open or rewrite a stage that already succeeded. A stage that genuinely completed
+   *   before the cancellation arrived genuinely completed, and rewriting it would make the
+   *   historical run say something untrue about what was searched;
+   * - be undone by a worker that finishes afterwards. The revision bump here is what makes
+   *   that worker's fenced write fail. It is discarded and counted, never applied.
+   *
+   * Cancelling an already-terminal run is a **409**, not a quiet success. A caller that asked
+   * to stop something which had already finished needs to know it had already finished —
+   * "nothing to do" and "done" lead to different next actions.
+   */
+  async cancel(input: {
+    readonly principal: Principal;
+    readonly searchId: string;
+    readonly expectedRevision: number;
+    readonly data: CancelSearchInput;
+    readonly now: Date;
+  }): Promise<SearchSummary> {
+    const { principal, searchId, expectedRevision, now } = input;
+
+    const tenantId = principal.tenantId;
+    if (tenantId === null) {
+      throw new ApiException('FORBIDDEN', 'Access denied.', {
+        internalDetail: 'Cancellation attempted without an authenticated tenant context.',
+      });
+    }
+
+    return this.transactions.run(
+      async (session: ClientSession) => {
+        const cancelled = await this.searches.findOneAndUpdate(
+          {
+            tenantId,
+            searchId,
+            revision: expectedRevision,
+            execution: { $in: ['QUEUED', 'RUNNING'] },
+          },
+          {
+            $set: {
+              execution: 'CANCELLED' as const,
+              completedAt: now,
+            },
+            $inc: { revision: 1 },
+          },
+          { returnDocument: 'after', session },
+        );
+
+        if (cancelled === null) {
+          // The fence refused. Why it refused decides what the caller is told, and the three
+          // answers are genuinely different: gone, already finished, or acted on stale state.
+          await this.explainCancelRefusal({ tenantId, searchId, expectedRevision, session });
+        }
+
+        // `explainCancelRefusal` always throws; this is for the type checker, and a bug that
+        // made it return would be caught here rather than by a null dereference below.
+        /* c8 ignore next 3 */
+        if (cancelled === null) {
+          throw new ApiException('INTERNAL', 'Cancellation could not be explained.');
+        }
+
+        // Stages that are still live stop. Terminal ones are untouched — see the note above.
+        const stagesCancelled = await this.stages.cancelRun({
+          tenantId,
+          runId: searchId,
+          now,
+          session,
+        });
+
+        await this.audit.append(
+          {
+            tenantId,
+            actor: {
+              type: principal.kind === 'MACHINE' ? 'MACHINE' : 'USER',
+              subject: principal.subject,
+              clientId: null,
+            },
+            action: 'search.cancel',
+            target: { type: 'SearchRun', id: searchId, version: cancelled.revision },
+            // SEC-05 — the caller's stated reason, which is the whole point of recording this.
+            reason: input.data.reason,
+            correlationId: null,
+            result: 'ALLOWED',
+            now,
+          },
+          session,
+        );
+
+        await this.outbox.append(
+          {
+            tenantId,
+            eventType: 'search.cancelled',
+            aggregateType: 'SearchRun',
+            aggregateId: searchId,
+            aggregateRevision: cancelled.revision,
+            payload: { searchId, stagesCancelled },
+            now,
+          },
+          session,
+        );
+
+        return toWire(cancelled);
+      },
+      { name: 'search.cancel' },
+    );
+  }
+
+  /**
+   * Say precisely why a cancellation was refused. Always throws.
+   *
+   * Reads inside the same session as the failed update, so the explanation describes the state
+   * the fence actually saw rather than one that moved again in between — an explanation that
+   * names a revision which was never current is worse than none, because the caller quotes it
+   * back and fails again.
+   */
+  private async explainCancelRefusal(input: {
+    readonly tenantId: string;
+    readonly searchId: string;
+    readonly expectedRevision: number;
+    readonly session: ClientSession;
+  }): Promise<never> {
+    const current = await this.searches.findOne(
+      { tenantId: input.tenantId, searchId: input.searchId },
+      { session: input.session },
+    );
+
+    if (current === null) {
+      throw ApiException.notFound(
+        'Search',
+        `tenant=${input.tenantId} search=${input.searchId} (cancel)`,
+      );
+    }
+
+    if (current.revision !== input.expectedRevision) {
+      throw ApiException.revisionConflict({
+        expectedRevision: input.expectedRevision,
+        currentRevision: current.revision,
+        currentState: current.execution,
+        internalDetail: `search=${input.searchId} cancel on stale revision`,
+      });
+    }
+
+    // The revision matched, so the only remaining reason is that the run is already terminal.
+    throw new ApiException(
+      'ALREADY_TERMINAL',
+      `This search is already ${current.execution.toLowerCase()} and cannot be cancelled.`,
+      { internalDetail: `search=${input.searchId} execution=${current.execution}` },
+    );
+  }
+
+  /**
+   * The SEC-01 ownership loader for the queue consumer.
+   *
+   * Takes the search ID **only**. Adding a tenant filter here would be the bug the ownership
+   * check exists to catch: a forged tenant would simply find nothing and be reported as a
+   * harmless replay, instead of as the attempted crossing it is. See `jobs/job-ownership.ts`.
+   */
+  async loadOwnership(searchId: string): Promise<{ tenantId: string; revision: number } | null> {
+    const record = await this.searches.findOne(
+      { searchId },
+      { projection: { tenantId: 1, revision: 1, _id: 0 } },
+    );
+    return record === null ? null : { tenantId: record.tenantId, revision: record.revision };
+  }
+
   /** Tenant scoping is in the query, never a check afterwards (SEC-01). */
   async findById(tenantId: string, searchId: string): Promise<SearchSummary> {
     const record = await this.searches.findOne({ tenantId, searchId });
@@ -373,5 +547,6 @@ function toWire(record: SearchRecord): SearchSummary {
     completedAt: record.completedAt?.toISOString() ?? null,
     refreshOfSearchId: record.refreshOfSearchId,
     progress: record.progress,
+    revision: record.revision,
   };
 }

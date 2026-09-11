@@ -45,6 +45,43 @@ const rawSchema = z.object({
   OUTBOX_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
 
   /**
+   * The dead-letter queue the consumer sends to when it has *decided* a message must not be
+   * processed — a forged tenant, an unreadable body, an event nothing here handles. The SQS
+   * redrive policy remains the backstop for everything it could not classify; this is for the
+   * cases it can, where waiting five deliveries to discover what we already know is four
+   * deliveries of wasted capacity and a DLQ entry with no reason attached.
+   */
+  JOBS_DEAD_LETTER_QUEUE_URL: z.string().url().optional(),
+
+  /**
+   * How long a worker's claim on a stage lasts before another worker may take it (REL-01).
+   *
+   * Short enough that a crashed worker's stage is picked up promptly; long enough that a slow
+   * fetch does not lose its lease mid-request. Long jobs renew rather than taking a long lease,
+   * because a long lease is also how long a crash goes unnoticed.
+   */
+  JOB_LEASE_MS: z.coerce.number().int().min(5_000).max(900_000).default(60_000),
+
+  /**
+   * The bound on one stage's total execution, renewals included. A renewal loop with no
+   * deadline is an unbounded job wearing a lease.
+   */
+  JOB_MAX_EXECUTION_MS: z.coerce.number().int().min(30_000).max(3_600_000).default(900_000),
+
+  /**
+   * Deliveries after which the consumer dead-letters a message outright. Must match the
+   * redrive policy's `maxReceiveCount` in `scripts/bootstrap/aws.mjs`.
+   */
+  JOB_MAX_DELIVERIES: z.coerce.number().int().min(2).max(20).default(5),
+
+  /**
+   * The evidence bucket. Optional here and required in production by the guard below, so a
+   * developer with no LocalStack gets the in-process store rather than a startup crash.
+   */
+  S3_EVIDENCE_BUCKET: z.string().min(1).optional(),
+  OBJECT_STORE_KIND: z.enum(['s3', 'in-memory']).default('s3'),
+
+  /**
    * The search index behind the D12 seam. `meilisearch` is a working assumption carried since
    * Phase A, not a decision — C4's measurement closes D12.
    */
@@ -73,6 +110,18 @@ export type AppConfig = Readonly<{
      */
     staticCredentials: { accessKeyId: string; secretAccessKey: string } | null;
     pollMs: number;
+    deadLetterQueueUrl: string | null;
+    leaseMs: number;
+    maxExecutionMs: number;
+    maxDeliveries: number;
+  };
+  storage: {
+    kind: 's3' | 'in-memory';
+    bucket: string | null;
+    region: string;
+    endpoint: string | null;
+    /** As `jobs.staticCredentials`, and null in production for the same reason. */
+    staticCredentials: { accessKeyId: string; secretAccessKey: string } | null;
   };
   searchIndex: {
     kind: 'meilisearch' | 'opensearch' | 'in-memory';
@@ -199,10 +248,42 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       problems.push('SEARCH_INDEX_KIND=meilisearch but MEILI_HOST is not set.');
     }
 
+    // An in-process object store in production would accept evidence, verify it against
+    // itself, and lose every byte at restart — while the committed references survive. That is
+    // a bucket full of dangling successes, which is the one thing FI-03 exists to prevent.
+    if (raw.OBJECT_STORE_KIND === 'in-memory') {
+      problems.push(
+        'OBJECT_STORE_KIND=in-memory is a development stand-in. In production it would hold ' +
+          'evidence in process memory and lose it at restart, leaving committed references ' +
+          'pointing at nothing (FI-03).',
+      );
+    }
+
+    if (raw.OBJECT_STORE_KIND === 's3' && raw.S3_EVIDENCE_BUCKET === undefined) {
+      problems.push('OBJECT_STORE_KIND=s3 but S3_EVIDENCE_BUCKET is not set.');
+    }
+
     if (raw.JOBS_QUEUE_URL === undefined) {
       problems.push(
         'JOBS_QUEUE_URL is not set. Without it the service would accept searches and publish ' +
           'their jobs into an in-process queue that vanishes at restart.',
+      );
+    }
+
+    if (raw.JOBS_DEAD_LETTER_QUEUE_URL === undefined) {
+      problems.push(
+        'JOBS_DEAD_LETTER_QUEUE_URL is not set. Without it, a message this service decides ' +
+          'must never be processed — a forged tenant, an unreadable body — would be held in ' +
+          'process memory and lost at restart, destroying the evidence of a producer bug or ' +
+          'an attempted cross-tenant crossing.',
+      );
+    }
+
+    if (raw.JOB_MAX_EXECUTION_MS <= raw.JOB_LEASE_MS) {
+      problems.push(
+        'JOB_MAX_EXECUTION_MS must exceed JOB_LEASE_MS. A stage whose execution bound is ' +
+          'shorter than one lease can never renew, so every long job is abandoned at its ' +
+          'first heartbeat rather than completing.',
       );
     }
 
@@ -247,6 +328,23 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
             }
           : null,
       pollMs: raw.OUTBOX_POLL_MS,
+      deadLetterQueueUrl: raw.JOBS_DEAD_LETTER_QUEUE_URL ?? null,
+      leaseMs: raw.JOB_LEASE_MS,
+      maxExecutionMs: raw.JOB_MAX_EXECUTION_MS,
+      maxDeliveries: raw.JOB_MAX_DELIVERIES,
+    },
+    storage: {
+      kind: raw.OBJECT_STORE_KIND,
+      bucket: raw.S3_EVIDENCE_BUCKET ?? null,
+      region: raw.AWS_REGION,
+      endpoint: raw.AWS_ENDPOINT_URL ?? null,
+      staticCredentials:
+        raw.AWS_ACCESS_KEY_ID !== undefined && raw.AWS_SECRET_ACCESS_KEY !== undefined
+          ? {
+              accessKeyId: raw.AWS_ACCESS_KEY_ID,
+              secretAccessKey: raw.AWS_SECRET_ACCESS_KEY,
+            }
+          : null,
     },
     searchIndex: {
       kind: raw.SEARCH_INDEX_KIND,

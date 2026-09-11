@@ -314,7 +314,13 @@
         ],
         "responses": {
           "200": {
-            "description": "The search.",
+            "description": "The search. The `ETag` header carries the current revision; quote it in `If-Match` on any action that changes the run.",
+            "headers": {
+              "ETag": {
+                "description": "The current revision, quoted. Send back as `If-Match`.",
+                "schema": { "type": "string" }
+              }
+            },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/SearchSummary" } }
             }
@@ -322,6 +328,53 @@
           "401": { "$ref": "#/components/responses/Error401" },
           "403": { "$ref": "#/components/responses/Error403" },
           "404": { "$ref": "#/components/responses/Error404" }
+        }
+      }
+    },
+    "/v1/searches/{searchId}/cancel": {
+      "post": {
+        "operationId": "cancelSearch",
+        "tags": ["searches"],
+        "summary": "Cancel a search that is still running",
+        "description": "Requires `If-Match` carrying the revision the caller last read. Without it the\nrequest is rejected: a cancellation issued against a run whose state has since\nchanged is a decision made on information that is no longer true.\n\nA stale `If-Match` returns **409** with a `conflict` object carrying the current\nrevision and the current execution state, so the caller can see what changed and\nre-submit deliberately rather than retrying blindly.\n\nCancellation is **final and does not rewrite history**. Stages that had already\nsucceeded stay succeeded, and a worker that completes after the cancellation has\nits result discarded rather than applied — the run is not re-opened by work that\narrives late.\n\nCancelling an already-terminal run returns **409 `ALREADY_TERMINAL`**, not a\nsilent success. \"Nothing to do\" and \"done\" are different answers.",
+        "parameters": [
+          { "name": "searchId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "The revision from the last read, as returned in `ETag`.",
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/CsrfToken" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CancelSearchRequest" },
+              "example": { "reason": "Requested by the client; screening no longer required." }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled. The run is terminal and its revision has advanced.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/SearchSummary" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" },
+          "409": {
+            "description": "Either the revision was stale (`REVISION_CONFLICT`, with a `conflict` object naming the current revision and state) or the run is already terminal (`ALREADY_TERMINAL`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } }
+            }
+          },
+          "422": { "$ref": "#/components/responses/Error422" }
         }
       }
     },
@@ -470,6 +523,16 @@
               "required": ["path", "message"],
               "additionalProperties": false
             }
+          },
+          "conflict": {
+            "type": "object",
+            "properties": {
+              "expectedRevision": { "type": "integer", "minimum": 0 },
+              "currentRevision": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+              "currentState": { "type": "string" }
+            },
+            "required": ["expectedRevision", "currentRevision", "currentState"],
+            "additionalProperties": false
           }
         },
         "required": ["code", "message", "correlationId", "retryable"],
@@ -698,6 +761,12 @@
         "required": ["requestedScope"],
         "additionalProperties": false
       },
+      "CancelSearchRequest": {
+        "type": "object",
+        "properties": { "reason": { "type": "string", "minLength": 1, "maxLength": 500 } },
+        "required": ["reason"],
+        "additionalProperties": false
+      },
       "SearchAccepted": {
         "type": "object",
         "properties": {
@@ -753,7 +822,8 @@
             },
             "required": ["stagesCompleted", "stagesTotal", "cascadeRungReached", "warnings"],
             "additionalProperties": false
-          }
+          },
+          "revision": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 }
         },
         "required": [
           "searchId",
@@ -768,7 +838,8 @@
           "createdAt",
           "completedAt",
           "refreshOfSearchId",
-          "progress"
+          "progress",
+          "revision"
         ],
         "additionalProperties": false
       },

@@ -23,6 +23,7 @@ import {
 } from '../../apps/api/src/persistence/audit.service.js';
 import { OutboxService } from '../../apps/api/src/persistence/outbox.service.js';
 import { SourceDocumentService } from '../../apps/api/src/persistence/source-document.service.js';
+import { StageExecutionService } from '../../apps/api/src/persistence/stage-execution.service.js';
 import { IndexerService } from '../../apps/api/src/search-index/indexer.service.js';
 import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-index.port.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
@@ -82,6 +83,7 @@ beforeAll(async () => {
     audit,
     outbox,
     indexer,
+    new StageExecutionService(db),
   );
 
   await Promise.all([outbox.ensureIndexes(), audit.ensureIndexes(), searches.ensureIndexes()]);
@@ -254,6 +256,42 @@ describe('TransactionRunner — commit, conflict, and what must not be retried',
 });
 
 describe('the outbox end to end', () => {
+  /**
+   * Sweep until the event under test has actually been reached.
+   *
+   * `publishOnce` sweeps the outbox **globally**, in batches of `BATCH_SIZE` (50), and the
+   * local database is shared with every other integration file vitest is running in parallel.
+   * So a single pass may simply not have got to this test's event yet — which is not "the
+   * publisher failed to publish it", and asserting on one pass makes these tests fail
+   * intermittently for a reason that has nothing to do with the outbox.
+   *
+   * This is the same trap as the C3 reconciler, in a second place: **a batched sweep over
+   * shared state needs a bounded drain, never a single call.** Bounded, because an unbounded
+   * loop turns "the publisher is broken" into a hang instead of a failure.
+   */
+  async function drainUntil(
+    publisher: OutboxPublisher,
+    now: Date,
+    reached: () => Promise<boolean>,
+    random?: () => number,
+  ): Promise<void> {
+    for (let pass = 0; pass < 25; pass += 1) {
+      if (await reached()) {
+        return;
+      }
+      const outcome =
+        random === undefined
+          ? await publisher.publishOnce(now)
+          : await publisher.publishOnce(now, random);
+      if (outcome.published === 0 && outcome.failed === 0) {
+        break;
+      }
+    }
+    if (!(await reached())) {
+      throw new Error('The publisher never reached the event under test.');
+    }
+  }
+
   it('publishes a committed event and stops republishing it (FI-04)', async () => {
     const tenantId = tenant();
     const aggregateId = randomUUID();
@@ -284,19 +322,20 @@ describe('the outbox end to end', () => {
       { publishedAt: null },
     ]);
 
-    const first = await publisher.publishOnce(now);
-    expect(first.published).toBeGreaterThanOrEqual(1);
-    expect(queue.pending().some((e) => e.aggregateId === aggregateId)).toBe(true);
+    await drainUntil(publisher, now, () =>
+      Promise.resolve(queue.pending().some((e) => e.aggregateId === aggregateId)),
+    );
 
     const published = await outbox.findByAggregate(tenantId, 'SearchRun', aggregateId);
     expect(published[0]?.publishedAt).not.toBeNull();
 
     // A second poll must not send it again. At-least-once is the delivery guarantee, not a
     // licence to republish forever.
-    const republished = await publisher.publishOnce(new Date(now.getTime() + 1000));
-    const envelopeIds = queue.pending().filter((e) => e.aggregateId === aggregateId);
-    expect(envelopeIds).toHaveLength(1);
-    expect(republished.published).toBe(0);
+    //
+    // Asserted on *this* event's envelopes rather than on the sweep's total, which counts
+    // whatever other tests committed while this one ran.
+    await publisher.publishOnce(new Date(now.getTime() + 1000));
+    expect(queue.pending().filter((e) => e.aggregateId === aggregateId)).toHaveLength(1);
   });
 
   it('leaves a failed publication in the outbox and backs it off', async () => {
@@ -325,8 +364,15 @@ describe('the outbox end to end', () => {
     );
 
     queue.failNextPublish = 'queue unreachable';
-    const failed = await publisher.publishOnce(now, () => 0.5);
-    expect(failed.failed).toBeGreaterThanOrEqual(1);
+    await drainUntil(
+      publisher,
+      now,
+      async () => {
+        const [event] = await outbox.findByAggregate(tenantId, 'SearchRun', aggregateId);
+        return (event?.attempt ?? 0) >= 1;
+      },
+      () => 0.5,
+    );
 
     // Still there, still unpublished. This is the difference between a durable outbox and a
     // best-effort send: nothing was lost, and the event is tried again later.
@@ -337,7 +383,10 @@ describe('the outbox end to end', () => {
 
     queue.failNextPublish = null;
     const later = new Date(now.getTime() + 10 * 60 * 1000);
-    await publisher.publishOnce(later);
+    await drainUntil(publisher, later, async () => {
+      const [event] = await outbox.findByAggregate(tenantId, 'SearchRun', aggregateId);
+      return event?.publishedAt != null;
+    });
     const recovered = await outbox.findByAggregate(tenantId, 'SearchRun', aggregateId);
     expect(recovered[0]?.publishedAt).not.toBeNull();
   });
@@ -387,7 +436,9 @@ describe('the outbox end to end', () => {
     );
 
     // The publisher restarts and finds it still unpublished, so it sends it again.
-    await publisher.publishOnce(now);
+    await drainUntil(publisher, now, () =>
+      Promise.resolve(queue.pending().filter((e) => e.eventId === eventId).length >= 2),
+    );
 
     const delivered = queue.pending().filter((e) => e.eventId === eventId);
     expect(delivered).toHaveLength(2);

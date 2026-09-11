@@ -381,7 +381,7 @@ reconciler ran and the assertion is on the reconciled state — not that the cra
 | T24     | FI-05, FI-07, FI-08, FI-09 | Redelivery or crash before acknowledgement commits no duplicate     |
 | T29     | FI-13                      | One accepted, the stale one 409s **with a recovery path**           |
 | T30     | FI-11, FI-12               | Fencing holds; the historical run is unchanged                      |
-| T31     | FI-16                      | Repeated and out-of-order deliveries deduplicate and apply safely   |
+| T31     | FI-07                      | Repeated and out-of-order deliveries deduplicate and apply safely   |
 | T41     | FI-03, FI-04               | Orphan reconciled, outbox republishes, no dangling success          |
 | G4 exit | FI-10                      | No unindexed committed documents                                    |
 | SEC-06  | FI-14                      | Sequence/checkpoint gaps are detected, not assumed absent           |
@@ -402,3 +402,30 @@ Named so that their absence is a decision and not an oversight:
 - **Cross-region and multi-node topology.** Every row here is verified against a single-node
   replica set. That is enough to prove the transaction semantics and not enough to prove they hold
   on a real cluster; G11 re-verifies against production topology.
+
+---
+
+## Where each row is tested, as of C6
+
+The map above says which rows a numbered test claims. This says where the code actually is, so
+a later session does not have to find it.
+
+| Rows                        | File                                                            |
+| :-------------------------- | :-------------------------------------------------------------- |
+| FI-01, FI-02, FI-04, FI-05  | `tests/integration/transactions.test.ts`                        |
+| FI-03, FI-15                | `tests/integration/evidence-storage.test.ts`                    |
+| FI-06 – FI-09, FI-11, FI-12 | `tests/integration/jobs.test.ts`                                |
+| FI-10                       | `tests/integration/search-index.test.ts`                        |
+| FI-13                       | `tests/integration/jobs.test.ts` (T29, at the service boundary) |
+
+Two notes on what that table does **not** claim.
+
+**FI-13 is tested on cancellation, not on a review action.** Review actions do not exist yet —
+findings are Phase F. The property FI-13 is about is the revision fence and the recovery path in
+the 409, and cancellation is the first action that has both, so it is tested there. When review
+actions arrive they must use the same `ApiException.revisionConflict` rather than growing their
+own 409, and the test moves with them.
+
+**FI-14 and FI-16 have no row here.** FI-14's checkpoint writer needs credentials this process
+must not hold (SEC-06), so the local stack can only stand in for it; FI-16 is notification
+delivery, which Phase H builds. Both are listed as uncovered rather than quietly omitted.

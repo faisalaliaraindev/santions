@@ -258,20 +258,20 @@ policies and different attempt counts, and three of the five must not be retried
 - [x] C1 — records, indexes and the migration decision; tenant context leads every tenant-owned key, with the five cross-tenant index exceptions documented in `docs/architecture.md`
 - [x] C2 — state, audit reference and outbox commit in one transaction, with conflict, unknown-outcome and duplicate-key handling
 - [x] C3 — index built behind the seam; reconciliation re-indexes a committed-but-unindexed document
-- [ ] C4 — three latencies measured over the FR-16 corpus; **D12 closed in `docs/decisions.md` with numbers**
-- [ ] C5 — staged upload, checksum verification, reference commit, orphan reconciliation
-- [ ] C6 — FR-06 classification honoured; DLQ, lease fencing, cancellation, duplicate delivery
-- [ ] T22, T23 — still pass (they do today; C2 must not regress them)
-- [ ] T24 — redelivery or crash before acknowledgement commits no duplicate stage, finding or event
-- [ ] T29 — simultaneous actions on one revision: one accepted, the stale one gets 409 **and a recovery path**
-- [ ] T30 — cancel or refresh racing a late completion: fencing holds; the historical run is unchanged
-- [ ] T31 — repeated and out-of-order deliveries are deduplicated and applied safely
-- [ ] T41 — upload commits but DB fails, then DB commits but the publisher crashes: orphan reconciled, outbox republishes, **no dangling success**
-- [ ] Restart verified at **every** persistence and publication boundary in the C0 matrix
-- [ ] `verify-local.mjs` still reports honestly; no suite marked implemented that does not run
-- [ ] `docs/implementation-status.md` moves G4 to Complete with the commands as evidence
-- [ ] `START-HERE.md` active-phase pointer moved to Phase D
-- [ ] Handoff entry written
+- [x] C4 — three latencies measured over the FR-16 corpus; **D12 closed in `docs/decisions.md` with numbers** (Meilisearch; see `docs/measurements/c4-search-index.md`)
+- [x] C5 — staged upload, checksum verification, reference commit, orphan reconciliation; FI-15 retention deletion with the hold checked at the delete
+- [x] C6 — FR-06 classification honoured; DLQ, lease fencing, cancellation, duplicate delivery
+- [x] T22, T23 — still pass (120 integration tests green, including both)
+- [x] T24 — redelivery commits no duplicate stage; verified again with the receipt deleted outright
+- [x] T29 — two cancellations on one revision: one accepted, the other 409 carrying `conflict` with the current revision and state
+- [x] T30 — cancellation racing a late completion: the fence refuses, the result is discarded and counted, succeeded stages are untouched
+- [x] T31 — three deliveries of one message do the work once; an older revision is discarded
+- [x] T41 — commit failure leaves an orphan and no reference, swept; a crashed publisher republishes and starts no second run
+- [x] Restart verified at every boundary in the C0 matrix that C1–C6 implement (FI-01..FI-12, FI-15). FI-13's review-action form and FI-14's production checkpoint writer, FI-16 — Phases D, G and H
+- [x] `verify:local` reports every suite green except end-to-end, which is still `[n/i]` and still exits non-zero
+- [x] `docs/implementation-status.md` moves G4 to Complete with the commands as evidence
+- [x] `START-HERE.md` active-phase pointer moved to Phase D
+- [x] Handoff entry written
 
 ## Do not
 

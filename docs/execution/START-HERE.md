@@ -7,20 +7,29 @@ of previous sessions. It is deliberately short.
 
 ## 1. Active phase
 
-> **Phase C — Persistence, jobs, index and object storage (gate G4)**
+> **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-c.md`](./phase-c.md). **C0–C3 are done. Start at C4**, the matcher-latency
-> workload test — it is what closes open decision **D12**, with numbers in `docs/decisions.md`
-> rather than a preference. Then C5 (S3 staging) and C6 (retries, DLQ, fencing, cancellation).
+> Brief: [`phase-d.md`](./phase-d.md). It is an **outline, not a brief** — expanding it is the
+> first task of the phase, and the outline itself says what expanding it involves. Three open
+> decisions close here: **D1** (jurisdictions), **D3** (categories) and **D8** (retention);
+> see [`../open-decisions.md`](../open-decisions.md). None of them can be closed by
+> engineering alone, and each currently carries a placeholder value with an `assumption` field
+> on the record so it cannot quietly become the decision.
 >
-> `docs/failure-injection-matrix.md` (C0) is the specification for the C5 and C6 tests. Read it
-> before writing either.
+> **Phase C is complete — gate G4 passed.** The whole path from an accepted search to a
+> survivable unit of work exists: the section 6.3 records, the transaction runner with the
+> outbox, the search index behind the (now closed) D12 seam, evidence staging with its orphan
+> sweep and retention deletion, and — at C6 — the consumer that turns a queued message into
+> fenced, deduplicated, retryable work.
+>
+> **What C6 left deliberately unbuilt:** there is no job handler. The worker
+> (`pnpm dev:worker`) **refuses to start** because a handler-less consumer would dead-letter
+> every queued search as unroutable. Registering the first handler is Phase E's work, and the
+> fetch pipeline behind it is what it handles. See `docs/decisions.md` D-016.
 >
 > Phases A and B are complete. The stack starts, seeds and survives a restart; auth, tenancy,
 > entitlements, subjects and idempotent search creation are built and tested against it; the
-> OpenAPI document is generated and the panel generates its client from it. C1–C3 added the
-> section 6.3 records, the transaction runner with the outbox, and the search index behind the
-> D12 seam.
+> OpenAPI document is generated and the panel generates its client from it.
 
 Update this pointer when a phase completes. It is the one line every session depends on.
 
@@ -63,12 +72,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **241 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **283 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**78 integration** tests and `pnpm test:security` **91 security** tests.
+**120 integration** tests and `pnpm test:security` **95 security** tests.
 
-Coverage is gated at 85/80 and currently reports 93.74% / 91.33% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 94.07% / 89.46% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by
@@ -111,14 +120,14 @@ product that states something untrue about a real person.
 | :---- | :----- | :----------------------------------- | :--------------------------- |
 | A     | G1     | Make the local stack real            | [`phase-a.md`](./phase-a.md) |
 | B     | G3     | Identity, tenancy, API contract      | [`phase-b.md`](./phase-b.md) |
-| **C** | G4     | Persistence, jobs, index, storage    | [`phase-c.md`](./phase-c.md) |
-| D     | G5     | Sources, graph, taxonomy admin       | [`phase-d.md`](./phase-d.md) |
+| C     | G4     | Persistence, jobs, index, storage    | [`phase-c.md`](./phase-c.md) |
+| **D** | G5     | Sources, graph, taxonomy admin       | [`phase-d.md`](./phase-d.md) |
 | E     | G6     | Planning, cascade, fetch             | [`phase-e.md`](./phase-e.md) |
 | F     | G7     | Extraction and the full pipeline     | [`phase-f.md`](./phase-f.md) |
 | G     | G8     | Control panel                        | [`phase-g.md`](./phase-g.md) |
 | H     | G9–G11 | Integration, live sources, hardening | [`phase-h.md`](./phase-h.md) |
 
-Briefs for A, B and C are complete; A and B are done. D through H are outlines that must be expanded into full
+Briefs for A, B and C are complete, and all three phases are done. D through H are outlines that must be expanded into full
 briefs **at the start of their phase** — deliberately, because their detail depends on what
 earlier phases reveal. Writing them out now would harden guesses into instructions. Each
 outline says what expanding it involves.
@@ -136,20 +145,22 @@ packages/evaluation/   PURE. Labelled dataset, FR-16 metrics, I1-I10 harness
 packages/contracts/    Versioned schemas; the OpenAPI document is generated from here
 apps/api/              NestJS. auth/ tenancy/ subjects/ searches/ persistence/ jobs/
                        search-index/ — see below
-apps/worker/           still empty. The consumer loop is C6
+                       worker-main.ts is the worker entrypoint — same image, same DI graph,
+                       no HTTP server (D-016). There is no separate apps/worker package
 infra/local/           Docker Compose stack, host ports in the 280xx range
 scripts/               local-up, local-bootstrap, local-reset, verify-local
 docs/                  architecture, decisions, open-decisions, traceability, status,
                        failure-injection-matrix
 ```
 
-Inside `apps/api/src`, the three directories Phase C added:
+Inside `apps/api/src`, the four directories Phase C added:
 
-| Directory       | What is in it                                                                        |
-| :-------------- | :----------------------------------------------------------------------------------- |
-| `persistence/`  | The section 6.3 records, and `TransactionRunner` — the one place a transaction opens |
-| `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01)          |
-| `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler |
+| Directory       | What is in it                                                                                                                                                     |
+| :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistence/`  | The section 6.3 records, and `TransactionRunner` — the one place a transaction opens                                                                              |
+| `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01), and C6's `JobConsumer`, `WorkerRuntime`, `DeadLetterPort` and `JobHandler` interface |
+| `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler                                                                              |
+| `storage/`      | `ObjectStorePort` + S3 adapter, `EvidenceStagingService` (stage → verify → commit, plus the orphan sweep), `RetentionSweeper`                                     |
 
 The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint

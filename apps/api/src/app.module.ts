@@ -12,7 +12,15 @@ import { ReservedController } from './common/reserved.controller.js';
 import { loadConfig, type AppConfig } from './config/config.js';
 import { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
 import { HealthController } from './health/health.controller.js';
+import {
+  DEAD_LETTER_PORT,
+  InMemoryDeadLetterSink,
+  SqsDeadLetterAdapter,
+  type DeadLetterPort,
+} from './jobs/dead-letter.port.js';
+import { DEFAULT_CONSUMER_OPTIONS, JobConsumer } from './jobs/job-consumer.js';
 import { OutboxPublisher } from './jobs/outbox-publisher.js';
+import { WorkerRuntime } from './jobs/worker-runtime.service.js';
 import { InMemoryQueueAdapter, QUEUE_PORT, type QueuePort } from './jobs/queue.port.js';
 import { SqsQueueAdapter } from './jobs/sqs-queue.adapter.js';
 import { AuditService, LocalAuditCheckpointWriter } from './persistence/audit.service.js';
@@ -22,6 +30,14 @@ import { RetentionService } from './persistence/retention.service.js';
 import { SourceDocumentService } from './persistence/source-document.service.js';
 import { StageExecutionService } from './persistence/stage-execution.service.js';
 import { IndexerService } from './search-index/indexer.service.js';
+import { EvidenceStagingService } from './storage/evidence-staging.service.js';
+import { RetentionSweeper } from './storage/retention-sweeper.service.js';
+import { S3ObjectStoreAdapter } from './storage/s3-object-store.adapter.js';
+import {
+  InMemoryObjectStore,
+  OBJECT_STORE_PORT,
+  type ObjectStorePort,
+} from './storage/object-store.port.js';
 import { MeilisearchAdapter } from './search-index/meilisearch.adapter.js';
 import {
   InMemorySearchIndex,
@@ -196,9 +212,9 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
             // Failing loudly is correct until D12 selects it. Silently falling back to
             // Meilisearch would make the configuration a lie.
             throw new Error(
-              'SEARCH_INDEX_KIND=opensearch is not implemented. Decision D12 is closed by the ' +
-                'Phase C matcher-latency measurement; if it selects OpenSearch, write ' +
-                'OpenSearchAdapter next to MeilisearchAdapter.',
+              'SEARCH_INDEX_KIND=opensearch is not implemented. D12 closed at C4 in favour of ' +
+                'Meilisearch on measured recall and latency (docs/decisions.md D-002). If a ' +
+                're-open trigger fires, write OpenSearchAdapter next to MeilisearchAdapter.',
             );
           case 'in-memory':
             new Logger('SearchIndex').warn(
@@ -217,6 +233,117 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [MONGO_DB, SEARCH_INDEX_PORT, SourceDocumentService],
     },
     {
+      // The evidence object store. Behind a port for the same reason the index is, though not
+      // for the same decision: there is no open question about S3 here. The seam exists so the
+      // staging service can be tested against a store that can be made to fail on demand —
+      // making a real bucket corrupt bytes means breaking it.
+      provide: OBJECT_STORE_PORT,
+      useFactory: (config: AppConfig): ObjectStorePort => {
+        switch (config.storage.kind) {
+          case 's3':
+            return new S3ObjectStoreAdapter({
+              bucket: config.storage.bucket ?? 'adverse-search-evidence-local',
+              region: config.storage.region,
+              ...(config.storage.endpoint === null ? {} : { endpoint: config.storage.endpoint }),
+              ...(config.storage.staticCredentials === null
+                ? {}
+                : { credentials: config.storage.staticCredentials }),
+            });
+          case 'in-memory':
+            new Logger('ObjectStore').warn(
+              'Using the in-process evidence store. Nothing survives a restart, so committed ' +
+                'references will outlive the bytes they name. Development only.',
+            );
+            return new InMemoryObjectStore();
+        }
+      },
+      inject: [APP_CONFIG],
+    },
+    {
+      provide: EvidenceStagingService,
+      useFactory: (
+        store: ObjectStorePort,
+        documents: SourceDocumentService,
+        retention: RetentionService,
+        config: AppConfig,
+      ) => new EvidenceStagingService(store, documents, retention, config.storage.region),
+      inject: [OBJECT_STORE_PORT, SourceDocumentService, RetentionService, APP_CONFIG],
+    },
+    {
+      provide: RetentionSweeper,
+      useFactory: (
+        store: ObjectStorePort,
+        retention: RetentionService,
+        documents: SourceDocumentService,
+      ) => new RetentionSweeper(store, retention, documents),
+      inject: [OBJECT_STORE_PORT, RetentionService, SourceDocumentService],
+    },
+    {
+      // The dead-letter queue. In-process only when none is configured, and warned about in
+      // the same terms as the other stand-ins: a message held in memory is a message lost at
+      // restart, and this is the one class of message whose loss destroys evidence.
+      provide: DEAD_LETTER_PORT,
+      useFactory: (config: AppConfig): DeadLetterPort => {
+        if (config.jobs.deadLetterQueueUrl === null) {
+          new Logger('DeadLetter').warn(
+            'JOBS_DEAD_LETTER_QUEUE_URL is not set: dead letters are held in process memory ' +
+              'and lost at restart.',
+          );
+          return new InMemoryDeadLetterSink();
+        }
+        return new SqsDeadLetterAdapter({
+          queueUrl: config.jobs.deadLetterQueueUrl,
+          region: config.jobs.region,
+          ...(config.jobs.endpoint === null ? {} : { endpoint: config.jobs.endpoint }),
+          ...(config.jobs.staticCredentials === null
+            ? {}
+            : { credentials: config.jobs.staticCredentials }),
+        });
+      },
+      inject: [APP_CONFIG],
+    },
+    {
+      provide: JobConsumer,
+      useFactory: (
+        stages: StageExecutionService,
+        receipts: InboxReceiptService,
+        transactions: TransactionRunner,
+        deadLetters: DeadLetterPort,
+        searches: SearchesService,
+        config: AppConfig,
+      ) =>
+        new JobConsumer(
+          stages,
+          receipts,
+          transactions,
+          deadLetters,
+          // Bound to the search run's own loader. Note what is *not* passed: a tenant. See
+          // `jobs/job-ownership.ts` for why a tenant-scoped loader defeats the check (SEC-01).
+          async (aggregateId: string) => searches.loadOwnership(aggregateId),
+          {
+            ...DEFAULT_CONSUMER_OPTIONS,
+            consumerName: 'search-worker',
+            leaseMs: config.jobs.leaseMs,
+            maxExecutionMs: config.jobs.maxExecutionMs,
+            maxDeliveries: config.jobs.maxDeliveries,
+          },
+        ),
+      inject: [
+        StageExecutionService,
+        InboxReceiptService,
+        TransactionRunner,
+        DEAD_LETTER_PORT,
+        SearchesService,
+        APP_CONFIG,
+      ],
+    },
+    {
+      provide: WorkerRuntime,
+      useFactory: (queue: QueuePort, consumer: JobConsumer, stages: StageExecutionService) =>
+        new WorkerRuntime(queue, consumer, stages),
+      inject: [QUEUE_PORT, JobConsumer, StageExecutionService],
+    },
+    {
       provide: OutboxPublisher,
       useFactory: (outbox: OutboxService, queue: QueuePort) => new OutboxPublisher(outbox, queue),
       inject: [OutboxService, QUEUE_PORT],
@@ -231,7 +358,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         a: AuditService,
         o: OutboxService,
         i: IndexerService,
-      ) => new SearchesService(db, e, s, t, a, o, i),
+        st: StageExecutionService,
+      ) => new SearchesService(db, e, s, t, a, o, i, st),
       inject: [
         MONGO_DB,
         EntitlementsService,
@@ -240,6 +368,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         AuditService,
         OutboxService,
         IndexerService,
+        StageExecutionService,
       ],
     },
 

@@ -61,6 +61,28 @@ export const apiErrorSchema = z
     retryable: z.boolean(),
     /** Field-level detail for validation failures. Never echoes a rejected secret. */
     details: z.array(z.object({ path: z.string(), message: z.string() })).optional(),
+
+    /**
+     * The recovery path for a `REVISION_CONFLICT` (matrix row FI-13, T29).
+     *
+     * Present only on that code, and it is not a nicety. A 409 that says only "someone else
+     * got there first" is a dead end: the caller's sole remaining option is to re-read, and a
+     * user interface that cannot show *what* changed trains people to retry blindly — which is
+     * precisely how the second reviewer's intent silently overwrites the first. Carrying the
+     * current revision and the current state means the losing caller can be shown the change
+     * and re-submit deliberately, on purpose, against a revision they have actually seen.
+     */
+    conflict: z
+      .object({
+        /** What the caller quoted. Echoed so a stale client can see its own staleness. */
+        expectedRevision: z.number().int().nonnegative(),
+        /** What the record is at now. Quote this to re-submit. */
+        currentRevision: z.number().int().positive(),
+        /** The state the winning action left behind, in the resource's own vocabulary. */
+        currentState: z.string(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

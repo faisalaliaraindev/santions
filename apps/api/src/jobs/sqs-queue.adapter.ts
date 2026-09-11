@@ -33,6 +33,7 @@ import {
 
 import {
   MAX_BATCH,
+  MAX_VISIBILITY_SECONDS,
   parseEnvelope,
   type JobEnvelope,
   type PublishOutcome,
@@ -140,15 +141,15 @@ export class SqsQueueAdapter implements QueuePort {
       }
       const envelope = parseEnvelope(message.Body);
       if (envelope === null) {
-        // Unparsable. Left on the queue so the redrive policy moves it to the DLQ rather than
-        // this process deleting evidence of a producer bug.
+        // Surfaced, not swallowed. The consumer dead-letters it with a reason; deciding that
+        // here would hide a producer bug inside a transport adapter.
         this.logger.error(
-          `Unparsable job envelope, left for the DLQ: ${message.MessageId ?? 'unknown id'}`,
+          `Unparsable job envelope: ${message.MessageId ?? 'unknown id'}. Passed to the consumer.`,
         );
-        continue;
       }
       received.push({
         envelope,
+        body: message.Body,
         receiptHandle: message.ReceiptHandle,
         approximateReceiveCount: Number(message.Attributes?.['ApproximateReceiveCount'] ?? '1'),
       });
@@ -162,14 +163,16 @@ export class SqsQueueAdapter implements QueuePort {
     );
   }
 
-  async release(receiptHandle: string): Promise<void> {
+  async release(receiptHandle: string, delaySeconds = 0): Promise<void> {
     // Visibility zero returns it immediately, so a worker that cannot proceed does not hold a
-    // message hostage for the rest of its visibility timeout.
+    // message hostage for the rest of its visibility timeout. A non-zero delay is the FR-06
+    // backoff: SQS holds the message and redelivers it when it is due, which costs no worker
+    // and survives this process dying in the meantime.
     await this.client.send(
       new ChangeMessageVisibilityCommand({
         QueueUrl: this.config.queueUrl,
         ReceiptHandle: receiptHandle,
-        VisibilityTimeout: 0,
+        VisibilityTimeout: Math.min(Math.max(0, Math.round(delaySeconds)), MAX_VISIBILITY_SECONDS),
       }),
     );
   }

@@ -30,6 +30,7 @@ import {
   subjectVersionSchema,
 } from '../subjects/subject.js';
 import {
+  cancelSearchSchema,
   coverageStateSchema,
   createSearchSchema,
   executionStateSchema,
@@ -65,6 +66,7 @@ export const COMPONENT_SCHEMAS = {
   FindingsState: findingsStateSchema,
   CoverageState: coverageStateSchema,
   CreateSearchRequest: createSearchSchema,
+  CancelSearchRequest: cancelSearchSchema,
   SearchAccepted: searchAcceptedSchema,
   SearchSummary: searchSummarySchema,
   SearchPage: pageSchema(searchSummarySchema),

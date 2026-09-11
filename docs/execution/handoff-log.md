@@ -27,6 +27,349 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (night) — Phase C step C6: the consumer, fencing, cancellation and the dead letter. **Gate G4 passed.**
+
+**Did:**
+
+- **`apps/api/src/jobs/job-consumer.ts`** — the one place a queued message becomes work. One
+  fixed sequence: parse → poison check → ownership (SEC-01) → receipt (FI-07) → stage identity
+  (FI-07) → lease (FI-11) → work → fenced write (FI-11/FI-12) → acknowledge. `handle()` returns
+  a **disposition** (`ACKNOWLEDGE` / `RETRY_LATER` with a delay / `DEAD_LETTER` with a reason)
+  and performs no transport call, which is what makes the interesting cases assertable without
+  a queue.
+- **`worker-runtime.service.ts`** — the loop that carries dispositions out, the FI-11 lease
+  sweep, and a drain-on-shutdown that lets the in-flight message finish. It **refuses to start
+  with no handlers registered**; see "left deliberately unbuilt" below.
+- **`dead-letter.port.ts`** — an explicit DLQ send with a reason, alongside (not instead of) the
+  SQS redrive policy. `JOBS_DEAD_LETTER_QUEUE_URL` is now a production startup guard.
+- **`job-handler.ts`** — the `JobHandler` seam a phase registers work against, plus `JobFailure`,
+  which carries an FR-06 `FailureSignal` rather than a class: the handler observes, the table
+  classifies.
+- **`QueuePort.release(handle, delaySeconds)`** — the FR-06 backoff is served as the message's
+  visibility timeout rather than by sleeping in the worker. `ReceivedMessage.envelope` is now
+  nullable and carries the raw `body`, so a malformed message reaches the consumer as a decision
+  instead of being dropped inside the SQS adapter.
+- **Cancellation, end to end.** `POST /v1/searches/{searchId}/cancel` with a **required**
+  `If-Match`; `GET /v1/searches/{searchId}` now returns the revision as an `ETag`, and
+  `SearchSummary` carries `revision`. A stale `If-Match` returns 409 with a new `conflict`
+  object on the error envelope (`expectedRevision`, `currentRevision`, `currentState`).
+- **`worker-main.ts`** — the worker entrypoint. Same image, same DI graph, no HTTP server
+  (decision **D-016**; there is no `apps/worker` package and will not be one). `pnpm dev:worker`.
+- Config: `JOBS_DEAD_LETTER_QUEUE_URL`, `JOB_LEASE_MS`, `JOB_MAX_EXECUTION_MS`,
+  `JOB_MAX_DELIVERIES`, with two production guards (no DLQ; an execution bound shorter than one
+  lease).
+- Docs: `architecture.md` gains "Consuming a message: one sequence, and why it is in that order"
+  and "Two dead-letter mechanisms"; `decisions.md` D-016 and **D-017**; phase-c.md's definition
+  of done fully ticked; `implementation-status.md` moves **G4 to Complete**; `START-HERE.md`
+  points at Phase D.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         283 passed  (was 260: +23 in apps/api/test/job-consumer.test.ts)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  120 passed  (was 101: +19 in tests/integration/jobs.test.ts)
+test:security      95 passed  (was  93: +2 new production guards)
+coverage          94.07% statements / 89.46% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+```
+
+T24, T29, T30, T31 and T41 all have named tests. Three properties were verified by planting the
+failure rather than by asserting the happy path:
+
+1. **The receipt is not the guard.** A test commits a stage, then **deletes the receipt
+   outright**, then redelivers — and the second attempt is still refused, by stage identity. If
+   it had passed only because a receipt existed, it was testing the cheap layer.
+2. **A late completion loses.** The cancellation lands _while the handler is running_. The
+   worker finishes, its fenced write is refused, the result is discarded and counted in
+   `discardedAttempts`, and the run stays `CANCELLED` with `findings: NOT_EVALUATED` — not
+   re-opened, not `PARTIAL`. A stage that had already succeeded is left byte-identical.
+3. **Retry-After is honoured exactly.** With jitter forced to 1%, a `Retry-After: 30` still
+   produces a 30-second delay, asserted on the delay the transport was actually asked for.
+
+**Left half-done:** nothing in C6. What is **deliberately unbuilt** is the first job handler —
+the worker refuses to start without one, because a handler-less consumer receives every queued
+search and dead-letters it as unroutable, and a process that looks healthy while draining the
+queue into the DLQ is worse than one that will not start. Registering the first handler is
+Phase E.
+
+**Found — five things worth knowing:**
+
+1. **This suite broke another file's test, and the failure appeared in the other file.** The
+   first version borrowed the seeded `tenant-alpha`; `transactions.test.ts`'s T63 asserts that a
+   refused entitlement leaves `tenant-alpha`'s audit trail unchanged, and these tests — running
+   in parallel against the same database — were writing to it. Fixed by seeding a tenant of this
+   suite's own in `beforeAll` and deleting it in `afterAll`. Worth remembering when adding any
+   integration suite: **borrowing shared fixture state makes some other file fail.**
+2. **A stage is only claimable once it is due,** so a fencing test cannot arrange an expired
+   lease by passing a `now` in the past — the claim fails for a reason unrelated to what is
+   being tested. Move the _sweep's_ clock forward instead, not the claim's.
+3. **A sweep assertion must not be a count.** `findExpiredLeases` is cross-tenant and bounded,
+   so `swept.returned >= 1` really measures how much unrelated work the shared local database
+   happens to be holding. The test asserts membership of the sweep's own query instead.
+4. **The C0 matrix's row-to-test map had T31 pointing at FI-16** — notification delivery, which
+   nothing in Phase C touches. T31 is repeated and out-of-order _queue_ deliveries, which is
+   FI-07. Corrected in `docs/failure-injection-matrix.md`, along with a new table saying which
+   file tests each row, and an explicit note that FI-14 and FI-16 have no coverage yet.
+5. **An internal defect is not an FR-06 class** (decision **D-017**). Mapping a type error onto
+   `CONTENT_ERROR` — the non-retrying default for an unrecognised _source_ signal — would put
+   our own bug into the coverage statement as a dead lead attributed to the publisher. It is
+   recorded with a null class, retried three times in case it was environmental, then abandoned.
+
+**Next session should:** start Phase D by **expanding [`phase-d.md`](./phase-d.md) from an
+outline into a brief** — it is not yet one, and the outline itself says what expanding it
+involves. Read `docs/open-decisions.md` first: D1, D3 and D8 close in this phase and none of
+them can be closed by engineering alone.
+
+**Decisions touched:** **D-016** (the worker is a second entrypoint, not a second application)
+and **D-017** (an internal defect is not an FR-06 class) recorded. D12 stays closed on C4's
+numbers. D1, D3 and D8 still carry placeholder values with an `assumption` field on the record,
+and close in Phase D. D11 (a well-evidenced acquittal banding as `CORROBORATED`) is still open
+and must close by Phase G.
+
+---
+
+## 2026-09-11 (late night) — Phase C step C5: evidence staging, the orphan sweep and retention deletion
+
+**Did:**
+
+- **`apps/api/src/storage/object-store.port.ts`** — the seam, plus `InMemoryObjectStore`. Holds
+  `keyFor` (the **only** place an object key is constructed) and `tenantOfKey` (what the orphan
+  sweep is allowed to delete). Keys are `evidence/<region>/<tenantId>/<YYYY-MM-DD>/<uuid>` with
+  no caller input anywhere in them (SEC-03).
+- **`S3ObjectStoreAdapter`** — the AWS SDK, for the reason `SqsQueueAdapter` uses it and not for
+  convenience: SigV4 over a rotating role credential is a security control that should be used
+  rather than re-implemented. Every write sends `ChecksumSHA256`, every read asks for
+  `ChecksumMode: ENABLED`, and the listing paginates to the end — a truncated listing would make
+  the orphan sweep silently skip everything past the first page, and the symptom of that is
+  storage cost rather than an error, so nobody would notice.
+- **`EvidenceStagingService`** — FI-03. Stage, verify against the store's own checksum and byte
+  count, then commit the reference. Plus `sweepOrphans`, which reads the committed key set
+  **after** listing the bucket, never before.
+- **`RetentionSweeper`** — FI-15. Mark the reference expired, then delete the object, and close
+  the action only once the object is confirmed gone. The legal hold is re-read from the document
+  at the point of deletion.
+- Config: `S3_EVIDENCE_BUCKET` and `OBJECT_STORE_KIND`, with two production guards. Wiring in
+  `app.module.ts`. `@aws-sdk/client-s3` added to `apps/api`.
+- Docs: `docs/architecture.md` gains "Evidence objects: stage, verify, commit — and never the
+  inverse" and "A batched sweep over shared state needs a bounded drain";
+  `docs/decisions.md` D-015; phase-c.md C4 and C5 ticked; `START-HERE.md` and
+  `implementation-status.md` moved to C6.
+
+**The rule both rows enforce, stated once:** an orphaned object costs a few kilobytes and is
+invisible to every user; a reference to bytes that are not there is a screening product telling a
+reviewer that evidence exists when it does not. Both orderings are chosen so the _object_ is the
+thing left wrong and never the _reference_. One of those failure modes gets investigated; the
+other gets believed.
+
+**Three properties, each verified by planting a violation:**
+
+1. **Nothing is committed unless the object verified.** With a store that reports a checksum not
+   matching the bytes, `stageAndCommit` throws **and** `sourceDocumentVersions` holds zero records
+   for the tenant. The count assertion is the load-bearing one — a staging bug that throws _and_
+   commits would pass a test that only checked the throw, and the record it left behind is the
+   dangling success.
+2. **The orphan sweep never deletes a referenced object, however old.** A committed document
+   aged 400 days survives a sweep. The reconciler _for_ FI-03 deleting a referenced object would
+   cause the exact failure FI-03 exists to prevent.
+3. **A retention action does not close while the object is still present.** Against a store whose
+   `remove` silently does nothing, the action ends `FAILED` with `completedAt` null and
+   `lastError` containing "still present" — because "I asked for a delete" is not "the object is
+   gone", and an action closing there reports a retention obligation as discharged while the
+   bytes sit in the bucket.
+
+Also tested directly: the legal hold raised **after** the action was scheduled still stops the
+deletion (the only case that matters — a hold placed when litigation starts must protect the
+evidence that litigation is about), a failed delete is retried rather than lost, and the key
+carries no publisher, URL or path fragment even when the caller's `sourceUrl` contains
+`../../etc/passwd`.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         260 passed
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  101 passed  (was 83: +18 in tests/integration/evidence-storage.test.ts)
+test:security      93 passed  (was 91: +2 new production guards)
+coverage          94.75% statements / 89.43% branches (gate 85/80)
+```
+
+The staging and retention paths run against the **real LocalStack S3**, not a fake — that the
+store computes its own checksum, that a delete is idempotent, and that a listing paginates are
+properties of S3 and not of our code. Failure injection uses the in-process store, because making
+a real bucket corrupt bytes on demand means breaking it.
+
+**Left half-done:** nothing within C5, with one thing deliberately not built: **neither sweep is
+scheduled in-process.** `sweepOrphans`, `sweepOnce` and `overdue` exist and are called by tests,
+ready for a scheduler; C6 owns the scheduling alongside retries and leases. Also **nothing calls
+`stageAndCommit` in production yet** — nothing fetches documents until Phase F. The path is built
+and tested; it is not yet on a request path. **C6 is not started**: no FR-06 classification, no
+DLQ, no lease fencing, no cancellation.
+
+**Found — three things:**
+
+1. **The first version of the orphan sweep's safety guard could never fire, and the test I wrote
+   for it was wrong in the same direction.** The guard checked that a key carried the tenant
+   prefix — but the sweep _lists_ that prefix, so every key it sees carries it by construction.
+   The test's "foreign" key was itself under the prefix, so the test asserted the guard fired when
+   it could not. Fixed by asking the narrower and actually useful question: **did this system
+   create this object?** Only `keyFor` creates evidence objects, so only keys matching its exact
+   shape are eligible for deletion. Recorded as **D-015**. The general lesson is worth more than
+   the fix: a guard that cannot fire and a test that cannot fail will agree with each other
+   forever.
+2. **A batched sweep over shared state, for the third time.** The C4 entry said "expect it a
+   third time"; here it is. `RetentionSweeper.sweepOnce` sweeps due actions cross-tenant, so run
+   from one integration file it completed the retention fixtures another file was still asserting
+   on — two failures that passed in isolation and failed in the suite. Fixed by giving
+   `sweepOnce` an optional `tenantId`; the scheduled sweeper omits it, because retention is an
+   obligation across every tenant and a per-tenant schedule is a list of tenants to forget to add
+   to, while a targeted run (an erasure request, or draining one tenant) passes it. **The rule and
+   all three instances are now a table in `docs/architecture.md`**, which is where it should have
+   been written after the first one.
+3. **`keyFor` had a test-only escape hatch for the object id, and it was a hole in the
+   reconciler.** A test that pinned a key could pin one `tenantOfKey` does not recognise, and the
+   sweep would then quietly decline to collect exactly the objects that test created. Removed;
+   nothing was using it.
+
+Still open and still unaddressed, carried from six previous entries: **`POST /v1/subjects`
+declares a permission but no scope**, so a key scoped to `search:read` can create a subject while
+`POST /v1/searches` refuses it. It belongs to whoever owns the machine contract.
+
+Carried from C4 and unchanged: **D13 / D-014** — three quarters of search acceptance latency is
+the request waiting for the index write. Closes by G8 with Phase F.
+
+**Next session should:** start **C6**. Read `docs/failure-injection-matrix.md` rows FI-06, FI-07,
+FI-08, FI-11, FI-12, FI-13 and FI-16 first — they are the specification for its tests. Begin with
+the **FR-06 failure classification table as written** (transient network, rate limited, soft
+block, hard block, content error — three of the five must not be retried at all); do not invent a
+second taxonomy. Every fencing test must have **two workers racing**: a single-worker test proves
+nothing about staleness.
+
+**Decisions touched:** **D-015 added** (the orphan sweep deletes only objects this system
+created). No open decision closed. D13 / D-014 still open, closing by G8.
+
+---
+
+## 2026-09-11 (night) — Phase C step C4: the workload measurement that closes D12
+
+**Did:**
+
+- **`packages/evaluation/src/workload/population.ts`** — a deterministic, pure generator for the
+  haystack the FR-16 names have to be found in. The FR-16 corpus holds sixteen cases, which is a
+  correctness fixture and not a workload: every index answers sixteen documents instantly, so a
+  latency taken over it would have closed D12 on noise. The sixteen names became the **queries**
+  — they were chosen to be hard — and the generator builds the population around them: two exact
+  collisions per target, a shared surname, a shared given name, a phonetic neighbour and a
+  one-edit neighbour, so retrieval is a discrimination problem rather than a lookup. Eight query
+  classes, one per FR-08 name form.
+- **`packages/evaluation/src/workload/stats.ts`** — nearest-rank quantiles, `isDecisive` (a
+  stated noise margin, so "unconvincing" has a definition rather than a feeling), and `recallOf`,
+  which returns `NaN` and never `1` for a class nothing was queried in. A 100% that means
+  "untested" is the most dangerous number the file could produce.
+- **`scripts/workload/search-index.mjs`** (`pnpm bench:search-index`) — three strategies (naive /
+  expanded / batched), three population sizes, recall@k by name form, and API acceptance measured
+  against **both** index kinds so the index's contribution is attributable rather than merely
+  present. Writes `docs/measurements/c4-search-index.json`.
+- **`SearchIndexPort.searchSubjectsBatch`** plus the Meilisearch `/multi-search` implementation —
+  added **because the measurement asked for it**, not in anticipation. Decision D-013.
+- **`MeilisearchAdapter` now sends `Accept-Encoding: identity`.** See finding 1.
+- Docs: `docs/measurements/c4-search-index.md` (the report), `docs/decisions.md` D-002 closed
+  with figures plus new D-013 and D-014, `docs/open-decisions.md` D12 closed and D13 opened,
+  `START-HERE.md` and `implementation-status.md` moved to C5.
+
+**D12 is closed: Meilisearch.** Not by preference and not by inertia — D-002 set a specific
+switch condition (OpenSearch if the matcher needs analysers or multi-field boolean scoring
+Meilisearch cannot express), and that condition was tested and **not met**. At 100,000 subjects,
+1,050 samples per strategy:
+
+| Strategy                            | matcher p95 |    recall |
+| :---------------------------------- | ----------: | --------: |
+| naive (raw name, one query)         |      4.33ms |     67.6% |
+| expanded (FR-08 forms, sequential)  |     11.20ms |     95.2% |
+| **batched (FR-08 forms, one trip)** |  **7.05ms** | **95.2%** |
+
+The matcher **does** need multi-field retrieval — raw-name recall falls 81.9% to 67.6% from
+1,000 to 100,000 subjects as the top _k_ fills with lookalikes, and `PARTICLE` recall collapses
+100% to 6.3% over that range. Meilisearch **expresses** it, in one round trip, flat across two
+orders of magnitude (retrieval p95 5.65 to 6.35ms). No `OpenSearchAdapter` was written;
+`SEARCH_INDEX_KIND=opensearch` still throws its not-implemented error.
+
+Closed with limits stated, in D-002: 100,000 subjects not 10⁷, no concurrency test, the
+`documents` index untested (nothing extracts text until Phase F), and **the non-Latin path
+unmeasured** — `TRANSLITERATION` recall is 0% for every strategy because the only
+`TransliterationPort` implementation is `identityTransliteration`, so a Cyrillic query is never
+expanded into the Latin forms the index holds. That figure says nothing about Meilisearch, and it
+is the likeliest re-open trigger.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         260 passed  (was 241: +19 in packages/evaluation/test/workload)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration   83 passed  (was 78: +5 for the batch path)
+test:security      91 passed
+coverage          94.75% statements / 89.43% branches (gate 85/80)
+pnpm bench:search-index --sizes=1000,10000,100000 --repeats=10   full run recorded
+```
+
+**Left half-done:** nothing within C4. **C5 and C6 are not started** — no S3 staging, no
+reference commit, no consumer loop, no DLQ, no fencing, no cancellation.
+
+**Found — three things, two of them defects:**
+
+1. **A flat ~45ms stall on every gzip response through the Docker Desktop port proxy — and the
+   first run nearly recorded it as Meilisearch's latency.** The first measurement put retrieval
+   at 47ms p50. It was not query work: `/health` answered in 1.8ms while every search took 45ms;
+   32 concurrent searches finished in the same wall time as one, so it was a wait and not work;
+   the stall switched on between 967 and 1,256 bytes of response body, 25/25 deterministic; the
+   same query from **inside** the Docker network took 2.2ms; and `Accept-Encoding: identity`
+   removed it entirely (48.06ms to 3.20ms, 0/20 slow). Node's `fetch` asks for gzip by default,
+   so every call the adapter made was paying it. The adapter now asks for `identity`, which is
+   right on its own merits — a service-to-service hop carrying small JSON gains nothing from
+   compression. Matcher p95 went 52.76ms to 4.38ms. **Worth knowing generally: this is a
+   property of the Docker Desktop port proxy on Windows and macOS, not of Meilisearch, and any
+   other adapter that talks HTTP to a container from the host will hit it the same way.**
+2. **A batched sweep over shared state asserted in one pass — the same trap as the C3
+   reconciler, in a second place.** Adding these measurements pushed the outbox past
+   `OutboxPublisher`'s batch of 50 and three tests in `tests/integration/transactions.test.ts`
+   started failing intermittently. `publishOnce` sweeps the outbox **globally**, so with vitest
+   running integration files in parallel a single pass need not reach the event under test — and
+   `queue.failNextPublish` could be absorbed by another file's event entirely, which is why the
+   test saw `attempt: 0`. Fixed with a bounded drain, and _verified by planting 300 due events_:
+   the old tests fail 4 of 14 against that backlog, the fixed ones pass. **The rule, now written
+   into both places: a batched sweep over shared state needs a bounded drain, never a single
+   call.** This has now cost two sessions; expect it a third time.
+3. **Three quarters of search acceptance is the request waiting for the index write.**
+   `POST /v1/searches` is 127ms p50 against Meilisearch and 33ms against the in-process index.
+   The ~94ms is the post-commit index write being awaited — something the request is explicitly
+   allowed to lose and which the FI-10 reconciler already covers. Not changed here: dropping the
+   wait trades C3's rule 2 (a write is not `INDEXED` until it is searchable) for latency, and
+   that depends on whether anything reads the index between acceptance and the run completing,
+   which Phase F's consumer decides. Raised as **D13 / D-014**, closing by G8. The composed total
+   search latency is roughly 132ms, of which the matcher is 5.23ms — **4%**. Whatever is worth
+   optimising in the search path, it is not the index.
+
+Still open and still unaddressed, carried from five previous entries: **`POST /v1/subjects`
+declares a permission but no scope**, so a key scoped to `search:read` can create a subject while
+`POST /v1/searches` refuses it. It belongs to whoever owns the machine contract.
+
+**Next session should:** start **C5** — S3 staging and reference commit. Read
+`docs/failure-injection-matrix.md` first; it is the specification for the C5 and C6 tests, and
+writing either without it means guessing at the boundaries they exist to cover.
+
+**Decisions touched:** **D12 closed — Meilisearch**, recorded with figures in `docs/decisions.md`
+D-002 and in `docs/measurements/c4-search-index.md`. **D-013 added** (the port gets a batch query,
+because the measurement asked for one). **D-014 / D13 opened** (whether acceptance waits for the
+index write; closes by G8 with Phase F). D7 and D11 untouched.
+
+---
+
 ## 2026-09-11 (evening) — Phase C step C3: the search index behind the D12 seam
 
 **Did:**

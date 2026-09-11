@@ -2,8 +2,10 @@ import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Res } from 
 import type { Response } from 'express';
 
 import {
+  cancelSearchSchema,
   createSearchSchema,
   paginationQuerySchema,
+  type CancelSearchInput,
   type CreateSearchInput,
   type SearchSummary,
 } from '@erly/adverse-contracts';
@@ -119,9 +121,76 @@ export class SearchesController {
   async findOne(
     @CurrentPrincipal() principal: Principal,
     @Param('searchId') searchId: string,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<SearchSummary> {
-    return this.searches.findById(requireTenant(principal), searchId);
+    const search = await this.searches.findById(requireTenant(principal), searchId);
+    // The revision, as an ETag, so the caller has something to put in `If-Match`. A concurrency
+    // scheme the client cannot see is one the client cannot take part in (matrix row FI-13).
+    res.setHeader('ETag', `"${String(search.revision)}"`);
+    return search;
   }
+
+  /**
+   * POST /v1/searches/:searchId/cancel — stop a run, against the revision last read.
+   *
+   * `If-Match` is **required**, not optional. Making it optional would mean the common path is
+   * the unguarded one, and an unconditional cancellation is a decision taken on state the
+   * caller may never have seen. A missing header is a 400 here rather than a silent overwrite.
+   */
+  @Post(':searchId/cancel')
+  @RequirePermission('search:cancel')
+  @RequireScope('search:write')
+  async cancel(
+    @CurrentPrincipal() principal: Principal,
+    @Param('searchId') searchId: string,
+    @Body(validate(cancelSearchSchema)) body: CancelSearchInput,
+    @Headers('if-match') ifMatch: string | undefined,
+  ): Promise<SearchSummary> {
+    return this.searches.cancel({
+      principal,
+      searchId,
+      expectedRevision: parseIfMatch(ifMatch),
+      data: body,
+      now: new Date(),
+    });
+  }
+}
+
+/**
+ * Read a revision out of `If-Match`.
+ *
+ * Accepts both the quoted ETag form the server emits and a bare number, because a client that
+ * echoes exactly what it was given and a client that sends the number it parsed are both
+ * behaving reasonably. Anything else is rejected rather than coerced: `Number('')` is 0 and
+ * `Number('abc')` is NaN, and a revision silently becoming 0 would fail the fence with a
+ * conflict that misdescribes what happened.
+ */
+export function parseIfMatch(header: string | undefined): number {
+  if (header === undefined || header.trim() === '') {
+    throw new ApiException(
+      'VALIDATION_FAILED',
+      'If-Match is required. Send the revision from the last read of this search.',
+      { details: [{ path: 'If-Match', message: 'required' }] },
+    );
+  }
+
+  const unquoted = header
+    .trim()
+    .replace(/^W\//, '')
+    .replace(/^"(.*)"$/, '$1');
+  if (!/^[0-9]+$/.test(unquoted)) {
+    throw new ApiException('VALIDATION_FAILED', 'If-Match must carry a revision number.', {
+      details: [{ path: 'If-Match', message: 'not a revision' }],
+    });
+  }
+
+  const revision = Number(unquoted);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new ApiException('VALIDATION_FAILED', 'If-Match must carry a revision number.', {
+      details: [{ path: 'If-Match', message: 'not a revision' }],
+    });
+  }
+  return revision;
 }
 
 function accepted(search: SearchSummary): {
