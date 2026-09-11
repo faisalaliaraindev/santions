@@ -13,3 +13,7 @@ export * from './dataset/seed.js';
 export * from './invariants/harness.js';
 
 export * from './metrics/metrics.js';
+
+export * from './workload/population.js';
+
+export * from './workload/stats.js';

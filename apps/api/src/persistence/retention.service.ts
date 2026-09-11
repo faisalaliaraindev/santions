@@ -111,10 +111,21 @@ export class RetentionService {
     return stored;
   }
 
-  /** Due actions, oldest first. Held actions are excluded: a hold is not a delay. */
-  async findDue(now: Date, limit: number): Promise<RetentionActionRecord[]> {
+  /**
+   * Due actions, oldest first. Held actions are excluded: a hold is not a delay.
+   *
+   * `tenantId` is optional and narrows the sweep to one tenant. The scheduled sweeper runs
+   * without it, because retention is an obligation across every tenant and a per-tenant
+   * schedule would be a list of tenants to forget to add to. It is passed for a targeted run —
+   * an erasure request, or draining one tenant's backlog without touching anyone else's.
+   */
+  async findDue(now: Date, limit: number, tenantId?: string): Promise<RetentionActionRecord[]> {
     return this.actions
-      .find({ state: { $in: ['SCHEDULED', 'REFERENCE_MARKED', 'FAILED'] }, dueAt: { $lte: now } })
+      .find({
+        state: { $in: ['SCHEDULED', 'REFERENCE_MARKED', 'FAILED'] },
+        dueAt: { $lte: now },
+        ...(tenantId === undefined ? {} : { tenantId }),
+      })
       .sort({ dueAt: 1 })
       .limit(limit)
       .toArray();

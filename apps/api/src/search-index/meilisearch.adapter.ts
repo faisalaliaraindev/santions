@@ -58,6 +58,18 @@ export class MeilisearchAdapter implements SearchIndexPort {
   private headers(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
+      // Ask for an uncompressed response, explicitly.
+      //
+      // `fetch` sends `Accept-Encoding: gzip, deflate, br` by default, and this is a
+      // service-to-service hop carrying small JSON over a local network: compression costs CPU
+      // on both ends and saves nothing worth having. It also turned out to cost a great deal
+      // more than nothing — C4 measured a **flat ~45ms stall on every gzip-encoded response
+      // over roughly one TCP segment** when the stack runs behind the Docker Desktop port
+      // proxy (Windows and macOS). The same query answered in ~2ms from inside the Docker
+      // network, and in ~3ms from the host with this header set. The stall is the proxy's, not
+      // Meilisearch's, but every developer running the local stack pays it on every search,
+      // and it is large enough to swamp a latency measurement — which is how C4 found it.
+      'Accept-Encoding': 'identity',
       ...(this.config.apiKey === null ? {} : { Authorization: `Bearer ${this.config.apiKey}` }),
     };
   }
@@ -143,9 +155,14 @@ export class MeilisearchAdapter implements SearchIndexPort {
     return this.search<DocumentIndexDocument>(DOCUMENTS_INDEX, query);
   }
 
-  private async search<T>(index: string, query: SearchQuery): Promise<readonly IndexHit<T>[]> {
-    // Tenant first, always. SEC-01 names index queries explicitly; this filter is defence in
-    // depth behind the caller's validated tenant, never the only control.
+  /**
+   * The filter expression for a query.
+   *
+   * Tenant first, always. SEC-01 names index queries explicitly; this filter is defence in
+   * depth behind the caller's validated tenant, never the only control. Built in one place so
+   * the batch path cannot drift from the single-query path and quietly lose the tenant clause.
+   */
+  private filterFor(query: SearchQuery): string {
     const filters = [`tenantId = ${quote(query.tenantId)}`];
     for (const [field, value] of Object.entries(query.filters ?? {})) {
       const values = Array.isArray(value) ? value : [value];
@@ -153,14 +170,17 @@ export class MeilisearchAdapter implements SearchIndexPort {
         filters.push(`(${values.map((v) => `${field} = ${quote(String(v))}`).join(' OR ')})`);
       }
     }
+    return filters.join(' AND ');
+  }
 
+  private async search<T>(index: string, query: SearchQuery): Promise<readonly IndexHit<T>[]> {
     const response = await fetch(`${this.config.host}/indexes/${index}/search`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({
         q: query.text,
         limit: query.limit,
-        filter: filters.join(' AND '),
+        filter: this.filterFor(query),
         showRankingScore: true,
       }),
     });
@@ -181,6 +201,63 @@ export class MeilisearchAdapter implements SearchIndexPort {
       const { _rankingScore, ...document } = hit;
       return { document: document as unknown as T, score: _rankingScore ?? null };
     });
+  }
+
+  /**
+   * Several subject queries in one request, through Meilisearch's `/multi-search`.
+   *
+   * The whole point is the single round trip, so a failure is one failure for the batch — there
+   * is no partial success to report, and throwing matches `search()`: an index that cannot
+   * answer is an outage, and returning empty lists would render it as "no matches found".
+   */
+  async searchSubjectsBatch(
+    queries: readonly SearchQuery[],
+  ): Promise<readonly (readonly IndexHit<SubjectIndexDocument>[])[]> {
+    if (queries.length === 0) {
+      return [];
+    }
+
+    const response = await fetch(`${this.config.host}/multi-search`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({
+        queries: queries.map((query) => ({
+          indexUid: SUBJECTS_INDEX,
+          q: query.text,
+          limit: query.limit,
+          filter: this.filterFor(query),
+          showRankingScore: true,
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Batch search on ${SUBJECTS_INDEX} failed (${String(response.status)}): ` +
+          (await response.text()).slice(0, 200),
+      );
+    }
+
+    const body = (await response.json()) as {
+      results?: { hits?: (SubjectIndexDocument & { _rankingScore?: number })[] }[];
+    };
+    const results = body.results ?? [];
+
+    // Results are positional, and a caller that pairs form *i* with result *i* would silently
+    // mis-attribute every hit if the index ever returned a different number of result sets.
+    if (results.length !== queries.length) {
+      throw new Error(
+        `Batch search returned ${String(results.length)} result sets for ` +
+          `${String(queries.length)} queries.`,
+      );
+    }
+
+    return results.map((result) =>
+      (result.hits ?? []).map((hit) => {
+        const { _rankingScore, ...document } = hit;
+        return { document, score: _rankingScore ?? null };
+      }),
+    );
   }
 
   async removeSubjects(ids: readonly string[]): Promise<void> {

@@ -185,6 +185,97 @@ describe('MeilisearchAdapter — the real index', () => {
     expect(await meili.searchSubjects({ tenantId, text: 'perez', limit: 10 })).toHaveLength(0);
   });
 
+  it('answers a batch of queries positionally, so each name form keeps its own hits', async () => {
+    const tenantId = tenant();
+    const marker = randomUUID().slice(0, 8);
+    const ana = subjectRow({ tenantId, fullName: `Ana Belén Quintero ${marker}` });
+    const ivan = subjectRow({ tenantId, fullName: `Iván Kuznetsov ${marker}` });
+    await meili.upsertSubjects([
+      IndexerService.projectSubject(ana),
+      IndexerService.projectSubject(ivan),
+    ]);
+
+    const results = await meili.searchSubjectsBatch([
+      { tenantId, text: `quintero ${marker}`, limit: 10 },
+      { tenantId, text: `kuznetsov ${marker}`, limit: 10 },
+    ]);
+
+    // Positional, not merged. Which form produced a hit is evidence the matcher uses to decide
+    // what the agreement is worth (FR-08); a merged list throws that away.
+    expect(results).toHaveLength(2);
+    expect(results[0]!.map((h) => h.document.subjectVersionId)).toContain(ana.subjectVersionId);
+    expect(results[0]!.map((h) => h.document.subjectVersionId)).not.toContain(
+      ivan.subjectVersionId,
+    );
+    expect(results[1]!.map((h) => h.document.subjectVersionId)).toContain(ivan.subjectVersionId);
+  });
+
+  it('applies the tenant filter to every query in a batch (SEC-01)', async () => {
+    const alpha = tenant();
+    const beta = tenant();
+    const name = `Rosalía Étienne ${randomUUID().slice(0, 8)}`;
+    const alphaRow = subjectRow({ tenantId: alpha, fullName: name });
+    const betaRow = subjectRow({ tenantId: beta, fullName: name });
+    await meili.upsertSubjects([
+      IndexerService.projectSubject(alphaRow),
+      IndexerService.projectSubject(betaRow),
+    ]);
+
+    // Three queries, so a filter applied only to the first would still look correct in the
+    // result set of the first — which is how a batch path loses tenant scoping unnoticed.
+    const results = await meili.searchSubjectsBatch([
+      { tenantId: alpha, text: 'rosalia', limit: 50 },
+      { tenantId: alpha, text: 'etienne', limit: 50 },
+      { tenantId: alpha, text: name.toLowerCase(), limit: 50 },
+    ]);
+
+    expect(results).toHaveLength(3);
+    for (const result of results) {
+      expect(result.every((h) => h.document.tenantId === alpha)).toBe(true);
+      expect(result.map((h) => h.document.subjectVersionId)).not.toContain(
+        betaRow.subjectVersionId,
+      );
+    }
+  });
+
+  it('returns the same hits in a batch as the queries would return one at a time', async () => {
+    // The batch exists to save round trips, not to change answers. If the two ever disagree,
+    // the matcher's recall depends on which method it happened to call.
+    const tenantId = tenant();
+    const marker = randomUUID().slice(0, 8);
+    await meili.upsertSubjects(
+      ['Piotr Nowicki', 'Petra Nowicka', 'Pyotr Novitski'].map((fullName) =>
+        IndexerService.projectSubject(subjectRow({ tenantId, fullName: `${fullName} ${marker}` })),
+      ),
+    );
+
+    const queries = [
+      { tenantId, text: `nowicki ${marker}`, limit: 20 },
+      { tenantId, text: `novitski ${marker}`, limit: 20 },
+      { tenantId, text: `nowicka ${marker}`, limit: 20 },
+    ];
+    const batched = await meili.searchSubjectsBatch(queries);
+    const individually = [];
+    for (const query of queries) {
+      individually.push(await meili.searchSubjects(query));
+    }
+
+    expect(batched.map((r) => r.map((h) => h.document.subjectVersionId))).toEqual(
+      individually.map((r) => r.map((h) => h.document.subjectVersionId)),
+    );
+  });
+
+  it('treats an empty batch as no work, not as a request with no tenant', async () => {
+    expect(await meili.searchSubjectsBatch([])).toEqual([]);
+  });
+
+  it('raises on a failed batch rather than returning empty result sets', async () => {
+    const broken = new MeilisearchAdapter({ host: MEILI_HOST, apiKey: 'not-the-master-key' });
+    await expect(
+      broken.searchSubjectsBatch([{ tenantId: tenant(), text: 'anything', limit: 10 }]),
+    ).rejects.toThrow(/Batch search on subjects failed/u);
+  });
+
   it('raises rather than answering "no matches" when the index cannot answer', async () => {
     // An index outage reported as an empty result is a clean screening result for a person who
     // was never actually searched for. It must be an error the caller has to handle.

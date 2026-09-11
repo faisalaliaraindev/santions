@@ -1,0 +1,899 @@
+{
+  "measuredAt": "2026-09-11T14:17:02.559Z",
+  "node": "v22.22.0",
+  "platform": "win32 x64",
+  "cpus": 12,
+  "index": {
+    "kind": "meilisearch",
+    "host": "http://127.0.0.1:28700"
+  },
+  "parameters": {
+    "seed": 20260911,
+    "limit": 25,
+    "repeats": 10
+  },
+  "sizes": [
+    {
+      "size": 1000,
+      "tenantId": "workload-1000",
+      "queries": 105,
+      "indexLoadMs": 157.58589999999992,
+      "strategies": [
+        {
+          "strategy": "naive",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.7343000000000757,
+            "p50": 2.944400000000087,
+            "p90": 3.608299999999872,
+            "p95": 3.820900000000165,
+            "p99": 4.398200000000088,
+            "max": 8.026500000000397,
+            "mean": 2.9630160000000103
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.009800000000268483,
+            "p50": 0.5561999999999898,
+            "p90": 0.708299999999781,
+            "p95": 0.7944999999999709,
+            "p99": 1.1424999999999272,
+            "max": 1.7477999999999838,
+            "mean": 0.48927923809522955
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 1.7467999999998938,
+            "p50": 3.510699999999815,
+            "p90": 4.285400000000095,
+            "p95": 4.530499999999847,
+            "p99": 5.1983000000000175,
+            "max": 8.695600000000013,
+            "mean": 3.4522952380952394
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 25,
+            "p90": 25,
+            "p95": 25,
+            "p99": 25,
+            "max": 25,
+            "mean": 19.82857142857143
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 1,
+              "recall": 0.0625
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 86,
+            "recall": 0.819047619047619
+          }
+        },
+        {
+          "strategy": "expanded",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.8568999999988591,
+            "p50": 7.604400000000169,
+            "p90": 10.031399999999849,
+            "p95": 11.272300000000541,
+            "p99": 14.475400000000263,
+            "max": 19.465500000000247,
+            "mean": 7.510125523809517
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.019500000000334694,
+            "p50": 0.7650999999996202,
+            "p90": 1.220099999998638,
+            "p95": 1.3722999999999956,
+            "p99": 2.011199999999917,
+            "max": 3.2755999999999403,
+            "mean": 0.8159204761904758
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 1.8763999999991938,
+            "p50": 8.447799999999916,
+            "p90": 11.104400000000169,
+            "p95": 12.571399999999812,
+            "p99": 16.40019999999913,
+            "max": 20.721800000000258,
+            "mean": 8.326045999999991
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 30,
+            "p90": 46,
+            "p95": 49,
+            "p99": 53,
+            "max": 64,
+            "mean": 32.67619047619048
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 101,
+            "recall": 0.9619047619047619
+          }
+        },
+        {
+          "strategy": "batched",
+          "retrieval": {
+            "count": 1050,
+            "min": 2.121100000000297,
+            "p50": 4.370200000001205,
+            "p90": 5.333299999998417,
+            "p95": 5.646500000002561,
+            "p99": 6.911400000000867,
+            "max": 9.390699999999924,
+            "mean": 4.329238285714294
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.018599999999423744,
+            "p50": 0.7069999999985157,
+            "p90": 1.1383000000005268,
+            "p95": 1.222700000002078,
+            "p99": 1.5957999999991443,
+            "max": 2.3181000000004133,
+            "mean": 0.7633885714285705
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 2.1437999999980093,
+            "p50": 5.149999999999636,
+            "p90": 6.350500000000466,
+            "p95": 6.763100000000122,
+            "p99": 8.088699999996606,
+            "max": 11.708800000000338,
+            "mean": 5.092626857142864
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 30,
+            "p90": 46,
+            "p95": 49,
+            "p99": 53,
+            "max": 64,
+            "mean": 32.67619047619048
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 101,
+            "recall": 0.9619047619047619
+          }
+        }
+      ]
+    },
+    {
+      "size": 10000,
+      "tenantId": "workload-10000",
+      "queries": 105,
+      "indexLoadMs": 445.5630000000019,
+      "strategies": [
+        {
+          "strategy": "naive",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.5542999999997846,
+            "p50": 2.869199999997363,
+            "p90": 3.525499999999738,
+            "p95": 3.822100000001228,
+            "p99": 4.507999999997992,
+            "max": 5.823100000001432,
+            "mean": 2.873867999999981
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.010200000000622822,
+            "p50": 0.4636000000027707,
+            "p90": 0.6169000000008964,
+            "p95": 0.6720000000022992,
+            "p99": 0.9166999999979453,
+            "max": 1.3328000000001339,
+            "mean": 0.41227800000005765
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 1.5645000000004075,
+            "p50": 3.3430999999982305,
+            "p90": 4.076999999997497,
+            "p95": 4.417700000001787,
+            "p99": 5.289700000001176,
+            "max": 6.704600000000937,
+            "mean": 3.286146000000039
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 25,
+            "p90": 25,
+            "p95": 25,
+            "p99": 25,
+            "max": 25,
+            "mean": 20.047619047619047
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 1,
+              "recall": 0.0625
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 86,
+            "recall": 0.819047619047619
+          }
+        },
+        {
+          "strategy": "expanded",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.852999999999156,
+            "p50": 7.33469999999943,
+            "p90": 9.345799999999144,
+            "p95": 9.84100000000035,
+            "p99": 11.510300000001735,
+            "max": 14.226599999998143,
+            "mean": 7.1542345714285815
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.01929999999993015,
+            "p50": 0.6921000000002095,
+            "p90": 1.0776000000005297,
+            "p95": 1.184000000001106,
+            "p99": 1.4385000000038417,
+            "max": 2.267700000000332,
+            "mean": 0.6932358095238444
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 1.8790999999982887,
+            "p50": 8.116399999998976,
+            "p90": 10.220900000000256,
+            "p95": 10.79030000000057,
+            "p99": 12.451499999999214,
+            "max": 15.317500000001019,
+            "mean": 7.8474703809524256
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 34,
+            "p90": 49,
+            "p95": 50,
+            "p99": 71,
+            "max": 72,
+            "mean": 33.885714285714286
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 15,
+              "recall": 0.9375
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 100,
+            "recall": 0.9523809523809523
+          }
+        },
+        {
+          "strategy": "batched",
+          "retrieval": {
+            "count": 1050,
+            "min": 2.10570000000007,
+            "p50": 4.614199999996345,
+            "p90": 5.773400000005495,
+            "p95": 6.155000000006112,
+            "p99": 7.321700000000419,
+            "max": 9.6475999999966,
+            "mean": 4.603104666666615
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.01870000000053551,
+            "p50": 0.7004999999990105,
+            "p90": 1.092899999996007,
+            "p95": 1.2188000000023749,
+            "p99": 1.6785000000018044,
+            "max": 2.4406999999991967,
+            "mean": 0.7083811428572379
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 2.130199999999604,
+            "p50": 5.358199999995122,
+            "p90": 6.7370000000009895,
+            "p95": 7.120100000000093,
+            "p99": 8.545200000000477,
+            "max": 11.460599999998522,
+            "mean": 5.3114858095238535
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 34,
+            "p90": 49,
+            "p95": 50,
+            "p99": 71,
+            "max": 72,
+            "mean": 33.885714285714286
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 15,
+              "recall": 0.9375
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 100,
+            "recall": 0.9523809523809523
+          }
+        }
+      ]
+    },
+    {
+      "size": 100000,
+      "tenantId": "workload-100000",
+      "queries": 105,
+      "indexLoadMs": 5007.207900000001,
+      "strategies": [
+        {
+          "strategy": "naive",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.5796000000045751,
+            "p50": 2.869299999998475,
+            "p90": 3.570899999998801,
+            "p95": 3.9158000000024913,
+            "p99": 4.588299999995797,
+            "max": 10.637599999994563,
+            "mean": 2.891113238095221
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.010500000003958121,
+            "p50": 0.10849999999481952,
+            "p90": 0.64259999999922,
+            "p95": 0.7019000000000233,
+            "p99": 0.8523999999961234,
+            "max": 1.5341999999945983,
+            "mean": 0.2655688571429762
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 1.5913000000000466,
+            "p50": 3.136800000000221,
+            "p90": 3.9765000000043074,
+            "p95": 4.334399999999732,
+            "p99": 5.244999999995343,
+            "max": 10.786199999995006,
+            "mean": 3.1566820952381973
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 25,
+            "p90": 25,
+            "p95": 25,
+            "p99": 25,
+            "max": 25,
+            "mean": 20.047619047619047
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 1,
+              "recall": 0.0625
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 1,
+              "recall": 0.0625
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 71,
+            "recall": 0.6761904761904762
+          }
+        },
+        {
+          "strategy": "expanded",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.8873999999996158,
+            "p50": 7.757499999999709,
+            "p90": 9.706500000000233,
+            "p95": 10.624700000000303,
+            "p99": 12.535000000003492,
+            "max": 16.299999999995634,
+            "mean": 7.46707790476182
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.01989999999932479,
+            "p50": 0.40340000000287546,
+            "p90": 0.8855000000039581,
+            "p95": 1.0812000000005355,
+            "p99": 1.3988999999928637,
+            "max": 2.030899999997928,
+            "mean": 0.44754180952386896
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 1.9093999999968219,
+            "p50": 8.219899999996414,
+            "p90": 10.392200000002049,
+            "p95": 11.19840000000113,
+            "p99": 13.21490000000631,
+            "max": 16.95679999999993,
+            "mean": 7.914619714285689
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 30,
+            "p90": 51,
+            "p95": 53,
+            "p99": 71,
+            "max": 72,
+            "mean": 33.285714285714285
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 15,
+              "recall": 0.9375
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 100,
+            "recall": 0.9523809523809523
+          }
+        },
+        {
+          "strategy": "batched",
+          "retrieval": {
+            "count": 1050,
+            "min": 1.9861999999993714,
+            "p50": 4.743599999994331,
+            "p90": 5.934000000001106,
+            "p95": 6.353699999999662,
+            "p99": 7.390299999999115,
+            "max": 9.271399999997811,
+            "mean": 4.741035904762047
+          },
+          "comparison": {
+            "count": 1050,
+            "min": 0.01969999999710126,
+            "p50": 0.40570000000298023,
+            "p90": 0.8609999999971478,
+            "p95": 1.0023000000001048,
+            "p99": 1.266299999995681,
+            "max": 1.6627000000007683,
+            "mean": 0.4385689523808694
+          },
+          "matcherTotal": {
+            "count": 1050,
+            "min": 2.0058999999964726,
+            "p50": 5.227599999998347,
+            "p90": 6.6384000000034575,
+            "p95": 7.053500000001804,
+            "p99": 7.960800000000745,
+            "max": 10.533100000000559,
+            "mean": 5.179604857142916
+          },
+          "candidatesPerQuery": {
+            "count": 105,
+            "min": 0,
+            "p50": 30,
+            "p90": 51,
+            "p95": 53,
+            "p99": 71,
+            "max": 72,
+            "mean": 33.285714285714285
+          },
+          "recallByClass": {
+            "EXACT": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "WORD_ORDER": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "PARTICLE": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            },
+            "INITIAL_EXPANSION": {
+              "attempted": 16,
+              "found": 15,
+              "recall": 0.9375
+            },
+            "DIACRITIC": {
+              "attempted": 14,
+              "found": 14,
+              "recall": 1
+            },
+            "PHONETIC": {
+              "attempted": 7,
+              "found": 7,
+              "recall": 1
+            },
+            "TRANSLITERATION": {
+              "attempted": 4,
+              "found": 0,
+              "recall": 0
+            },
+            "TYPO": {
+              "attempted": 16,
+              "found": 16,
+              "recall": 1
+            }
+          },
+          "recallOverall": {
+            "attempted": 105,
+            "found": 100,
+            "recall": 0.9523809523809523
+          }
+        }
+      ]
+    }
+  ],
+  "api": {
+    "in-memory": {
+      "indexKind": "in-memory",
+      "subjectCreate": {
+        "count": 20,
+        "min": 9.048899999994319,
+        "p50": 10.12960000000021,
+        "p90": 14.260299999994459,
+        "p95": 14.928199999994831,
+        "p99": 38.20910000000731,
+        "max": 38.20910000000731,
+        "mean": 12.090340000001742
+      },
+      "searchAccept": {
+        "count": 20,
+        "min": 26.9432000000088,
+        "p50": 33.26450000000477,
+        "p90": 37.99580000000424,
+        "p95": 39.30580000000191,
+        "p99": 45.73060000000987,
+        "max": 45.73060000000987,
+        "mean": 33.80819500000143
+      }
+    },
+    "meilisearch": {
+      "indexKind": "meilisearch",
+      "subjectCreate": {
+        "count": 20,
+        "min": 7.8818000000028405,
+        "p50": 8.850200000000768,
+        "p90": 11.047299999991083,
+        "p95": 11.073199999998906,
+        "p99": 11.39539999999397,
+        "max": 11.39539999999397,
+        "mean": 9.312754999999015
+      },
+      "searchAccept": {
+        "count": 20,
+        "min": 117.16960000000836,
+        "p50": 127.04250000001048,
+        "p90": 152.76380000000063,
+        "p95": 153.16790000000037,
+        "p99": 156.08669999999984,
+        "max": 156.08669999999984,
+        "mean": 134.12192500000236
+      }
+    }
+  }
+}

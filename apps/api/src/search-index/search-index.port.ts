@@ -93,6 +93,28 @@ export interface SearchIndexPort {
   searchDocuments(query: SearchQuery): Promise<readonly IndexHit<DocumentIndexDocument>[]>;
 
   /**
+   * Several subject queries in one round trip, results returned positionally.
+   *
+   * This exists because C4 measured the need for it rather than anticipating it. The FR-08
+   * matcher cannot use a single query: retrieving on the raw name alone loses recall as the
+   * population grows — 81.9% at a thousand subjects, 67.6% at a hundred thousand — because the
+   * top *k* fills with lookalikes before the right person is reached. Retrieving on the
+   * expanded name forms holds recall flat at 95.2% across the same range, and that is the
+   * matcher's real access pattern: one query per name form, every time.
+   *
+   * Issued sequentially those forms cost a round trip each (p95 9.37ms). Issued as one batch
+   * they cost 5.70ms for identical results — so the sequential version is spending 40% of
+   * matcher latency on round trips that buy nothing. See `docs/measurements/c4-search-index.md`.
+   *
+   * Positional results, not merged: which form produced a hit is evidence the matcher uses to
+   * decide what the agreement is worth (FR-08), and merging here would throw that away and make
+   * every caller that needs it issue the queries separately again.
+   */
+  searchSubjectsBatch(
+    queries: readonly SearchQuery[],
+  ): Promise<readonly (readonly IndexHit<SubjectIndexDocument>[])[]>;
+
+  /**
    * Remove entries by primary key.
    *
    * Not an optimisation: SEC-05 requires deletion and suppression to propagate to indexes as
@@ -163,6 +185,19 @@ export class InMemorySearchIndex implements SearchIndexPort {
       .slice(0, query.limit)
       .map((document) => ({ document, score: null }));
     return Promise.resolve(hits);
+  }
+
+  async searchSubjectsBatch(
+    queries: readonly SearchQuery[],
+  ): Promise<readonly (readonly IndexHit<SubjectIndexDocument>[])[]> {
+    // No round trip to save in process, so the batch is the loop. The shape still has to match
+    // the real adapter exactly — positional, one result list per query — or a test that passes
+    // against this one proves nothing about the adapter it stands in for.
+    const results: (readonly IndexHit<SubjectIndexDocument>[])[] = [];
+    for (const query of queries) {
+      results.push(await this.searchSubjects(query));
+    }
+    return results;
   }
 
   async searchDocuments(query: SearchQuery): Promise<readonly IndexHit<DocumentIndexDocument>[]> {
