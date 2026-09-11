@@ -4,33 +4,27 @@
  * "Tenant/client-scoped idempotency key; same canonical request returns the same operation,
  * changed body returns 409. Handle concurrent submissions atomically."
  *
- * The atomicity matters. Two identical requests arriving together must produce **one**
- * committed operation, and a check-then-insert cannot promise that — both callers can pass the
- * check before either inserts. So the claim is a unique-index insert: exactly one caller wins
- * the race, and the loser reads the winner's result.
+ * This is now a thin HTTP-facing wrapper over `InboxReceiptService`, which holds the one
+ * claim protocol this service has (section 6.3 `InboxReceipt`). What stays here is what is
+ * genuinely HTTP: the canonical request hash, and turning a key conflict into the 409 the
+ * contract promises. The queue consumer uses the same receipt on a different channel, so the
+ * two paths cannot drift into disagreeing about what "already done" means.
+ *
+ * The atomicity still matters, and still lives in the claim: two identical requests arriving
+ * together must produce **one** committed operation, and a check-then-insert cannot promise
+ * that — both callers can pass the check before either inserts.
  */
 
 import { createHash } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import type { Collection, Db } from 'mongodb';
 
 import { ApiException } from '../common/api-exception.js';
-
-interface IdempotencyRecord {
-  /** Tenant-scoped: the same key in two tenants is two independent operations (test T23). */
-  readonly tenantId: string;
-  readonly key: string;
-  readonly operation: string;
-  /** SHA-256 of the canonical request body. A changed body under the same key is a 409. */
-  readonly requestHash: string;
-  readonly resultId: string | null;
-  readonly status: 'IN_FLIGHT' | 'COMPLETED';
-  readonly createdAt: Date;
-  readonly completedAt: Date | null;
-  /** Replay window. Documented per section 6.3. */
-  readonly expiresAt: Date;
-}
+import {
+  HTTP_IDEMPOTENCY_CHANNEL,
+  InboxReceiptService,
+  type ReceiptOutcome,
+} from '../persistence/inbox-receipt.service.js';
 
 /**
  * How long a key is remembered. Expiring a receipt must not let a late duplicate repeat a
@@ -39,23 +33,11 @@ interface IdempotencyRecord {
  */
 export const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export type IdempotencyOutcome =
-  | { readonly kind: 'PROCEED' }
-  | { readonly kind: 'REPLAY'; readonly resultId: string }
-  | { readonly kind: 'IN_FLIGHT' };
+export type IdempotencyOutcome = Exclude<ReceiptOutcome, { kind: 'CONFLICT' }>;
 
 @Injectable()
 export class IdempotencyService {
-  private readonly records: Collection<IdempotencyRecord>;
-
-  constructor(db: Db) {
-    this.records = db.collection<IdempotencyRecord>('idempotencyKeys');
-  }
-
-  async ensureIndexes(): Promise<void> {
-    await this.records.createIndex({ tenantId: 1, key: 1, operation: 1 }, { unique: true });
-    await this.records.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-  }
+  constructor(private readonly receipts: InboxReceiptService) {}
 
   /** Stable hash of the request, so key reuse with a different body is detectable. */
   static hashRequest(body: unknown): string {
@@ -76,39 +58,17 @@ export class IdempotencyService {
     readonly requestHash: string;
     readonly now: Date;
   }): Promise<IdempotencyOutcome> {
-    try {
-      await this.records.insertOne({
-        tenantId: input.tenantId,
-        key: input.key,
-        operation: input.operation,
-        requestHash: input.requestHash,
-        resultId: null,
-        status: 'IN_FLIGHT',
-        createdAt: input.now,
-        completedAt: null,
-        expiresAt: new Date(input.now.getTime() + IDEMPOTENCY_WINDOW_MS),
-      });
-      return { kind: 'PROCEED' };
-    } catch (error) {
-      // Duplicate key: somebody else holds this key. Read theirs rather than creating a
-      // second operation.
-      if (!isDuplicateKeyError(error)) {
-        throw error;
-      }
-    }
-
-    const existing = await this.records.findOne({
+    const outcome = await this.receipts.claim({
       tenantId: input.tenantId,
+      channel: HTTP_IDEMPOTENCY_CHANNEL,
       key: input.key,
       operation: input.operation,
+      requestHash: input.requestHash,
+      now: input.now,
+      ttlMs: IDEMPOTENCY_WINDOW_MS,
     });
 
-    if (existing === null) {
-      // Expired between the failed insert and this read. Treat as a fresh claim.
-      return { kind: 'PROCEED' };
-    }
-
-    if (existing.requestHash !== input.requestHash) {
+    if (outcome.kind === 'CONFLICT') {
       // T23 — same key, different body. Never silently returns the first result, because the
       // caller clearly meant something else and would be misled by the old one.
       throw new ApiException(
@@ -118,11 +78,7 @@ export class IdempotencyService {
       );
     }
 
-    if (existing.status === 'COMPLETED' && existing.resultId !== null) {
-      return { kind: 'REPLAY', resultId: existing.resultId };
-    }
-
-    return { kind: 'IN_FLIGHT' };
+    return outcome;
   }
 
   async complete(input: {
@@ -132,10 +88,7 @@ export class IdempotencyService {
     readonly resultId: string;
     readonly now: Date;
   }): Promise<void> {
-    await this.records.updateOne(
-      { tenantId: input.tenantId, key: input.key, operation: input.operation },
-      { $set: { status: 'COMPLETED', resultId: input.resultId, completedAt: input.now } },
-    );
+    await this.receipts.complete({ ...input, channel: HTTP_IDEMPOTENCY_CHANNEL });
   }
 
   /** Release a claim whose work failed, so a retry is not blocked by a dead reservation. */
@@ -144,12 +97,7 @@ export class IdempotencyService {
     readonly key: string;
     readonly operation: string;
   }): Promise<void> {
-    await this.records.deleteOne({
-      tenantId: input.tenantId,
-      key: input.key,
-      operation: input.operation,
-      status: 'IN_FLIGHT',
-    });
+    await this.receipts.release({ ...input, channel: HTTP_IDEMPOTENCY_CHANNEL });
   }
 }
 
@@ -166,8 +114,4 @@ function canonicalise(value: unknown): string {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${JSON.stringify(k)}:${canonicalise(v)}`);
   return `{${entries.join(',')}}`;
-}
-
-function isDuplicateKeyError(error: unknown): boolean {
-  return (error as { code?: number }).code === 11000;
 }

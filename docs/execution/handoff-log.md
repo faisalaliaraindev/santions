@@ -27,6 +27,140 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (later) — Phase C steps C0 and C1: the failure matrix and the section 6.3 records
+
+**Did:**
+
+- **C0 — `docs/failure-injection-matrix.md`.** Sixteen rows, FI-01 to FI-16, one per point where
+  this service writes to two systems that cannot commit together. Each row states the orphan, the
+  named reconciler, the grace window with its basis, and what the user sees in §6.2 vocabulary
+  while it is unreconciled. Three ordering rules sit above the table and decide every row:
+  **prefer an orphan to a dangling reference** (an orphaned S3 object is swept up; a committed
+  reference to an object that was never written tells a reviewer evidence exists when it does
+  not); **every reconciler needs a grace window longer than the longest legitimate in-flight gap**
+  (a sweep that deletes "orphans" younger than the slowest healthy upload deletes live work, and
+  does it under load); and **no unreconciled state may overstate knowledge** — a run may report
+  `RUNNING`/`INCOMPLETE`, never `NO_MATCHES_FOUND`. A row-to-test map ties FI rows to T22, T23,
+  T24, T29, T30, T31, T41, the G4 exit condition, SEC-06 and D-012, and the file names the four
+  boundary families it deliberately does **not** cover (fetch, extraction, export, multi-node) so
+  their absence is a decision rather than an oversight.
+- **C1 — the section 6.3 records this phase needs**, in `apps/api/src/persistence/`:
+  - **`StageExecutionService`** — `(tenantId, runId, stageKey)` unique, which _is_ the
+    duplicate-work guard rather than an optimisation; lease acquisition as one atomic
+    `findOneAndUpdate`; `completeFenced` checking lease token **and** revision; `cancelRun`
+    bumping revision so a late completion fails its fence; `reclaimExpiredLease` returning or
+    abandoning; and `discardedAttempts`, so a refused write is visible rather than silent.
+  - **`OutboxService`** — `append` takes a `ClientSession` as a **required** parameter, so an
+    outbox event written outside its transaction is a type error rather than a code-review note.
+  - **`InboxReceiptService`** — generalises the old `idempotencyKeys` into `inboxReceipts` with a
+    `channel` (`http-idempotency`, or `queue:<consumer>`). `IdempotencyService` is now a thin
+    HTTP wrapper that keeps the canonical request hash and the 409; the queue path will use the
+    same claim protocol, so the two cannot drift into disagreeing about "already done".
+  - **`SourceDocumentService`** — refuses outright to commit a reference whose stored object was
+    never verified; commits `indexState: 'PENDING'` so an unindexed document is findable;
+    `findUnindexed` counts `FAILED` as unindexed, because excluding it would make the gate check
+    pass by omitting exactly the documents it asks about. Four date fields, each with precision,
+    and a missing date stays null.
+  - **`AuditService`** — per-tenant gapless sequence, hash chain, `append` requiring a session,
+    no update or delete method at all, and `verifyChain` returning `SEQUENCE_GAP`, `BROKEN_LINK`,
+    `ALTERED_ENTRY` or `CHECKPOINT_MISMATCH`. See **Found 1**.
+  - **`RetentionService`** — mark the reference, then delete the object; the action is not closed
+    until the object is gone; a hold stops it where it stands; overdue past the window is an
+    operator concern, not a silent retry.
+- **FR-06 failure classification moved into the pure package**,
+  `packages/domain/src/reliability/failure-classification.ts`: the seven classes with their
+  policies as data, `classifyFailure`, full-jitter `backoffDelayMs` with injected randomness, and
+  `shouldRetry`. C6 wires it instead of writing a second taxonomy next to the retry loop.
+- **The migration and audit-integrity decisions** are written into `docs/architecture.md` under
+  a new "Persistence conventions (Phase C)" section, along with a table of the **five** indexes
+  that deliberately do not lead with `tenantId` and why each one cannot.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         221 passed  (was 206: +15 FR-06 classification)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration   52 passed  (was 14: +38 in tests/integration/persistence.test.ts)
+test:security      86 passed  (unchanged - the idempotency refactor regressed nothing)
+coverage          93.74% statements / 91.33% branches, via CI's own invocation
+                  (vitest --project unit --project invariants --project evaluation --coverage)
+                  gate is 85/80
+```
+
+Three guards were verified by planting a violation rather than by assuming:
+
+- deleting the `leaseToken` and `revision` conditions from `completeFenced` fails exactly the two
+  fencing tests (FI-11 stale worker, FI-12 cancellation) and nothing else;
+- dropping `result` from the audited hash fails "detects an altered entry (SEC-06)";
+- making the unverified-reference check unreachable fails "refuses to commit a reference whose
+  object was never verified (FI-03)".
+
+A caution about coverage for the next session: `vitest run --project unit --coverage` alone
+reports 84.56% and fails the gate, because domain code is also exercised by the invariants and
+evaluation projects. The CI line above is the real gate. Do not "fix" a coverage failure that is
+really a wrong invocation.
+
+**Left half-done:** nothing within C0 or C1. **C2 through C6 are not started.** Specifically:
+there is no transaction runner, so nothing yet commits state, audit and outbox together; nothing
+calls any of the new records from a real code path — `searchRuns` is still created and never
+advanced, no stage is ever ensured, no audit entry is written by a real action; there is no
+publisher, no queue consumer, no index writer, no S3 staging and no sweeper. The reconcilers the
+matrix names are specified, not built.
+
+**Found — three things:**
+
+1. **SEC-06 cannot be satisfied by code in this repository, and the design now says so.** A hash
+   chain detects a removed or altered entry. It does not detect an attacker with the entry
+   writer's credentials rewriting an entry and recomputing every hash after it — the chain then
+   verifies. So `AuditCheckpointWriter` is a port; the only implementation,
+   `LocalAuditCheckpointWriter`, shares MongoDB and its credentials with the entry writer and
+   stamps every checkpoint `protection: 'NONE_LOCAL_STACK'`, so nothing built on these records can
+   claim tamper-evidence this deployment does not have. A test asserts that value, and another
+   test demonstrates the wholesale-rewrite attack being caught **only** by the checkpoint. What
+   production must supply is enumerated in `docs/architecture.md`; G11 verifies it.
+2. **The migration question answered itself during C1.** Renaming `idempotencyKeys` to
+   `inboxReceipts` is exactly the kind of change `StartupService`'s idempotent index creation
+   cannot handle — it transforms nothing and silently abandons the old collection. It was safe
+   only because the data was local, disposable and at most 24 hours old. The recorded decision is
+   **additive-only, no migration runner, until the first deployment holding data anyone depends
+   on**, with four concrete requirements listed for the runner that must land before then. The
+   old `idempotencyKeys` collection still exists in the local database with stale documents; it
+   is unread and `pnpm local:reset` clears it.
+3. **The audit sequence serialises audited writes per tenant.** A gapless per-tenant sequence
+   needs an `$inc` on a counter inside the same transaction, so two audited writes for one tenant
+   conflict and one retries. That cost was accepted deliberately: allocating the sequence outside
+   the transaction leaves a hole whenever a transaction aborts, which is indistinguishable from a
+   deletion and would make the tamper signal useless by crying wolf. If C2's transaction-conflict
+   retry policy shows this to be a real throughput problem, the fix is a per-tenant batched
+   sequence — not a non-gapless one.
+
+Still open and still unaddressed, carried from the previous two entries: **`POST /v1/subjects`
+declares a permission but no scope**, so a key scoped to `search:read` can create a subject while
+`POST /v1/searches` refuses it. It belongs to whoever owns the machine contract.
+
+**Next session should:** start **C2** — the transaction runner. One place that opens a MongoDB
+transaction and one retry policy around it, handling transaction conflicts, **unknown commit
+outcomes** (the one people forget: a commit whose result never came back is not a failure, and
+treating it as one is how work gets duplicated) and duplicate-key errors explicitly. Then wire
+the first real caller through it: a search creation that commits the `SearchRun`, its
+`StageExecution` rows, its `AuditEvent` and its `OutboxEvent` together. The seams are already in
+place — `OutboxService.append` and `AuditService.append` both require a `ClientSession`, and
+every other write accepts an optional one. Read `docs/failure-injection-matrix.md` rows FI-04,
+FI-05 and FI-09 before writing it; they are the specification.
+
+**Decisions touched:** none closed. **D12 stays open** and is still closed by C4's measurement
+with numbers in `docs/decisions.md`; Meilisearch remains a working assumption behind the
+`SEARCH_INDEX_KIND` seam and nothing in C1 touched it. **D-012** (30-day evidence retention) now
+has a record that can carry it out, but the retention _policy value_ is unchanged and still
+placeholder-flagged. Two new decisions are recorded in `docs/architecture.md` rather than in
+`docs/decisions.md`, because both are architecture rather than product: additive-only migrations
+until first deployment, and the audit checkpoint as a port with an honestly-labelled local
+implementation.
+
+---
+
 ## 2026-09-11 (end of session) — Phase C brief expanded; nothing in C started
 
 **Did:**

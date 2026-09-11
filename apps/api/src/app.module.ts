@@ -12,6 +12,12 @@ import { ReservedController } from './common/reserved.controller.js';
 import { loadConfig, type AppConfig } from './config/config.js';
 import { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
 import { HealthController } from './health/health.controller.js';
+import { AuditService, LocalAuditCheckpointWriter } from './persistence/audit.service.js';
+import { InboxReceiptService } from './persistence/inbox-receipt.service.js';
+import { OutboxService } from './persistence/outbox.service.js';
+import { RetentionService } from './persistence/retention.service.js';
+import { SourceDocumentService } from './persistence/source-document.service.js';
+import { StageExecutionService } from './persistence/stage-execution.service.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
 import { SearchesController } from './searches/searches.controller.js';
 import { SearchesService } from './searches/searches.service.js';
@@ -91,9 +97,48 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [MONGO_DB],
     },
     {
-      provide: IdempotencyService,
-      useFactory: (db: Db) => new IdempotencyService(db),
+      provide: InboxReceiptService,
+      useFactory: (db: Db) => new InboxReceiptService(db),
       inject: [MONGO_DB],
+    },
+    {
+      provide: IdempotencyService,
+      useFactory: (receipts: InboxReceiptService) => new IdempotencyService(receipts),
+      inject: [InboxReceiptService],
+    },
+    {
+      provide: StageExecutionService,
+      useFactory: (db: Db) => new StageExecutionService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      provide: OutboxService,
+      useFactory: (db: Db) => new OutboxService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      provide: SourceDocumentService,
+      useFactory: (db: Db) => new SourceDocumentService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      provide: RetentionService,
+      useFactory: (db: Db) => new RetentionService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      provide: LocalAuditCheckpointWriter,
+      useFactory: (db: Db) => new LocalAuditCheckpointWriter(db),
+      inject: [MONGO_DB],
+    },
+    {
+      // The checkpoint writer is injected as a port, not constructed inline: SEC-06 requires
+      // production to supply one whose credentials this process does not hold, and a seam that
+      // only exists in a comment is a seam nobody can substitute at.
+      provide: AuditService,
+      useFactory: (db: Db, checkpoints: LocalAuditCheckpointWriter) =>
+        new AuditService(db, checkpoints),
+      inject: [MONGO_DB, LocalAuditCheckpointWriter],
     },
     {
       provide: SearchesService,
@@ -109,16 +154,42 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         apiKeys: ApiKeyService,
         subjects: SubjectsService,
         nameFrequency: NameFrequencyService,
-        idempotency: IdempotencyService,
+        receipts: InboxReceiptService,
         searches: SearchesService,
-      ) => new StartupService(sessions, apiKeys, subjects, nameFrequency, idempotency, searches),
+        stages: StageExecutionService,
+        outbox: OutboxService,
+        documents: SourceDocumentService,
+        retention: RetentionService,
+        audit: AuditService,
+        checkpoints: LocalAuditCheckpointWriter,
+      ) =>
+        new StartupService(
+          sessions,
+          apiKeys,
+          subjects,
+          nameFrequency,
+          receipts,
+          searches,
+          stages,
+          outbox,
+          documents,
+          retention,
+          audit,
+          checkpoints,
+        ),
       inject: [
         SessionService,
         ApiKeyService,
         SubjectsService,
         NameFrequencyService,
-        IdempotencyService,
+        InboxReceiptService,
         SearchesService,
+        StageExecutionService,
+        OutboxService,
+        SourceDocumentService,
+        RetentionService,
+        AuditService,
+        LocalAuditCheckpointWriter,
       ],
     },
 

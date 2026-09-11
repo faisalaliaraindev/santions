@@ -1,6 +1,6 @@
 # Phase C — Persistence, jobs, index and object storage
 
-**Gate:** G4 · **Status:** NOT STARTED · **Prerequisite:** Phase B complete (it is)
+**Gate:** G4 · **Status:** IN PROGRESS — C0 and C1 done, C2 next · **Prerequisite:** Phase B complete (it is)
 
 ---
 
@@ -133,6 +133,22 @@ which is fine for additive indexes and **not** fine for a change that has to tra
 documents. Decide in this step whether Phase C needs a real runner or whether additive-only is
 honest, and write the answer into `docs/architecture.md`.
 
+**Done (2026-09-11).** `apps/api/src/persistence/` holds `StageExecutionService`,
+`OutboxService`, `InboxReceiptService`, `SourceDocumentService`, `AuditService` (with the
+`AuditCheckpointWriter` port and `LocalAuditCheckpointWriter`) and `RetentionService`, all
+registered in `app.module.ts` and indexed by `StartupService`. `idempotencyKeys` became
+`inboxReceipts` with a `channel`, and `IdempotencyService` is now a thin HTTP wrapper over it.
+The FR-06 classification table lives in `packages/domain/src/reliability/failure-classification.ts`
+— pure, so C6 wires it rather than inventing a second taxonomy. Covered by
+`tests/integration/persistence.test.ts` (38 tests). The migration decision (additive-only, no
+runner, with what production requires written out) and the audit-integrity decision are in
+`docs/architecture.md` under "Persistence conventions (Phase C)".
+
+**What C1 deliberately did not do:** nothing calls any of these records yet. `searchRuns` is
+still created and never advanced, no stage is ever ensured by a real code path, and no audit
+entry is written by a real action. Wiring them to the search lifecycle is C2's transaction
+runner, and doing it in C1 would have meant designing the transaction boundary twice.
+
 ### C2 — Transactions and the outbox
 
 Report state, audit reference and outbox events commit **together**, in one MongoDB transaction
@@ -207,8 +223,8 @@ policies and different attempt counts, and three of the five must not be retried
 
 ## Definition of done
 
-- [ ] C0 — `docs/failure-injection-matrix.md` exists and covers every two-system boundary
-- [ ] C1 — records, indexes and the migration decision; tenant context leads every tenant-owned key
+- [x] C0 — `docs/failure-injection-matrix.md` exists and covers every two-system boundary (16 rows, FI-01..FI-16)
+- [x] C1 — records, indexes and the migration decision; tenant context leads every tenant-owned key, with the five cross-tenant index exceptions documented in `docs/architecture.md`
 - [ ] C2 — state, audit reference and outbox commit in one transaction, with conflict, unknown-outcome and duplicate-key handling
 - [ ] C3 — index built behind the seam; reconciliation re-indexes a committed-but-unindexed document
 - [ ] C4 — three latencies measured over the FR-16 corpus; **D12 closed in `docs/decisions.md` with numbers**

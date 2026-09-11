@@ -168,3 +168,99 @@ No graph database, no Redis, no vector database. Indexed MongoDB serves report l
 one-hop graph traversal. Any of these may be introduced later, but only when a documented
 query or workload test justifies it — and MongoDB is not mistaken for an internet search
 engine, which is why a real search index is in the mandatory stack.
+
+## Persistence conventions (Phase C)
+
+The collection naming and versioning rules were set in Phase B and are unchanged: a collection
+is named for its section 6.3 record, camelCase, plural; a version is immutable and an update
+writes a new version and supersedes the old one; nothing trusts a tenant that came from a
+request, and Phase C extends that rule to queue envelopes.
+
+Three things Phase C decided that were previously unstated.
+
+### Indexes that do not lead with tenant context
+
+Section 6.3 requires tenant-owned keys and indexes to start with tenant context, and every
+tenant-owned index in this service does. There are now five documented exceptions, each of
+which exists because the query genuinely has no tenant to start from:
+
+| Index                                                                               | Why it cannot lead with `tenantId`                                                                                                                 |
+| :---------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKeyCredentials.keyId`                                                           | The presented credential carries no tenant. The lookup is what _establishes_ the tenant                                                            |
+| `nameFrequencyProfiles`                                                             | Population data is shared and must never become tenant-owned, or a common surname is re-measured per customer                                      |
+| `stageExecutions.{state, nextAttemptAt}` and `{state, leaseExpiresAt}`              | Work claiming and lease sweeping are platform processes. A per-tenant sweep leaves a crashed worker's stage stuck in whichever tenant nobody swept |
+| `outboxEvents.{publishedAt, nextAttemptAt}`                                         | Publication is a platform process and must see the oldest due event anywhere                                                                       |
+| `sourceDocumentVersions.{indexState, createdAt}`, `retentionActions.{state, dueAt}` | Reconciliation and retention are platform obligations; scoping them per tenant is how one tenant's unindexed evidence goes unnoticed               |
+
+These are **index** exceptions, not authorisation exceptions. Every one of them feeds a
+platform process that then acts on a single record whose `tenantId` it reads from the record
+itself — never from a queue envelope, a request header or a caller's claim (SEC-01). Fairness
+between tenants in work claiming is REL-02's problem and is solved in the claim query, not by
+an index that makes cross-tenant work invisible.
+
+### Migrations
+
+**Decision: additive-only, with no migration runner, until the first production deployment.**
+
+`StartupService` creates indexes idempotently at boot. That is honest for additive index
+creation and it is _not_ honest for anything that has to transform existing documents — a
+renamed field, a re-shaped value, a split collection. Saying "we can migrate" without having
+migrated anything is a claim, not a capability.
+
+What makes additive-only defensible right now is narrow and will expire: there is no
+production deployment, no customer data, and the local stack is rebuilt with
+`pnpm local:reset` whenever a shape changes. Phase C produced one change that a runner would
+have been needed for — `idempotencyKeys` became `inboxReceipts` with a `channel` field — and it
+was safe only because the data in it was local, disposable and at most 24 hours old.
+
+**What this commits us to.** A migration runner is required before the first deployment that
+holds data anyone depends on, and it must land with:
+
+- ordered, versioned, idempotent migrations recorded in a `schemaMigrations` collection;
+- a forward migration and a documented recovery for each — not necessarily a reversible one,
+  but never nothing;
+- execution as a deliberate step, not as a side effect of a process starting, so that ten API
+  instances booting at once do not each begin transforming the same documents;
+- a test that runs them against a database seeded with the _previous_ shape, since a migration
+  verified only against an empty database has not been verified.
+
+Until then, any change requiring a document transformation is a change that must either wait
+for the runner or be accompanied by one. This paragraph is the record that the choice was
+made rather than overlooked. Gate G11 re-checks it.
+
+### Audit integrity
+
+SEC-06 explicitly rules out the obvious implementation: _a hash chain stored with the same
+unrestricted writer is not sufficient by itself._ The design honours that by separating what
+the code can do from what the deployment must do.
+
+**What the code does.** `auditEvents` carries a per-tenant gapless sequence and a hash chain
+over entry content and predecessor hash. Entries commit **inside** the business transaction, so
+there is no window in which an action happens unrecorded. `AuditService` exposes no update and
+no delete method to any caller. `verifyChain` detects a sequence gap, a broken link, an altered
+entry and a checkpoint mismatch.
+
+**What the code cannot do, stated rather than papered over.** An attacker holding the entry
+writer's credentials can rewrite an entry, recompute every hash after it and leave a chain that
+verifies. Detection of _that_ requires a checkpoint written by a principal the entry writer
+cannot act as. This is a deployment property. No amount of additional code in this repository
+creates it.
+
+So `AuditCheckpointWriter` is a port. The only implementation today is
+`LocalAuditCheckpointWriter`, which shares MongoDB and its credentials with the entry writer,
+and every checkpoint it writes carries `protection: 'NONE_LOCAL_STACK'` so that nothing built
+on these records can accidentally claim tamper-evidence this deployment does not have.
+
+**What production must supply**, and what gate G11 verifies rather than this phase:
+
+1. Separate audit-write and audit-read permissions, neither held by the business roles.
+2. A checkpoint writer with its own principal — a different IAM role, a different datastore, or
+   an external notary — which the entry-writing principal cannot assume. Periodic, covering the
+   current head, with the appropriate `protection` value recorded.
+3. A verifier that runs on a schedule and alerts on any non-`ok` verdict, including entries
+   accumulating past the last checkpoint.
+4. Retention reconciled with SEC-05: minimal permitted facts, not a permanent duplicate of the
+   evidence text.
+
+Local emulation is not evidence that any of this works, exactly as it is not for S3 IAM and KMS
+(SEC-03).

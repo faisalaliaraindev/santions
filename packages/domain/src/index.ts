@@ -36,3 +36,5 @@ export * from './planning/query-families.js';
 export * from './coverage/result-state.js';
 export * from './identity/transliteration.js';
 export * from './access/permissions.js';
+
+export * from './reliability/failure-classification.js';
