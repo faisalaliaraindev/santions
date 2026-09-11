@@ -9,8 +9,10 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-d.md`](./phase-d.md). It is an **outline, not a brief** — expanding it is the
-> first task of the phase, and the outline itself says what expanding it involves.
+> Brief: [`phase-d.md`](./phase-d.md). **Expanded into a full brief on 2026-09-11** — six steps
+> plus a **D0** that did not exist in the outline: a Costa Rica source dossier written before
+> any adapter, because D-010 means none of the free sources this plan was written around covers
+> the only enabled jurisdiction. Start there, not at D1.
 >
 > **No decision is due at G5.** D1, D3 and D8 were the three this phase was meant to close, and
 > all three closed on 2026-09-11 (see `docs/decisions.md` D-010, D-009, D-012) — Costa Rica with

@@ -27,6 +27,57 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (late) — Phase D brief expanded from outline. No code written.
+
+**Did:** rewrote `docs/execution/phase-d.md` from a ~4KB outline into a full brief in the Phase C
+format: goal, why-this-order, a narrow read-before-starting list, what already exists, seven
+steps, definition of done, a "do not" list, decisions, risks.
+
+The substantive change is a **new step D0 that the outline did not have**: write a Costa Rica
+source dossier before any adapter. D-010 makes CR the only enabled jurisdiction, and every free
+source this plan was written around (Companies House, EDGAR, CourtListener) is UK or US. Writing
+`CompanyRegistryPort` first would design the association graph around a registry contract nobody
+has confirmed exists. D0 also picks up two work items that were stranded in `docs/decisions.md`
+and named in no brief: the **Costa Rican name-frequency distribution** (D-011 — without it the
+FR-08 frequency penalty never fires for Rodríguez or Jiménez) and the **Spanish lexicon needing a
+Spanish-reading reviewer** (D-010 — explicitly not a translation task).
+
+Other calls made while expanding, each written into the brief with its reasoning:
+
+- **One versioned-approval service** for sources, taxonomy and policy, not three. Suspension does
+  **not** require four eyes (re-activation does) — needing a second person to stop using a bad
+  source is how a bad source stays live over a weekend.
+- **The reliability profile must not live on `SourceVersion`.** It is changing runtime
+  observation; the version is an immutable approved artefact. A separate mutable `SourceHealth`.
+- **`COMPLETE` / `INCOMPLETE` / `UNKNOWN` association coverage kept distinct.** `UNKNOWN` is the
+  likely CR case — never asked, because no approved registry exists — and reporting it as
+  `INCOMPLETE` claims an attempt that never happened.
+- **SEC-05 rights is a pure function in `packages/domain/src/rights/`**, with model disclosure as
+  its own operation, default-deny on unknown ones.
+- Scope fence: Phase D defines all six FR-05 ports and mocks them all, but builds only the
+  `CompanyRegistryPort` real adapter. Discovery and fetch stay in Phase E.
+
+**Verified:** `npx prettier --check docs/execution/phase-d.md` clean. No code changed, so no
+suite was run — the last recorded state stands (unit 283 · invariants 29 · evaluation 12 ·
+integration 120 · security 95).
+
+**Left half-done:** nothing. Phase D itself is not started — the brief is the deliverable here.
+
+**Found:** `START-HERE.md` still told the next session that phase-d.md was an outline whose
+expansion was the first task. Updated to point at D0 instead.
+
+**Next session should:** start **D0** — create `docs/sources/cr-dossier.md` and work the
+candidate list in `docs/decisions.md` D-010. Every claim labelled `DOCUMENTED` / `INFERRED` /
+`UNKNOWN`; **no live call** (G10 owns live verification).
+
+**Decisions touched:** none closed. Expect D0 to open **D14** — what feeds the association graph
+in Costa Rica if no free officer-level register exists — owner is product, not engineering. D6
+(robots exceptions) should be raised with a source admin during this phase, not at the start of
+Phase E, because the registry field that records it must exist before the first source version is
+approved.
+
+---
+
 ## 2026-09-11 (night) — Phase C step C6: the consumer, fencing, cancellation and the dead letter. **Gate G4 passed.**
 
 **Did:**
