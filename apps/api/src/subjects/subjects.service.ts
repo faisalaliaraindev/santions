@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import type { Collection, Db } from 'mongodb';
+import type { ClientSession, Collection, Db } from 'mongodb';
 
 import type { CreateSubjectInput, SubjectVersion } from '@erly/adverse-contracts';
 import { normaliseName, phoneticKeys } from '@erly/adverse-domain';
@@ -43,10 +43,19 @@ export class SubjectsService {
     await this.subjects.createIndex({ tenantId: 1, externalSubjectRef: 1 });
   }
 
+  /**
+   * Create the first version of a subject.
+   *
+   * `session` is optional because this is reached two ways. `POST /v1/subjects` creates a
+   * subject on its own and has no transaction to join. Search creation passes its session, so
+   * that a snapshot and the run that cites it commit together — without it, a crash between
+   * them leaves a subject version no search references (matrix row FI-02).
+   */
   async create(input: {
     readonly tenantId: string;
     readonly data: CreateSubjectInput;
     readonly now: Date;
+    readonly session?: ClientSession | undefined;
   }): Promise<SubjectVersion> {
     const { tenantId, data, now } = input;
 
@@ -92,7 +101,10 @@ export class SubjectsService {
       supersededAt: null,
     };
 
-    await this.subjects.insertOne(record);
+    await this.subjects.insertOne(
+      record,
+      input.session === undefined ? {} : { session: input.session },
+    );
     return toWire(record);
   }
 

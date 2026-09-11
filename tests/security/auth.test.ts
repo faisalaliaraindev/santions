@@ -201,6 +201,7 @@ describe('T09 — production startup guards', () => {
     SESSION_SECRET: 'a-real-rotated-session-secret',
     SESSION_COOKIE_SECURE: 'true',
     CORS_ORIGINS: 'https://panel.example.com',
+    JOBS_QUEUE_URL: 'https://sqs.eu-west-2.amazonaws.com/123456789012/adverse-search-jobs',
   };
 
   it('accepts a properly configured production environment', () => {
@@ -246,6 +247,34 @@ describe('T09 — production startup guards', () => {
     expect(() => loadConfig({ ...productionBase, CORS_ORIGINS: '*' })).toThrow(
       /wildcard origin is never permitted/,
     );
+  });
+
+  it('rejects a queue-less production configuration', () => {
+    // A production API that accepts searches with no queue publishes every job into an
+    // in-process array that vanishes at restart. The search is accepted and never runs, which
+    // is the worst of both: the customer is told "queued" and nothing is queued.
+    const withoutQueue = { ...productionBase, JOBS_QUEUE_URL: undefined };
+    expect(() => loadConfig(withoutQueue)).toThrow(/JOBS_QUEUE_URL is not set/u);
+  });
+
+  it('rejects an AWS endpoint override in production', () => {
+    // That override exists so the service can talk to LocalStack. In production it can only
+    // mean AWS traffic is being pointed somewhere that is not AWS.
+    expect(() =>
+      loadConfig({ ...productionBase, AWS_ENDPOINT_URL: 'http://127.0.0.1:28566' }),
+    ).toThrow(/AWS_ENDPOINT_URL is set/u);
+  });
+
+  it('rejects static AWS credentials in production', () => {
+    // A long-lived access key in an environment variable is exactly what an instance or task
+    // role exists to remove. If one is present, the role is not being used.
+    expect(() =>
+      loadConfig({
+        ...productionBase,
+        AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE',
+        AWS_SECRET_ACCESS_KEY: 'a-long-lived-secret-key-value',
+      }),
+    ).toThrow(/Static AWS credentials are set/u);
   });
 
   it('permits the same development values outside production', () => {

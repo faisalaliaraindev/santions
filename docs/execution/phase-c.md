@@ -1,6 +1,6 @@
 # Phase C — Persistence, jobs, index and object storage
 
-**Gate:** G4 · **Status:** IN PROGRESS — C0 and C1 done, C2 next · **Prerequisite:** Phase B complete (it is)
+**Gate:** G4 · **Status:** IN PROGRESS — C0, C1 and C2 done, C3 next · **Prerequisite:** Phase B complete (it is)
 
 ---
 
@@ -164,6 +164,20 @@ Report state, audit reference and outbox events commit **together**, in one Mong
   persisted record** before acting on it (SEC-01). The envelope's tenant field is a routing hint,
   never an authority.
 
+**Done (2026-09-11).** `TransactionRunner` (`apps/api/src/persistence/transaction.runner.ts`) is
+the one place that opens a transaction: bounded attempts, bounded deadline, full-jitter backoff,
+and the three §6.3 cases handled visibly — a conflict retries the body, an **unknown commit
+outcome retries the commit and never the body**, a duplicate key is surfaced immediately.
+`SearchesService.create` now commits the `SearchRun`, its `AuditEvent` and its `OutboxEvent`
+together, with the subject snapshot resolved inside the same session. `OutboxPublisher` publishes
+committed events afterwards through `QueuePort`, whose SQS adapter uses the AWS SDK with long
+polling and batched sends; `verifyJobOwnership` is the only place allowed to turn an envelope into
+a tenant, and it does it by loading the aggregate by ID alone and ignoring the envelope's claim.
+
+**What C2 did not do:** no consumer loop yet — `verifyJobOwnership` and `QueuePort.receive` exist
+and are tested, but nothing dequeues in a running process. That is C6, along with the DLQ and the
+FR-06 retry wiring.
+
 ### C3 — The search index
 
 Name-matching indexes and the corpus index, with **MongoDB as the system of record**. The index
@@ -225,7 +239,7 @@ policies and different attempt counts, and three of the five must not be retried
 
 - [x] C0 — `docs/failure-injection-matrix.md` exists and covers every two-system boundary (16 rows, FI-01..FI-16)
 - [x] C1 — records, indexes and the migration decision; tenant context leads every tenant-owned key, with the five cross-tenant index exceptions documented in `docs/architecture.md`
-- [ ] C2 — state, audit reference and outbox commit in one transaction, with conflict, unknown-outcome and duplicate-key handling
+- [x] C2 — state, audit reference and outbox commit in one transaction, with conflict, unknown-outcome and duplicate-key handling
 - [ ] C3 — index built behind the seam; reconciliation re-indexes a committed-but-unindexed document
 - [ ] C4 — three latencies measured over the FR-16 corpus; **D12 closed in `docs/decisions.md` with numbers**
 - [ ] C5 — staged upload, checksum verification, reference commit, orphan reconciliation

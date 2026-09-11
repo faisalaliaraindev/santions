@@ -264,3 +264,28 @@ on these records can accidentally claim tamper-evidence this deployment does not
 
 Local emulation is not evidence that any of this works, exactly as it is not for S3 IAM and KMS
 (SEC-03).
+
+### Jobs and the queue
+
+The queue is reached through `QueuePort`. Two things about the implementation are decisions
+rather than defaults.
+
+**The AWS SDK, not the unsigned REST calls the bootstrap scripts use.** Those scripts talk to
+LocalStack, which accepts unsigned requests, and keeping the SDK out of them is what stops a
+stray AWS profile pointing a bootstrap script at real infrastructure. The _application_ has the
+opposite requirement: in production it authenticates with a credential that rotates — an instance
+role, a task role, IRSA — and SigV4 over a rotating credential is a security control to be used,
+not re-implemented. The SDK's credential chain is the production answer and is the same code path
+locally, with only the endpoint overridden. Startup refuses an `AWS_ENDPOINT_URL` or a static
+access key in production, for exactly that reason.
+
+**Two cost levers are built in rather than retrofitted.** Long polling (`WaitTimeSeconds: 20`),
+because short polling bills a request per empty receive and on an idle queue that is the whole
+bill; and batched sends of up to ten envelopes, which SQS charges as one request, so a run
+fanning out to nine sources costs one request rather than nine. Both are cheaper to adopt now
+than to introduce later against code that assumed per-message calls.
+
+**A missing queue is a refusal, not a fallback.** With no `JOBS_QUEUE_URL` the service uses an
+in-process queue and says so loudly, and production startup rejects the configuration outright. A
+service that accepts a search and publishes its job into a variable that vanishes at restart has
+told a customer "queued" and queued nothing — which is worse than refusing to start.

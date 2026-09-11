@@ -14,6 +14,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
 import { AppModule, APP_CONFIG } from './app.module.js';
+import { OutboxPublisher } from './jobs/outbox-publisher.js';
 import { correlationMiddleware } from './common/correlation.js';
 import { corsOptions } from './common/cors.js';
 import type { AppConfig } from './config/config.js';
@@ -57,9 +58,20 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
+  // Start publishing committed outbox events (matrix row FI-04). Started here rather than in
+  // the module so that importing the application for a test does not silently start draining
+  // the outbox of whatever database that test is pointed at.
+  app.get(OutboxPublisher).start(config.jobs.pollMs);
+
   await app.listen(config.port);
 
   logger.log(`API listening on ${String(config.port)} (${config.nodeEnv}, mode=${config.mode})`);
+  if (config.jobs.queueUrl === null) {
+    logger.warn(
+      'No JOBS_QUEUE_URL: jobs are published to an in-process queue and do not survive a ' +
+        'restart. Production startup refuses this configuration.',
+    );
+  }
   if (!config.isProduction) {
     logger.warn('Development configuration. Production startup rejects this setup (test T09).');
   }

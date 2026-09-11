@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
-import type { Collection, Db } from 'mongodb';
+import type { ClientSession, Collection, Db } from 'mongodb';
 
 import type { CreateSearchInput, SearchSummary } from '@erly/adverse-contracts';
 import type { Principal } from '@erly/adverse-domain';
@@ -20,7 +20,12 @@ import {
   EntitlementsService,
   type PinnedVersions,
 } from '../tenancy/entitlements.service.js';
+import { AuditService } from '../persistence/audit.service.js';
+import { OutboxService } from '../persistence/outbox.service.js';
+import { TransactionRunner } from '../persistence/transaction.runner.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
+
+type SubjectRef = NonNullable<CreateSearchInput['subjectRef']>;
 
 interface SearchRecord {
   readonly searchId: string;
@@ -51,6 +56,9 @@ export class SearchesService {
     db: Db,
     private readonly entitlements: EntitlementsService,
     private readonly subjects: SubjectsService,
+    private readonly transactions: TransactionRunner,
+    private readonly audit: AuditService,
+    private readonly outbox: OutboxService,
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
   }
@@ -93,61 +101,177 @@ export class SearchesService {
       environment: data.environment,
     });
 
-    // Resolve the subject: either an existing pinned version, or a new snapshot.
-    let subjectId: string;
-    let subjectVersion: number;
-
-    if (data.subjectRef !== undefined) {
-      const subject = await this.subjects.findVersion({
-        tenantId,
-        subjectId: data.subjectRef.subjectId,
-        version: data.subjectRef.version,
-      });
-      subjectId = subject.subjectId;
-      subjectVersion = subject.version;
-    } else if (data.subjectSnapshot !== undefined) {
-      const subject = await this.subjects.create({ tenantId, data: data.subjectSnapshot, now });
-      subjectId = subject.subjectId;
-      subjectVersion = subject.version;
-    } else {
-      // The schema's refine already prevents this; kept as a defence in depth.
-      throw new ApiException(
-        'VALIDATION_FAILED',
-        'Provide exactly one of subjectRef or subjectSnapshot.',
-      );
-    }
+    const subject = {
+      ref: data.subjectRef ?? null,
+      snapshot: data.subjectSnapshot,
+    };
 
     const pinnedVersions = await this.entitlements.pinVersions(tenantId, entitlement.version);
 
-    const record: SearchRecord = {
-      searchId: randomUUID(),
-      tenantId,
-      subjectId,
-      subjectVersion,
-      environment: data.environment,
-      // Nothing has run yet. Reporting anything but QUEUED / NOT_EVALUATED / UNKNOWN here
-      // would be claiming a result the service does not have (section 6.2).
-      execution: 'QUEUED',
-      findings: 'NOT_EVALUATED',
-      coverage: 'UNKNOWN',
-      pinnedVersions,
-      requestedScope: data.requestedScope,
-      externalCaseRef: data.externalCaseRef ?? null,
-      createdBy: principal.subject,
-      createdAt: now,
-      completedAt: null,
-      refreshOfSearchId: null,
-      progress: {
-        stagesCompleted: 0,
-        stagesTotal: 0,
-        cascadeRungReached: null,
-        warnings: [],
-      },
-      revision: 1,
-    };
+    return this.commitRun({ principal, data, now, tenantId, pinnedVersions, subject });
+  }
 
-    await this.searches.insertOne(record);
-    return toWire(record);
+  /**
+   * The one write. Run state, audit entry and outbox event commit **together** (section 6.3).
+   *
+   * Everything the transaction needs was resolved before it opened — the entitlement check,
+   * the pinned versions, the subject — because the body may run more than once under a write
+   * conflict and must be free of side effects outside the session.
+   *
+   * The subject snapshot is the exception, and it is inside on purpose: it is a write, so it
+   * belongs to the same commit as the run that cites it. Retrying the body writes a second
+   * subject version, which is correct — a version is immutable, and the run that commits is
+   * the one whose version is referenced. The abandoned version is not an orphan in any sense
+   * that matters, because a failed transaction wrote nothing at all.
+   *
+   * The outbox event is what starts the work. Nothing is published from here: publication
+   * happens after the commit, from `OutboxPublisher` (matrix rows FI-04 and FI-05).
+   */
+  private async commitRun(input: {
+    readonly principal: Principal;
+    readonly data: CreateSearchInput;
+    readonly now: Date;
+    readonly tenantId: string;
+    readonly pinnedVersions: PinnedVersions;
+    readonly subject: {
+      readonly ref: SubjectRef | null;
+      readonly snapshot: CreateSearchInput['subjectSnapshot'];
+    };
+  }): Promise<SearchSummary> {
+    const { principal, data, now, tenantId, pinnedVersions } = input;
+
+    return this.transactions.run(
+      async (session: ClientSession) => {
+        const resolved = await this.resolveSubject({
+          tenantId,
+          subject: input.subject,
+          now,
+          session,
+        });
+
+        const record: SearchRecord = {
+          searchId: randomUUID(),
+          tenantId,
+          subjectId: resolved.subjectId,
+          subjectVersion: resolved.version,
+          environment: data.environment,
+          // Nothing has run yet. Reporting anything but QUEUED / NOT_EVALUATED / UNKNOWN here
+          // would be claiming a result the service does not have (section 6.2).
+          execution: 'QUEUED',
+          findings: 'NOT_EVALUATED',
+          coverage: 'UNKNOWN',
+          pinnedVersions,
+          requestedScope: data.requestedScope,
+          externalCaseRef: data.externalCaseRef ?? null,
+          createdBy: principal.subject,
+          createdAt: now,
+          completedAt: null,
+          refreshOfSearchId: null,
+          progress: {
+            stagesCompleted: 0,
+            stagesTotal: 0,
+            cascadeRungReached: null,
+            warnings: [],
+          },
+          revision: 1,
+        };
+
+        await this.searches.insertOne(record, { session });
+
+        // SEC-06 — the audit entry commits with the action, so an accepted search cannot exist
+        // without a record of who asked for it and under which entitlement.
+        await this.audit.append(
+          {
+            tenantId,
+            actor: {
+              type: principal.kind === 'MACHINE' ? 'MACHINE' : 'USER',
+              subject: principal.subject,
+              clientId: null,
+            },
+            action: 'search.create',
+            target: { type: 'SearchRun', id: record.searchId, version: record.revision },
+            // SEC-05 — the minimal permitted fact. The declared purpose of the screening is
+            // why this was allowed; the subject's identity details are not copied into the audit
+            // trail, which would duplicate personal data indefinitely.
+            reason: resolved.purpose,
+            correlationId: null,
+            result: 'ALLOWED',
+            now,
+          },
+          session,
+        );
+
+        await this.outbox.append(
+          {
+            tenantId,
+            eventType: 'search.queued',
+            aggregateType: 'SearchRun',
+            aggregateId: record.searchId,
+            aggregateRevision: record.revision,
+            payload: {
+              searchId: record.searchId,
+              subjectId: record.subjectId,
+              subjectVersion: record.subjectVersion,
+              environment: record.environment,
+            },
+            now,
+          },
+          session,
+        );
+
+        return toWire(record);
+      },
+      { name: 'search.create' },
+    );
+  }
+
+  /** Resolve the subject inside the transaction: an existing pinned version, or a new one. */
+  private async resolveSubject(input: {
+    readonly tenantId: string;
+    readonly subject: {
+      readonly ref: SubjectRef | null;
+      readonly snapshot: CreateSearchInput['subjectSnapshot'];
+    };
+    readonly now: Date;
+    readonly session: ClientSession;
+  }): Promise<{
+    readonly subjectId: string;
+    readonly version: number;
+    /** Never null: FR-01 requires a screening purpose on every subject. */
+    readonly purpose: string;
+  }> {
+    if (input.subject.ref !== null) {
+      const subject = await this.subjects.findVersion({
+        tenantId: input.tenantId,
+        subjectId: input.subject.ref.subjectId,
+        version: input.subject.ref.version,
+      });
+      return {
+        subjectId: subject.subjectId,
+        version: subject.version,
+        purpose: subject.purpose,
+      };
+    }
+
+    if (input.subject.snapshot !== undefined) {
+      const subject = await this.subjects.create({
+        tenantId: input.tenantId,
+        data: input.subject.snapshot,
+        now: input.now,
+        session: input.session,
+      });
+      return {
+        subjectId: subject.subjectId,
+        version: subject.version,
+        purpose: subject.purpose,
+      };
+    }
+
+    // The schema's refine already prevents this; kept as a defence in depth.
+    throw new ApiException(
+      'VALIDATION_FAILED',
+      'Provide exactly one of subjectRef or subjectSnapshot.',
+    );
   }
 
   /** Tenant scoping is in the query, never a check afterwards (SEC-01). */

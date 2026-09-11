@@ -27,6 +27,133 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (later still) — Phase C step C2: transactions, the outbox and the queue seam
+
+**Did:**
+
+- **`TransactionRunner`** (`apps/api/src/persistence/transaction.runner.ts`) — the one place that
+  opens a MongoDB transaction, written out rather than delegated to the driver's
+  `withTransaction`, because §6.3 asks for three cases to be handled **explicitly** and the
+  helper hides the one that matters:
+  - a **transaction conflict** (`TransientTransactionError`) retries the whole body — nothing
+    committed, so re-running is safe;
+  - an **unknown commit outcome** (`UnknownTransactionCommitResult`) retries **the commit alone,
+    never the body**. The work may already be durable; re-running it is how duplicate work gets
+    committed. When both labels are present, unknown wins — an outcome we did not hear is not an
+    outcome we know did not happen. If the deadline passes with the outcome still unknown, the
+    caller gets `UnknownCommitOutcomeError`, which says "check the record", not "it failed";
+  - a **duplicate key** is surfaced immediately and never retried. It is deterministic, and two
+    services in this codebase deliberately _use_ it as their "somebody already did this" signal.
+  - Bounded attempts (5), bounded deadline (15 s, shorter than the driver's 120 s because this
+    sits behind an HTTP request), full-jitter backoff, injected `sleep`/`random` so the policy is
+    testable without waiting for it.
+- **Search creation now commits run, audit entry and outbox event together.**
+  `SearchesService.create` does its read-only work first — sandbox/live check, entitlement check,
+  pinned versions — then opens one transaction that inserts the `SearchRun`, appends the SEC-06
+  `AuditEvent` and appends the `OutboxEvent` that will start the work. The subject snapshot is
+  resolved **inside** the session (`SubjectsService.create` gained an optional `session`), so a
+  snapshot and the run citing it commit together; matrix row FI-02 was updated to say that gap is
+  now closed on the search path and why it deliberately stays open on `POST /v1/subjects`.
+- **`QueuePort`** (`apps/api/src/jobs/queue.port.ts`) — the job envelope as a contract, a
+  defensive `parseEnvelope` that rejects an unknown `envelopeVersion` rather than half-reading it,
+  and an `InMemoryQueueAdapter` for tests.
+- **`SqsQueueAdapter`** — the production implementation, using `@aws-sdk/client-sqs` (a new
+  dependency; see **Found 2**). Long polling at 20 s and batched sends of ten, both cost decisions
+  taken now because they are far cheaper to build in than to retrofit. Partial batch failure is
+  reported per entry rather than treated as all-or-nothing.
+- **`OutboxPublisher`** — the FI-04 reconciler. Polls committed-and-due events, publishes, then
+  marks. **Publishes before marking**, deliberately: a crash between them republishes (FI-05),
+  which the consumer deduplicates, whereas marking first would lose the event outright. Failed
+  publications get a full-jitter backoff and stay in the outbox. Started from `main.ts`, not from
+  the module, so importing the app in a test does not silently start draining whatever database
+  that test is pointed at.
+- **`verifyJobOwnership`** (SEC-01) — the only place allowed to turn an envelope into a tenant.
+  It loads the aggregate **by ID alone** and takes the tenant from the record, so a forged
+  envelope produces a `TENANT_MISMATCH` security event rather than cross-tenant work. A loader
+  scoped by the envelope's own tenant would make the check a tautology, and a test asserts the
+  loader is called with the aggregate ID and nothing else. Also returns `STALE_REVISION` for an
+  out-of-order delivery (T31).
+- **Config and startup guards:** `JOBS_QUEUE_URL`, `AWS_REGION`, `AWS_ENDPOINT_URL`, static AWS
+  credentials and `OUTBOX_POLL_MS`. Production startup now **refuses** an endpoint override, a
+  static access key, or a missing queue URL — see **Found 1**.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         241 passed  (was 221: +20 transaction/envelope/ownership policy)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration   66 passed  (was 52: +14 in tests/integration/transactions.test.ts)
+test:security      89 passed  (was 86: +3 new production guards)
+coverage          93.74% statements / 91.33% branches (gate 85/80), via CI's own invocation
+```
+
+The write-conflict test is a real conflict, not a simulated one: two sessions read-then-write the
+same document under snapshot read concern, and the run log shows
+`test.conflict.b: conflict on attempt 1; retrying the transaction`. Both increments land and the
+counter reaches 2.
+
+Three guards verified by planting a violation:
+
+- making `classifyCommitError` return `RETRY_TRANSACTION` for an unknown commit outcome fails
+  exactly the two tests that say the commit is retried and never the work;
+- deleting the duplicate-key branch from `classifyBodyError` fails "never retries a duplicate
+  key";
+- making `verifyJobOwnership` skip its tenant comparison fails "refuses a forged tenant instead
+  of doing that tenant work".
+
+**Left half-done:** nothing within C2. **C3 through C6 are not started.** There is still no
+consumer loop — `QueuePort.receive` and `verifyJobOwnership` exist and are tested, but nothing
+dequeues in a running process, so nothing yet advances a `StageExecution`. No index writer, no S3
+staging, no sweeper, no DLQ handling, and the FR-06 classification table is still unused by any
+retry path.
+
+**Found — three things:**
+
+1. **Adding a production guard broke a passing test, correctly.** `T09 — accepts a properly
+configured production environment` failed once startup began requiring `JOBS_QUEUE_URL`. The
+   fixture was updated rather than the rule relaxed: a production API that accepts searches with
+   no queue publishes every job into an in-process array that vanishes at restart, so the customer
+   is told "queued" and nothing is queued. Two further guards were added alongside it and tested —
+   `AWS_ENDPOINT_URL` set in production (that override exists for LocalStack; in production it can
+   only mean AWS traffic is being redirected) and static AWS credentials present (a long-lived key
+   in an environment variable is what an instance role exists to remove).
+2. **`@aws-sdk/client-sqs` is a new dependency in a deliberately lean set** (24 packages). The
+   reasoning, now recorded in `docs/architecture.md` under "Jobs and the queue": the bootstrap
+   scripts avoid the SDK so a stray profile cannot point them at real AWS, but the application has
+   the opposite requirement — it must authenticate with a rotating role credential, and SigV4 over
+   a rotating credential is a security control to use rather than re-implement. If that trade is
+   ever revisited, the port is the seam and `SqsQueueAdapter` is the only file affected.
+3. **The integration duplicate-key test does not prove the duplicate-key guard.** Planting the
+   violation showed it still passing: in this MongoDB version a duplicate key inside a transaction
+   does not carry `TransientTransactionError`, so the error falls through to `FAIL` whether or not
+   the explicit branch exists. The unit test with a synthetic error carrying **both** labels is
+   what actually holds the guard. The integration test is still worth keeping — it asserts the
+   error reaches the caller in one attempt and quickly — but it should not be cited as the proof.
+
+Still open and still unaddressed, carried from three previous entries: **`POST /v1/subjects`
+declares a permission but no scope**, so a key scoped to `search:read` can create a subject while
+`POST /v1/searches` refuses it. It belongs to whoever owns the machine contract.
+
+**Next session should:** start **C3** — the search index behind the `SEARCH_INDEX_KIND` seam
+Phase A established, with MongoDB as the system of record and the index as derived state. The
+reconciliation is a deliverable, not a follow-up: `SourceDocumentService.findUnindexed` and
+`countUnindexed` already exist and already treat a `FAILED` index write as unindexed, so what C3
+owes is the writer, the re-indexer that drains `indexState: PENDING`, and the gate check that
+"no unindexed committed documents" is a query rather than an assumption (matrix row FI-10). Keep
+index-specific code inside the seam — C4's measurement may send this to OpenSearch, and code
+outside the seam is what would make that migration expensive enough to skip, which decides D12 by
+inertia.
+
+**Decisions touched:** none of D1–D12 closed. **D12 stays open**, still closed by C4's measurement
+with numbers. Two decisions recorded in `docs/architecture.md` rather than `docs/decisions.md`,
+both architecture rather than product: the AWS SDK behind `QueuePort` with its credential
+reasoning, and the two SQS cost levers (long polling, batched sends). A missing queue is a startup
+refusal rather than a silent fallback, which is a third and is recorded with them.
+
+---
+
 ## 2026-09-11 (later) — Phase C steps C0 and C1: the failure matrix and the section 6.3 records
 
 **Did:**

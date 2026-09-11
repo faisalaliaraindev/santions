@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { MongoClient, type Db } from 'mongodb';
 
@@ -12,12 +12,16 @@ import { ReservedController } from './common/reserved.controller.js';
 import { loadConfig, type AppConfig } from './config/config.js';
 import { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
 import { HealthController } from './health/health.controller.js';
+import { OutboxPublisher } from './jobs/outbox-publisher.js';
+import { InMemoryQueueAdapter, QUEUE_PORT, type QueuePort } from './jobs/queue.port.js';
+import { SqsQueueAdapter } from './jobs/sqs-queue.adapter.js';
 import { AuditService, LocalAuditCheckpointWriter } from './persistence/audit.service.js';
 import { InboxReceiptService } from './persistence/inbox-receipt.service.js';
 import { OutboxService } from './persistence/outbox.service.js';
 import { RetentionService } from './persistence/retention.service.js';
 import { SourceDocumentService } from './persistence/source-document.service.js';
 import { StageExecutionService } from './persistence/stage-execution.service.js';
+import { TransactionRunner } from './persistence/transaction.runner.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
 import { SearchesController } from './searches/searches.controller.js';
 import { SearchesService } from './searches/searches.service.js';
@@ -141,10 +145,57 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [MONGO_DB, LocalAuditCheckpointWriter],
     },
     {
+      provide: TransactionRunner,
+      useFactory: (client: MongoClient) => new TransactionRunner(client),
+      inject: [MONGO_CLIENT],
+    },
+    {
+      // The queue is a port. SQS when one is configured; an in-process queue otherwise, which
+      // is a development convenience and is logged as one — never a silent fallback that makes
+      // a misconfigured production process look healthy while dropping every job.
+      provide: QUEUE_PORT,
+      useFactory: (config: AppConfig): QueuePort => {
+        if (config.jobs.queueUrl === null) {
+          new Logger('Queue').warn(
+            'JOBS_QUEUE_URL is not set: using an in-process queue. Jobs do not survive a ' +
+              'restart and are not visible to any other process.',
+          );
+          return new InMemoryQueueAdapter();
+        }
+        return new SqsQueueAdapter({
+          queueUrl: config.jobs.queueUrl,
+          region: config.jobs.region,
+          ...(config.jobs.endpoint === null ? {} : { endpoint: config.jobs.endpoint }),
+          ...(config.jobs.staticCredentials === null
+            ? {}
+            : { credentials: config.jobs.staticCredentials }),
+        });
+      },
+      inject: [APP_CONFIG],
+    },
+    {
+      provide: OutboxPublisher,
+      useFactory: (outbox: OutboxService, queue: QueuePort) => new OutboxPublisher(outbox, queue),
+      inject: [OutboxService, QUEUE_PORT],
+    },
+    {
       provide: SearchesService,
-      useFactory: (db: Db, e: EntitlementsService, s: SubjectsService) =>
-        new SearchesService(db, e, s),
-      inject: [MONGO_DB, EntitlementsService, SubjectsService],
+      useFactory: (
+        db: Db,
+        e: EntitlementsService,
+        s: SubjectsService,
+        t: TransactionRunner,
+        a: AuditService,
+        o: OutboxService,
+      ) => new SearchesService(db, e, s, t, a, o),
+      inject: [
+        MONGO_DB,
+        EntitlementsService,
+        SubjectsService,
+        TransactionRunner,
+        AuditService,
+        OutboxService,
+      ],
     },
 
     {

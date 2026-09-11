@@ -60,7 +60,7 @@ that mentions a receipt also names the identity that holds when the receipt is g
 | ID        | Boundary                                                    | Orphan                                       | Reconciler                                               | Window     | Phase |
 | :-------- | :---------------------------------------------------------- | :------------------------------------------- | :------------------------------------------------------- | :--------- | :---- |
 | **FI-01** | Idempotency claim written → run inserted                    | `IN_FLIGHT` receipt with no run              | Explicit `release()`; TTL expiry as the backstop         | 24 h TTL   | B ✅  |
-| **FI-02** | Subject version committed → run inserted                    | _Not an orphan_ — see below                  | None, deliberately                                       | —          | B ✅  |
+| **FI-02** | Subject version committed → run inserted                    | _Not an orphan_ — see below                  | None, deliberately; closed on the search path by C2      | —          | C2 ✅ |
 | **FI-03** | S3 object staged + checksum verified → reference committed  | S3 object nothing references                 | Orphan-object sweep over the tenant prefix               | 6 h        | C5    |
 | **FI-04** | Reference + outbox event committed → event published        | Unpublished `OutboxEvent`                    | Outbox publisher polls unpublished, due events           | next poll  | C2    |
 | **FI-05** | Event published to queue → marked published in Mongo        | Event published twice                        | None needed — consumer dedupes (FI-07/FI-09)             | —          | C2    |
@@ -104,11 +104,16 @@ remove the distinction.
 
 ### FI-02 — Subject version committed → run inserted
 
-**Deliberately not an orphan.** `SubjectsService.create` writes a `subjectVersion` before
-`searchRuns.insertOne`. A crash between them leaves a subject version no search references — but
-a subject version is a first-class record, created directly by `POST /v1/subjects` with no search
-at all. There is nothing to reconcile, and a sweeper that deleted "unreferenced" subject versions
-would delete records a customer created on purpose.
+**No longer a boundary on the search path, and deliberately not an orphan anywhere else.**
+
+C2 closed the gap: `SearchesService` resolves the subject _inside_ its transaction and passes the
+session down, so a snapshot and the run that cites it commit together. There is no window between
+them any more.
+
+It stays in this table because the other path is real and must not acquire a reconciler by
+mistake. `POST /v1/subjects` creates a subject version with no search at all, and a sweeper that
+deleted "unreferenced" subject versions would delete records a customer created on purpose. A
+subject version is a first-class record, not a fragment of a search.
 
 Recorded here so that the next person to read this file does not invent a reconciler for it.
 

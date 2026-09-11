@@ -29,6 +29,20 @@ const rawSchema = z.object({
 
   /** Comma-separated allowlist. Never `*` in production. */
   CORS_ORIGINS: z.string().default(''),
+
+  /**
+   * The jobs queue. Optional, because the API can serve reads without it — but a process that
+   * accepts searches with no queue configured is publishing into a variable, so the absence is
+   * warned about loudly at startup rather than defaulted away quietly.
+   */
+  JOBS_QUEUE_URL: z.string().url().optional(),
+  AWS_REGION: z.string().min(1).default('eu-west-2'),
+  /** Set only when pointing at LocalStack. Absent in production. */
+  AWS_ENDPOINT_URL: z.string().url().optional(),
+  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  /** How often the outbox publisher polls. */
+  OUTBOX_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
 });
 
 export type AppConfig = Readonly<{
@@ -40,6 +54,18 @@ export type AppConfig = Readonly<{
   oidc: { issuer: string; clientId: string; clientSecret: string; audience: string };
   session: { secret: string; secure: boolean };
   corsOrigins: readonly string[];
+  jobs: {
+    queueUrl: string | null;
+    region: string;
+    endpoint: string | null;
+    /**
+     * Static credentials, for LocalStack only. Null in production, where the SDK resolves a
+     * rotating role credential — an environment variable holding a long-lived key is the thing
+     * that arrangement exists to avoid.
+     */
+    staticCredentials: { accessKeyId: string; secretAccessKey: string } | null;
+    pollMs: number;
+  };
 }>;
 
 /**
@@ -129,6 +155,31 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       );
     }
 
+    // The AWS endpoint override exists so the service can talk to LocalStack. In production
+    // it can only mean traffic is being redirected somewhere that is not AWS.
+    if (raw.AWS_ENDPOINT_URL !== undefined) {
+      problems.push(
+        'AWS_ENDPOINT_URL is set. That override exists for LocalStack; in production the ' +
+          'endpoint must be the real AWS one, resolved by the SDK.',
+      );
+    }
+
+    // A long-lived access key in an environment variable is the thing an instance or task role
+    // exists to remove. If one is present, the role is not being used.
+    if (raw.AWS_ACCESS_KEY_ID !== undefined || raw.AWS_SECRET_ACCESS_KEY !== undefined) {
+      problems.push(
+        'Static AWS credentials are set. Production must use a rotating role credential ' +
+          '(instance role, task role or IRSA) resolved by the SDK credential chain.',
+      );
+    }
+
+    if (raw.JOBS_QUEUE_URL === undefined) {
+      problems.push(
+        'JOBS_QUEUE_URL is not set. Without it the service would accept searches and publish ' +
+          'their jobs into an in-process queue that vanishes at restart.',
+      );
+    }
+
     if (raw.CORS_ORIGINS.split(',').some((o) => o.trim() === '*')) {
       problems.push(
         'CORS_ORIGINS contains "*". A wildcard origin is never permitted in production.',
@@ -156,5 +207,20 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     corsOrigins: raw.CORS_ORIGINS.split(',')
       .map((o) => o.trim())
       .filter((o) => o !== ''),
+    jobs: {
+      queueUrl: raw.JOBS_QUEUE_URL ?? null,
+      region: raw.AWS_REGION,
+      endpoint: raw.AWS_ENDPOINT_URL ?? null,
+      // Both or neither: half a credential is a confusing failure inside the SDK rather than
+      // a clear one here.
+      staticCredentials:
+        raw.AWS_ACCESS_KEY_ID !== undefined && raw.AWS_SECRET_ACCESS_KEY !== undefined
+          ? {
+              accessKeyId: raw.AWS_ACCESS_KEY_ID,
+              secretAccessKey: raw.AWS_SECRET_ACCESS_KEY,
+            }
+          : null,
+      pollMs: raw.OUTBOX_POLL_MS,
+    },
   };
 }
