@@ -1,6 +1,6 @@
 # Phase C — Persistence, jobs, index and object storage
 
-**Gate:** G4 · **Status:** IN PROGRESS — C0, C1 and C2 done, C3 next · **Prerequisite:** Phase B complete (it is)
+**Gate:** G4 · **Status:** IN PROGRESS — C0–C3 done, C4 next (closes D12) · **Prerequisite:** Phase B complete (it is)
 
 ---
 
@@ -191,6 +191,23 @@ Reconciliation is a deliverable, not a follow-up: a committed document that neve
 index must be findable and re-indexable, and the gate's exit condition names "no unindexed
 committed documents" explicitly.
 
+**Done (2026-09-11).** `apps/api/src/search-index/` holds `SearchIndexPort` (the seam),
+`MeilisearchAdapter`, `InMemorySearchIndex` and `IndexerService`. Nothing outside that directory
+names a concrete index, so C4 can still send this to OpenSearch by writing one more adapter.
+
+Three properties worth not re-deriving: the adapter waits for Meilisearch's **task** before
+reporting a write as indexed, because a document is not searchable when the HTTP call returns and
+marking it `INDEXED` early is the silent-clean-result failure FI-10 describes; a search that the
+index cannot answer **throws** rather than returning an empty list, because an outage reported as
+"no matches found" is a clean screening result for a person nobody searched for; and the
+reconciler sweeps `indexState: { $ne: 'INDEXED' }` rather than listing states, so subject versions
+written before C3 — which carry no `indexState` at all — are not silently skipped.
+
+**What C3 did not do:** nothing extracts document text yet, so the corpus index is exercised
+through the record's own fields and Phase F owns supplying `title` and `text`. No scheduled
+reconciler loop is started in-process; `reconcile()` and `countUnindexed()` are called by tests
+and are ready for a scheduler.
+
 ### C4 — The matcher-latency workload test — closes D12
 
 The measurement, not a preference. Three latencies, measured **separately**:
@@ -240,7 +257,7 @@ policies and different attempt counts, and three of the five must not be retried
 - [x] C0 — `docs/failure-injection-matrix.md` exists and covers every two-system boundary (16 rows, FI-01..FI-16)
 - [x] C1 — records, indexes and the migration decision; tenant context leads every tenant-owned key, with the five cross-tenant index exceptions documented in `docs/architecture.md`
 - [x] C2 — state, audit reference and outbox commit in one transaction, with conflict, unknown-outcome and duplicate-key handling
-- [ ] C3 — index built behind the seam; reconciliation re-indexes a committed-but-unindexed document
+- [x] C3 — index built behind the seam; reconciliation re-indexes a committed-but-unindexed document
 - [ ] C4 — three latencies measured over the FR-16 corpus; **D12 closed in `docs/decisions.md` with numbers**
 - [ ] C5 — staged upload, checksum verification, reference commit, orphan reconciliation
 - [ ] C6 — FR-06 classification honoured; DLQ, lease fencing, cancellation, duplicate delivery

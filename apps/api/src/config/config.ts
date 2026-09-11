@@ -43,6 +43,14 @@ const rawSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
   /** How often the outbox publisher polls. */
   OUTBOX_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
+
+  /**
+   * The search index behind the D12 seam. `meilisearch` is a working assumption carried since
+   * Phase A, not a decision — C4's measurement closes D12.
+   */
+  SEARCH_INDEX_KIND: z.enum(['meilisearch', 'opensearch', 'in-memory']).default('meilisearch'),
+  MEILI_HOST: z.string().url().optional(),
+  MEILI_MASTER_KEY: z.string().min(1).optional(),
 });
 
 export type AppConfig = Readonly<{
@@ -65,6 +73,11 @@ export type AppConfig = Readonly<{
      */
     staticCredentials: { accessKeyId: string; secretAccessKey: string } | null;
     pollMs: number;
+  };
+  searchIndex: {
+    kind: 'meilisearch' | 'opensearch' | 'in-memory';
+    host: string | null;
+    apiKey: string | null;
   };
 }>;
 
@@ -173,6 +186,19 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       );
     }
 
+    // An in-process index in production would answer every screening query from a Map that
+    // is empty at startup — which reads as "no matches found" rather than as an outage.
+    if (raw.SEARCH_INDEX_KIND === 'in-memory') {
+      problems.push(
+        'SEARCH_INDEX_KIND=in-memory is a development stand-in. In production it would answer ' +
+          'screening queries from an empty process-local map, which reads as a clean result.',
+      );
+    }
+
+    if (raw.SEARCH_INDEX_KIND === 'meilisearch' && raw.MEILI_HOST === undefined) {
+      problems.push('SEARCH_INDEX_KIND=meilisearch but MEILI_HOST is not set.');
+    }
+
     if (raw.JOBS_QUEUE_URL === undefined) {
       problems.push(
         'JOBS_QUEUE_URL is not set. Without it the service would accept searches and publish ' +
@@ -221,6 +247,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
             }
           : null,
       pollMs: raw.OUTBOX_POLL_MS,
+    },
+    searchIndex: {
+      kind: raw.SEARCH_INDEX_KIND,
+      host: raw.MEILI_HOST ?? null,
+      apiKey: raw.MEILI_MASTER_KEY ?? null,
     },
   };
 }

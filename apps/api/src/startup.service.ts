@@ -7,6 +7,7 @@ import { OutboxService } from './persistence/outbox.service.js';
 import { RetentionService } from './persistence/retention.service.js';
 import { SourceDocumentService } from './persistence/source-document.service.js';
 import { StageExecutionService } from './persistence/stage-execution.service.js';
+import { IndexerService } from './search-index/indexer.service.js';
 import { ApiKeyService } from './tenancy/api-key.service.js';
 import { SearchesService } from './searches/searches.service.js';
 import { NameFrequencyService } from './subjects/name-frequency.service.js';
@@ -44,6 +45,7 @@ export class StartupService implements OnModuleInit {
     private readonly retention: RetentionService,
     private readonly audit: AuditService,
     private readonly auditCheckpoints: LocalAuditCheckpointWriter,
+    private readonly indexer: IndexerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -60,6 +62,7 @@ export class StartupService implements OnModuleInit {
       this.retention.ensureIndexes(),
       this.audit.ensureIndexes(),
       this.auditCheckpoints.ensureIndexes(),
+      this.indexer.ensureIndexes(),
     ]);
     this.logger.log('Indexes ensured.');
   }

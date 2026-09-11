@@ -22,6 +22,9 @@ import {
   LocalAuditCheckpointWriter,
 } from '../../apps/api/src/persistence/audit.service.js';
 import { OutboxService } from '../../apps/api/src/persistence/outbox.service.js';
+import { SourceDocumentService } from '../../apps/api/src/persistence/source-document.service.js';
+import { IndexerService } from '../../apps/api/src/search-index/indexer.service.js';
+import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-index.port.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
@@ -70,7 +73,16 @@ beforeAll(async () => {
   audit = new AuditService(db, new LocalAuditCheckpointWriter(db));
 
   const subjects = new SubjectsService(db, new NameFrequencyService(db));
-  searches = new SearchesService(db, new EntitlementsService(db), subjects, runner, audit, outbox);
+  const indexer = new IndexerService(db, new InMemorySearchIndex(), new SourceDocumentService(db));
+  searches = new SearchesService(
+    db,
+    new EntitlementsService(db),
+    subjects,
+    runner,
+    audit,
+    outbox,
+    indexer,
+  );
 
   await Promise.all([outbox.ensureIndexes(), audit.ensureIndexes(), searches.ensureIndexes()]);
 }, 60_000);

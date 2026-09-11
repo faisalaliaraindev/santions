@@ -202,6 +202,7 @@ describe('T09 — production startup guards', () => {
     SESSION_COOKIE_SECURE: 'true',
     CORS_ORIGINS: 'https://panel.example.com',
     JOBS_QUEUE_URL: 'https://sqs.eu-west-2.amazonaws.com/123456789012/adverse-search-jobs',
+    MEILI_HOST: 'https://search.internal.example.com',
   };
 
   it('accepts a properly configured production environment', () => {
@@ -275,6 +276,20 @@ describe('T09 — production startup guards', () => {
         AWS_SECRET_ACCESS_KEY: 'a-long-lived-secret-key-value',
       }),
     ).toThrow(/Static AWS credentials are set/u);
+  });
+
+  it('rejects the in-process search index in production', () => {
+    // It would answer every screening query from a map that is empty at startup. The result
+    // is not an error — it reads as "no matches found" for a person nobody actually searched
+    // for, which is the worst failure this service can produce.
+    expect(() => loadConfig({ ...productionBase, SEARCH_INDEX_KIND: 'in-memory' })).toThrow(
+      /in-memory is a development stand-in/u,
+    );
+  });
+
+  it('rejects a configured index with no host to reach it at', () => {
+    const withoutHost = { ...productionBase, MEILI_HOST: undefined };
+    expect(() => loadConfig(withoutHost)).toThrow(/MEILI_HOST is not set/u);
   });
 
   it('permits the same development values outside production', () => {

@@ -27,6 +27,110 @@ Say what you did about it.
 
 ---
 
+## 2026-09-11 (evening) — Phase C step C3: the search index behind the D12 seam
+
+**Did:**
+
+- **`SearchIndexPort`** (`apps/api/src/search-index/search-index.port.ts`) — the application-side
+  half of the seam Phase A established in `scripts/bootstrap/search-index.mjs`. Nothing outside
+  that directory names a concrete index, which is what keeps **D12 open on the numbers** rather
+  than on the cost of changing. Carries the subject and document index shapes, a mandatory
+  `tenantId` on every query, and `InMemorySearchIndex` for wiring tests.
+- **`MeilisearchAdapter`** — talks to the HTTP API directly. Deliberately _not_ the official
+  client, and deliberately the opposite trade from the SQS decision: there the dependency buys
+  SigV4 over a rotating credential, which is a security control; here it would buy a thin wrapper
+  over four endpoints.
+- **`IndexerService`** — projection, write, reconciliation, gate check and tenant rebuild. The
+  FI-10 reconciler, which is the row whose symptom is a clean screening result.
+- **Wiring:** `SEARCH_INDEX_KIND` / `MEILI_HOST` / `MEILI_MASTER_KEY` in config;
+  `SEARCH_INDEX_PORT` provided in `app.module.ts` (`opensearch` throws a clear
+  not-implemented error rather than silently falling back, so the configuration cannot lie);
+  `IndexerService.ensureIndexes` in `StartupService`; and `SearchesService.create` indexes the
+  pinned subject version **after** the commit, outside the transaction, without failing the
+  request if the index is unreachable.
+
+**Three properties that carry the weight, each verified by planting a violation:**
+
+1. **A write is not `INDEXED` until the index says it is searchable.** Meilisearch writes are
+   asynchronous — the document is not findable when the HTTP call returns. The adapter waits for
+   the task. Making it report the enqueue as success fails five tests, including the one that
+   searches immediately with no polling.
+2. **Every index query filters by tenant.** Removing the filter fails three tests, including two
+   tenants holding deliberately identical names.
+3. **The reconciler sweeps `indexState: { $ne: 'INDEXED' }`, not a list of states.** Subject
+   versions written before C3 carry no `indexState` field at all; changing the sweep to
+   `$in: ['PENDING', 'FAILED']` fails the legacy-record test. This is the additive-only migration
+   decision from C1 being paid for in practice.
+
+A fourth, not plantable but tested directly: **a search the index cannot answer throws.** An
+outage returned as an empty list is "no matches found" for a person nobody actually searched for.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         241 passed
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration   78 passed  (was 66: +12 in tests/integration/search-index.test.ts)
+test:security      91 passed  (was 89: +2 new production guards)
+coverage          93.74% statements / 91.33% branches (gate 85/80)
+```
+
+The index tests run against the **real Meilisearch** in the local stack, not a fake. Two of the
+properties above — asynchronous writes, and whether a filter expression genuinely isolates
+tenants — are properties of Meilisearch rather than of our code, and a fake would assert that the
+fake works. Failure injection uses the in-process port, because making a real index fail on demand
+means breaking it.
+
+**Left half-done:** nothing within C3. **C4, C5 and C6 are not started.** Specifically: no
+scheduled reconciler runs in-process (`reconcile()` and `countUnindexed()` exist and are called by
+tests, ready for a scheduler); the corpus index is exercised through the record's own fields
+because nothing extracts document text yet — Phase F owns supplying `title` and `text`; and no
+consumer loop, no S3 staging, no DLQ.
+
+**Found — three things:**
+
+1. **The reconciler is batched, and a test that assumed one pass was wrong.** `reconcile()` moves
+   at most 100 records so a backlog cannot monopolise the process — correct — but the shared local
+   database has accumulated unindexed subject versions from every previous test run, so a single
+   pass never reached the record under test. The tests now drain in a bounded loop. Worth knowing
+   for **C4 and for the G4 exit check**: "no unindexed committed documents" is only true after the
+   reconciler has actually run to completion, and on this machine that currently means several
+   passes. The backlog is local test residue, not a defect, and `pnpm local:reset` clears it.
+2. **Adding production guards broke the T09 fixture again, correctly** — the same pattern as C2.
+   `SEARCH_INDEX_KIND` defaults to `meilisearch`, so production now demands `MEILI_HOST`, and
+   `in-memory` is refused outright in production: it would answer every screening query from a map
+   that is empty at startup, which reads as a clean result rather than as an outage. Fixture
+   updated, both new guards tested.
+3. **`indexState` on `subjectVersions` is a second additive field with the same trap as the
+   first.** Any future sweep over an additive status field must exclude the terminal state rather
+   than enumerate the others, or it skips every record written before the field existed. That rule
+   is now written into the code comment and into this entry, because it will come up a third time.
+
+Still open and still unaddressed, carried from four previous entries: **`POST /v1/subjects`
+declares a permission but no scope**, so a key scoped to `search:read` can create a subject while
+`POST /v1/searches` refuses it. It belongs to whoever owns the machine contract.
+
+**Next session should:** start **C4**, which **closes D12** — the matcher-latency workload test.
+Measure three latencies **separately** over the FR-16 corpus in `packages/evaluation`, with the
+FR-08 name-form expansions including transliteration and phonetic keys, since those are what a
+naive index handles badly: matcher latency, API acceptance latency, and total search latency.
+Record the numbers in `docs/decisions.md` and close D12 there **with the figures**, not as a
+preference. The brief's own expectation is that OpenSearch is the likelier answer if the matcher
+needs custom analysers or multi-field boolean scoring — and if the measurement says switch, then
+writing `OpenSearchAdapter` next to `MeilisearchAdapter` is this phase's work, not a note for
+later. State the corpus size and the confidence with the numbers; an unconvincing measurement
+leaves D12 open, which is an honest outcome.
+
+**Decisions touched:** none closed. **D12 remains open** and is now genuinely decidable — the seam
+is real, both sides of it are small, and C4's numbers are the only thing left. One architecture
+note added to `docs/architecture.md` ("The search index is derived state"), recording that MongoDB
+wins every disagreement, that a write is only indexed once confirmed searchable, and that an index
+outage raises rather than returning an empty result.
+
+---
+
 ## 2026-09-11 (later still) — Phase C step C2: transactions, the outbox and the queue seam
 
 **Did:**

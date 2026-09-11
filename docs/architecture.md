@@ -289,3 +289,24 @@ than to introduce later against code that assumed per-message calls.
 in-process queue and says so loudly, and production startup rejects the configuration outright. A
 service that accepts a search and publishes its job into a variable that vanishes at restart has
 told a customer "queued" and queued nothing — which is worse than refusing to start.
+
+### The search index is derived state
+
+MongoDB is the system of record; the index is a fast way to find things that are already durably
+recorded. If the two disagree, MongoDB wins and the index is rebuilt — `IndexerService.rebuildTenant`
+purges and re-projects, and that is always a correct repair. The index is never read to decide
+what is true.
+
+Two rules follow from that and are easy to lose:
+
+- **A write is `INDEXED` only once the index confirms it is searchable.** Meilisearch writes are
+  asynchronous; the document is not findable when the HTTP call returns. Marking on the enqueue
+  would record a document as indexed while the matcher cannot see it, and the symptom of that is
+  a screening result with nothing in it.
+- **A search the index cannot answer raises.** Returning an empty list on an outage reports
+  "no matches found" for a person who was never actually searched for. Coverage state exists to
+  carry that distinction (section 6.2, invariant I10); an empty array destroys it.
+
+Deletion propagates here too. SEC-05 requires restriction and erasure to reach indexes as well as
+evidence objects and exports: a restricted record that is still searchable is still disclosed,
+whatever the record says.

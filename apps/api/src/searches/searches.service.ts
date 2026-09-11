@@ -23,6 +23,7 @@ import {
 import { AuditService } from '../persistence/audit.service.js';
 import { OutboxService } from '../persistence/outbox.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';
+import { IndexerService } from '../search-index/indexer.service.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
 
 type SubjectRef = NonNullable<CreateSearchInput['subjectRef']>;
@@ -59,6 +60,7 @@ export class SearchesService {
     private readonly transactions: TransactionRunner,
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
+    private readonly indexer: IndexerService,
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
   }
@@ -108,7 +110,26 @@ export class SearchesService {
 
     const pinnedVersions = await this.entitlements.pinVersions(tenantId, entitlement.version);
 
-    return this.commitRun({ principal, data, now, tenantId, pinnedVersions, subject });
+    const committed = await this.commitRun({
+      principal,
+      data,
+      now,
+      tenantId,
+      pinnedVersions,
+      subject,
+    });
+
+    // Indexing happens after the commit and outside the transaction (section 6.3), and its
+    // failure is deliberately not this request's failure: the subject is durably recorded, the
+    // record carries `indexState`, and the reconciler picks it up (matrix row FI-10). Failing
+    // the request here would refuse a search because a cache was briefly unreachable.
+    await this.indexer.indexSubjectVersionOf({
+      tenantId,
+      subjectId: committed.subjectId,
+      version: committed.subjectVersion,
+    });
+
+    return committed;
   }
 
   /**

@@ -21,6 +21,13 @@ import { OutboxService } from './persistence/outbox.service.js';
 import { RetentionService } from './persistence/retention.service.js';
 import { SourceDocumentService } from './persistence/source-document.service.js';
 import { StageExecutionService } from './persistence/stage-execution.service.js';
+import { IndexerService } from './search-index/indexer.service.js';
+import { MeilisearchAdapter } from './search-index/meilisearch.adapter.js';
+import {
+  InMemorySearchIndex,
+  SEARCH_INDEX_PORT,
+  type SearchIndexPort,
+} from './search-index/search-index.port.js';
 import { TransactionRunner } from './persistence/transaction.runner.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
 import { SearchesController } from './searches/searches.controller.js';
@@ -174,6 +181,42 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [APP_CONFIG],
     },
     {
+      // The index is a port for one reason: D12 is open, and C4's measurement may send this to
+      // OpenSearch. Index-specific code outside this directory is what would make that
+      // migration expensive enough to skip — which would decide D12 by inertia.
+      provide: SEARCH_INDEX_PORT,
+      useFactory: (config: AppConfig): SearchIndexPort => {
+        switch (config.searchIndex.kind) {
+          case 'meilisearch':
+            return new MeilisearchAdapter({
+              host: config.searchIndex.host ?? 'http://127.0.0.1:28700',
+              apiKey: config.searchIndex.apiKey,
+            });
+          case 'opensearch':
+            // Failing loudly is correct until D12 selects it. Silently falling back to
+            // Meilisearch would make the configuration a lie.
+            throw new Error(
+              'SEARCH_INDEX_KIND=opensearch is not implemented. Decision D12 is closed by the ' +
+                'Phase C matcher-latency measurement; if it selects OpenSearch, write ' +
+                'OpenSearchAdapter next to MeilisearchAdapter.',
+            );
+          case 'in-memory':
+            new Logger('SearchIndex').warn(
+              'Using the in-process search index. It is a wiring stand-in, not an index: ' +
+                'results are a substring scan and nothing survives a restart.',
+            );
+            return new InMemorySearchIndex();
+        }
+      },
+      inject: [APP_CONFIG],
+    },
+    {
+      provide: IndexerService,
+      useFactory: (db: Db, index: SearchIndexPort, documents: SourceDocumentService) =>
+        new IndexerService(db, index, documents),
+      inject: [MONGO_DB, SEARCH_INDEX_PORT, SourceDocumentService],
+    },
+    {
       provide: OutboxPublisher,
       useFactory: (outbox: OutboxService, queue: QueuePort) => new OutboxPublisher(outbox, queue),
       inject: [OutboxService, QUEUE_PORT],
@@ -187,7 +230,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         t: TransactionRunner,
         a: AuditService,
         o: OutboxService,
-      ) => new SearchesService(db, e, s, t, a, o),
+        i: IndexerService,
+      ) => new SearchesService(db, e, s, t, a, o, i),
       inject: [
         MONGO_DB,
         EntitlementsService,
@@ -195,6 +239,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         TransactionRunner,
         AuditService,
         OutboxService,
+        IndexerService,
       ],
     },
 
@@ -213,6 +258,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         retention: RetentionService,
         audit: AuditService,
         checkpoints: LocalAuditCheckpointWriter,
+        indexer: IndexerService,
       ) =>
         new StartupService(
           sessions,
@@ -227,6 +273,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           retention,
           audit,
           checkpoints,
+          indexer,
         ),
       inject: [
         SessionService,
@@ -241,6 +288,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         RetentionService,
         AuditService,
         LocalAuditCheckpointWriter,
+        IndexerService,
       ],
     },
 
