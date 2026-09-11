@@ -68,8 +68,10 @@ Say what you did about it.
   a reason. `lastUsedAt` is updated on every successful verification, which is what makes an
   unused key identifiable and therefore safe to revoke.
 - **The API key is a documented credential.** `apiKey` was added to the OpenAPI security schemes
-  with its own `ApiKey` scheme rather than a second flavour of `Bearer`, and the panel's client
-  was regenerated.
+  with its own `ApiKey` scheme rather than a second flavour of `Bearer`. Regenerating the
+  panel's client produced **no diff**: `openapi-typescript` does not emit security schemes as
+  types, because they describe how to authenticate rather than what a payload looks like. The
+  panel is unaffected — it authenticates with the session cookie and never holds a key.
 - Registered `ApiKeyService` in the module and its indexes in `StartupService`.
 
 **Verified:**
