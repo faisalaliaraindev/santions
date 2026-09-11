@@ -10,11 +10,16 @@ of previous sessions. It is deliberately short.
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
 > Brief: [`phase-d.md`](./phase-d.md). It is an **outline, not a brief** — expanding it is the
-> first task of the phase, and the outline itself says what expanding it involves. Three open
-> decisions close here: **D1** (jurisdictions), **D3** (categories) and **D8** (retention);
-> see [`../open-decisions.md`](../open-decisions.md). None of them can be closed by
-> engineering alone, and each currently carries a placeholder value with an `assumption` field
-> on the record so it cannot quietly become the decision.
+> first task of the phase, and the outline itself says what expanding it involves.
+>
+> **No decision is due at G5.** D1, D3 and D8 were the three this phase was meant to close, and
+> all three closed on 2026-09-11 (see `docs/decisions.md` D-010, D-009, D-012) — Costa Rica with
+> es+en requested, all seventeen categories, and a configurable 30-day retention default. The
+> phase brief's "Decisions to close" section still named them until C6 corrected it; check
+> [`../open-decisions.md`](../open-decisions.md) rather than a phase brief for what is actually
+> open. The nearest live one is **D6** — how robots exceptions for official sources are approved
+> and recorded — which is due at G6 but is shaped by the source registry D1 builds, so raise it
+> with a source admin during this phase rather than at the start of the next.
 >
 > **Phase C is complete — gate G4 passed.** The whole path from an accepted search to a
 > survivable unit of work exists: the section 6.3 records, the transaction runner with the

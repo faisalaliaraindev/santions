@@ -48,7 +48,26 @@ searched, graph limitations are visible, and a disabled category is never querie
 
 ## Decisions to close
 
-**D1** jurisdictions and languages enabled first · **D3** categories on by default · **D8**
-retention per source and jurisdiction.
+**None.** This section previously named D1 (jurisdictions and languages), D3 (categories on by
+default) and D8 (retention per source and jurisdiction). All three closed on 2026-09-11 — see
+`docs/decisions.md` D-010, D-009 and D-012 — and the outline was not updated at the time. It is
+corrected here rather than left to mislead: a phase brief that sends someone to reopen a settled
+decision costs a session.
 
-All three need people outside engineering. Raise them before the phase starts, not at its exit.
+What this phase must do instead is **honour them**, which is a different job and an easy one to
+skip:
+
+- **D-010** — Costa Rica, with es and en _requested_ but **not enabled**, because FR-03 forbids
+  enabling a language with no measured recall figure. The registry and taxonomy this phase builds
+  must keep that distinction visible, not flatten it into "es and en are on".
+- **D-009** — all seventeen categories on by default. D6 (this phase) wires the lexicon audit into
+  the **activation** path so a runtime taxonomy edit cannot introduce a protected characteristic
+  that CI would have caught.
+- **D-012** — retention is configurable per policy version, defaulting to 30 days, with a legal
+  hold that overrides it. Phase C built the deletion machinery; this phase gives it the per-source
+  and per-jurisdiction values that make it meaningful.
+
+**The one to raise early: D6** — how robots exceptions for official sources are approved and
+recorded. It is due at G6 (Phase E), but it is shaped by the source registry built here, and it
+needs a source admin rather than an engineer. Raising it at the start of Phase E is raising it too
+late to influence the record it has to live in.

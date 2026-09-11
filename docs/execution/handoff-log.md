@@ -120,14 +120,24 @@ Phase E.
 
 **Next session should:** start Phase D by **expanding [`phase-d.md`](./phase-d.md) from an
 outline into a brief** — it is not yet one, and the outline itself says what expanding it
-involves. Read `docs/open-decisions.md` first: D1, D3 and D8 close in this phase and none of
-them can be closed by engineering alone.
+involves.
 
 **Decisions touched:** **D-016** (the worker is a second entrypoint, not a second application)
 and **D-017** (an internal defect is not an FR-06 class) recorded. D12 stays closed on C4's
-numbers. D1, D3 and D8 still carry placeholder values with an `assumption` field on the record,
-and close in Phase D. D11 (a well-evidenced acquittal banding as `CORROBORATED`) is still open
-and must close by Phase G.
+numbers.
+
+**A correction to an earlier claim in this entry, and to the phase brief.** An earlier draft of
+this handoff said D1, D3 and D8 still carry placeholders and close in Phase D. That is wrong:
+all three closed on 2026-09-11 (D-010 Costa Rica with es+en requested but not enabled, D-009 all
+seventeen categories, D-012 configurable 30-day retention). `phase-d.md`'s "Decisions to close"
+section had gone stale the same way and has been corrected — **no decision is due at G5**. The
+lesson for the next session: `docs/open-decisions.md` is the register, and a phase brief's list
+is a copy that can rot. Read the register.
+
+The nearest live decision is **D6** (how robots exceptions for official sources are approved and
+recorded), due G6 but shaped by the source registry Phase D builds — raise it with a source admin
+during Phase D, not at the start of Phase E. **D11** (a well-evidenced acquittal banding as
+`CORROBORATED`) is still open and must close by Phase G.
 
 ---
 
