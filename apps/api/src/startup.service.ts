@@ -12,6 +12,7 @@ import { StageExecutionService } from './persistence/stage-execution.service.js'
 import { IndexerService } from './search-index/indexer.service.js';
 import { ApiKeyService } from './tenancy/api-key.service.js';
 import { SearchesService } from './searches/searches.service.js';
+import { SourceHealthService } from './sources/source-health.service.js';
 import { NameFrequencyService } from './subjects/name-frequency.service.js';
 import { SubjectsService } from './subjects/subjects.service.js';
 
@@ -50,6 +51,7 @@ export class StartupService implements OnModuleInit {
     private readonly indexer: IndexerService,
     private readonly adminRecords: VersionedRecordService,
     private readonly capabilities: CapabilityCoverageService,
+    private readonly sourceHealth: SourceHealthService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -69,6 +71,7 @@ export class StartupService implements OnModuleInit {
       this.indexer.ensureIndexes(),
       this.adminRecords.ensureIndexes(),
       this.capabilities.ensureIndexes(),
+      this.sourceHealth.ensureIndexes(),
     ]);
     this.logger.log('Indexes ensured.');
   }

@@ -57,24 +57,26 @@ that mentions a receipt also names the identity that holds when the receipt is g
 
 ## The matrix
 
-| ID        | Boundary                                                    | Orphan                                       | Reconciler                                               | Window     | Phase |
-| :-------- | :---------------------------------------------------------- | :------------------------------------------- | :------------------------------------------------------- | :--------- | :---- |
-| **FI-01** | Idempotency claim written → run inserted                    | `IN_FLIGHT` receipt with no run              | Explicit `release()`; TTL expiry as the backstop         | 24 h TTL   | B ✅  |
-| **FI-02** | Subject version committed → run inserted                    | _Not an orphan_ — see below                  | None, deliberately; closed on the search path by C2      | —          | C2 ✅ |
-| **FI-03** | S3 object staged + checksum verified → reference committed  | S3 object nothing references                 | Orphan-object sweep over the tenant prefix               | 6 h        | C5    |
-| **FI-04** | Reference + outbox event committed → event published        | Unpublished `OutboxEvent`                    | Outbox publisher polls unpublished, due events           | next poll  | C2    |
-| **FI-05** | Event published to queue → marked published in Mongo        | Event published twice                        | None needed — consumer dedupes (FI-07/FI-09)             | —          | C2    |
-| **FI-06** | Queue message read → handling begins                        | Nothing durable                              | Visibility timeout returns the message                   | visibility | C6    |
-| **FI-07** | Stage state committed → message acknowledged                | Message redelivered after committed work     | `InboxReceipt` on message identity + stage identity      | visibility | C6    |
-| **FI-08** | External request made → message acknowledged                | **The external call may repeat**             | Not prevented. Stage identity stops duplicate results    | visibility | C6    |
-| **FI-09** | Effect applied → receipt written                            | Effect committed, receipt absent             | Same transaction; identity is the guard if it is not     | —          | C2    |
-| **FI-10** | Document committed → written to the search index            | Committed-but-unindexed document             | Re-indexer sweeps `indexState: PENDING`                  | 5 min      | C3    |
-| **FI-11** | Lease acquired → stage state written                        | Lease held by a dead worker                  | Lease-expiry sweeper; fencing rejects the stale write    | lease TTL  | C6    |
-| **FI-12** | Cancellation committed → late completion arrives            | A result for a run that is no longer running | Fence rejects it; the attempt is recorded, not applied   | —          | C6    |
-| **FI-13** | Review action read revision → review action written         | Two actions on one revision                  | Revision check; the stale one gets 409 + a recovery path | —          | C6    |
-| **FI-14** | Business state + audit entry committed → checkpoint written | Audit entries past the last checkpoint       | Checkpointer detects and closes the sequence gap         | checkpoint | C1    |
-| **FI-15** | Reference marked expired → S3 object deleted                | Object still present, reference says expired | Retention sweeper retries the delete                     | 24 h       | C1/C5 |
-| **FI-16** | Notification delivered → delivery recorded                  | Delivery repeated, or arriving out of order  | Receiver dedupes on event ID; lower revisions discarded  | —          | C6/G  |
+| ID        | Boundary                                                    | Orphan                                       | Reconciler                                                        | Window     | Phase |
+| :-------- | :---------------------------------------------------------- | :------------------------------------------- | :---------------------------------------------------------------- | :--------- | :---- |
+| **FI-01** | Idempotency claim written → run inserted                    | `IN_FLIGHT` receipt with no run              | Explicit `release()`; TTL expiry as the backstop                  | 24 h TTL   | B ✅  |
+| **FI-02** | Subject version committed → run inserted                    | _Not an orphan_ — see below                  | None, deliberately; closed on the search path by C2               | —          | C2 ✅ |
+| **FI-03** | S3 object staged + checksum verified → reference committed  | S3 object nothing references                 | Orphan-object sweep over the tenant prefix                        | 6 h        | C5    |
+| **FI-04** | Reference + outbox event committed → event published        | Unpublished `OutboxEvent`                    | Outbox publisher polls unpublished, due events                    | next poll  | C2    |
+| **FI-05** | Event published to queue → marked published in Mongo        | Event published twice                        | None needed — consumer dedupes (FI-07/FI-09)                      | —          | C2    |
+| **FI-06** | Queue message read → handling begins                        | Nothing durable                              | Visibility timeout returns the message                            | visibility | C6    |
+| **FI-07** | Stage state committed → message acknowledged                | Message redelivered after committed work     | `InboxReceipt` on message identity + stage identity               | visibility | C6    |
+| **FI-08** | External request made → message acknowledged                | **The external call may repeat**             | Not prevented. Stage identity stops duplicate results             | visibility | C6    |
+| **FI-09** | Effect applied → receipt written                            | Effect committed, receipt absent             | Same transaction; identity is the guard if it is not              | —          | C2    |
+| **FI-10** | Document committed → written to the search index            | Committed-but-unindexed document             | Re-indexer sweeps `indexState: PENDING`                           | 5 min      | C3    |
+| **FI-11** | Lease acquired → stage state written                        | Lease held by a dead worker                  | Lease-expiry sweeper; fencing rejects the stale write             | lease TTL  | C6    |
+| **FI-12** | Cancellation committed → late completion arrives            | A result for a run that is no longer running | Fence rejects it; the attempt is recorded, not applied            | —          | C6    |
+| **FI-13** | Review action read revision → review action written         | Two actions on one revision                  | Revision check; the stale one gets 409 + a recovery path          | —          | C6    |
+| **FI-14** | Business state + audit entry committed → checkpoint written | Audit entries past the last checkpoint       | Checkpointer detects and closes the sequence gap                  | checkpoint | C1    |
+| **FI-15** | Reference marked expired → S3 object deleted                | Object still present, reference says expired | Retention sweeper retries the delete                              | 24 h       | C1/C5 |
+| **FI-16** | Notification delivered → delivery recorded                  | Delivery repeated, or arriving out of order  | Receiver dedupes on event ID; lower revisions discarded           | —          | C6/G  |
+| **FI-17** | Source registry read → snapshot committed                   | A snapshot citing a version that has changed | Snapshot pins what the run planned; health is re-read at each use | —          | D5    |
+| **FI-18** | Source suspended → in-flight run already dispatched work    | Work in flight against a source we stopped   | Access rechecked at every point of use; the gap is recorded       | one call   | D5    |
 
 "✅" means it exists and holds today. The rest are specified here and built in the step named.
 
@@ -327,6 +329,67 @@ scheduling — a hold placed after a `RetentionAction` was created must still st
 **What the user sees:** the evidence reported as expired. Not an error, not an empty document, and
 not a 500 from a reference that no longer resolves.
 
+### FI-17 — Source registry read → snapshot committed
+
+The boundary D5 adds on the **registry** side. A run reads the source registry to decide what it
+may use and commits a snapshot of that decision; between the two, an administrator can activate a
+new version, supersede one, or engage the kill switch.
+
+**Why a transaction does not solve this.** The two writes are not both writes. The registry read
+happens at plan time and the snapshot commit inside the search-creation transaction, but the _use_
+of the source happens minutes later inside a worker that holds neither. Wrapping the read and the
+commit together would make them consistent with each other and leave the gap that matters - the one
+between the commit and the fetch.
+
+**Orphan:** a committed snapshot citing a source version that is no longer the active one. It is
+**not** reconciled by rewriting the snapshot, and that is the decision: an approved version is
+immutable and a snapshot records what the run planned, so correcting it afterwards would destroy
+the only evidence of what the run actually intended.
+
+**Reconciler:** none for the snapshot itself. `SourceHealthService.checkAccess` is what makes a
+stale snapshot harmless — it re-reads the active version and the mutable health document at every
+point of use (FI-18). The pinned version explains what the run intended; health decides what it is
+allowed to do.
+
+**Window: —.** There is no interval in which a stale snapshot can cause a call the current registry
+forbids, because the registry is re-read at the call.
+
+**What the user sees:** where the version has since been suspended or superseded, a coverage
+outcome of `SUSPENDED` naming it, and on a historical read `sourceSuspendedSince` on the finding and
+`sinceSuspendedSources` on the findings page (D-031). Never a silently narrower plan.
+
+### FI-18 — Source suspended → in-flight run already dispatched work
+
+The boundary on the **run** side, and the one T36 is about. An operator engages the kill switch at
+10:31. A run that started at 10:28 has built its plan, may already hold leads, and is part-way
+through fetching them.
+
+**Orphan:** work in flight against a source this service has just stopped using — queued discovery
+queries, and discovered leads whose documents have not yet been fetched.
+
+**Reconciler: the point-of-use recheck, not a sweeper.** The pipeline calls
+`SourceHealthService.checkAccess` immediately before **each** discovery query and **each** fetch.
+There is no cancellation message chasing the run, deliberately: a cancellation that has to arrive is
+one that can fail to arrive, and that failure is the thing this row exists to prevent. Making the
+run ask, every time, removes the delivery problem entirely.
+
+**Window: one call.** At most one request already on the wire completes after the switch is
+engaged. It cannot be zero without holding a lock across an external call, which would make every
+fetch in the system wait on the registry.
+
+**What the user sees:** a `SourceCoverageOutcome` of `SUSPENDED` naming the suspension, its operator
+and its reason, and a `PARTIAL` or `INCOMPLETE` run — never a `SUCCEEDED` / `NO_MATCHES_FOUND` run
+that quietly consulted one fewer source. Each un-fetched lead is kept as a **rejected lead carrying
+the suspension as its reason**, so nothing is lost and a reviewer can see what was not looked at.
+
+**A result produced before the suspension is not deleted.** T36 is explicit, and deleting it would
+destroy an accurate record of what was found and when. A later read shows `sourceSuspendedSince` on
+the finding's document and lists the source in `sinceSuspendedSources` on the findings page — both
+places, for the reason in decision **D-031**.
+
+**Licence expiry is the same row.** T36 names it explicitly and `decideSourceAccess` puts it on the
+same path: past the recorded expiry the source is refused exactly as a suspended one is.
+
 ### FI-16 — Notification delivered → delivery recorded
 
 At-least-once and potentially out-of-order (REL-03). A crash after delivery and before recording
@@ -386,6 +449,7 @@ reconciler ran and the assertion is on the reconciled state — not that the cra
 | G4 exit | FI-10                      | No unindexed committed documents                                    |
 | SEC-06  | FI-14                      | Sequence/checkpoint gaps are detected, not assumed absent           |
 | D-012   | FI-15                      | Retention deletes the object, and legal hold stops it at the delete |
+| T36     | FI-17, FI-18               | A source suspended mid-run stops being used **within** that run     |
 
 ---
 
@@ -393,8 +457,10 @@ reconciler ran and the assertion is on the reconciled state — not that the cra
 
 Named so that their absence is a decision and not an oversight:
 
-- **Fetch boundaries** — partial cascade completion, per-source budget exhaustion mid-run, egress
-  identity rotation mid-fetch. Phase E adds them to this file.
+- **Fetch boundaries** — partial cascade completion and egress identity rotation mid-fetch. Phase E
+  adds them to this file. **Per-source budget exhaustion mid-run is now covered** by FI-18: the same
+  point-of-use check that honours the kill switch refuses a spent budget, and the refusal is a
+  coverage outcome (`PARTIAL` / `TRUNCATED_BY_QUOTA`) rather than an error.
 - **Extraction boundaries** — an assertion committed against a document version that is later
   superseded. Phase F.
 - **Export boundaries** — an export job whose artefact is staged but whose rights were revoked
@@ -410,13 +476,14 @@ Named so that their absence is a decision and not an oversight:
 The map above says which rows a numbered test claims. This says where the code actually is, so
 a later session does not have to find it.
 
-| Rows                        | File                                                            |
-| :-------------------------- | :-------------------------------------------------------------- |
-| FI-01, FI-02, FI-04, FI-05  | `tests/integration/transactions.test.ts`                        |
-| FI-03, FI-15                | `tests/integration/evidence-storage.test.ts`                    |
-| FI-06 – FI-09, FI-11, FI-12 | `tests/integration/jobs.test.ts`                                |
-| FI-10                       | `tests/integration/search-index.test.ts`                        |
-| FI-13                       | `tests/integration/jobs.test.ts` (T29, at the service boundary) |
+| Rows                        | File                                                                                                                                            |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| FI-01, FI-02, FI-04, FI-05  | `tests/integration/transactions.test.ts`                                                                                                        |
+| FI-03, FI-15                | `tests/integration/evidence-storage.test.ts`                                                                                                    |
+| FI-06 – FI-09, FI-11, FI-12 | `tests/integration/jobs.test.ts`                                                                                                                |
+| FI-10                       | `tests/integration/search-index.test.ts`                                                                                                        |
+| FI-13                       | `tests/integration/jobs.test.ts` (T29, at the service boundary)                                                                                 |
+| FI-17, FI-18                | `packages/domain/test/reliability/source-health.test.ts` (the decision) and `tests/integration/source-health.test.ts` (against the replica set) |
 
 Two notes on what that table does **not** claim.
 

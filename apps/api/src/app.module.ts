@@ -57,6 +57,7 @@ import {
   SOURCE_ADAPTERS,
   type SourceAdapterSet,
 } from './sources/sources.registry.js';
+import { SourceHealthService } from './sources/source-health.service.js';
 import { TransactionRunner } from './persistence/transaction.runner.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
 import { SearchesController } from './searches/searches.controller.js';
@@ -196,6 +197,15 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       provide: CapabilityCoverageService,
       useFactory: (db: Db) => new CapabilityCoverageService(db),
       inject: [MONGO_DB],
+    },
+    {
+      // Phase D step D5. The mutable observation document that sits *beside* the immutable
+      // source version — breaker, budgets and kill switch. See `sources/source-health.service.ts`
+      // for why it is a separate collection and why it is shared rather than tenant-owned.
+      provide: SourceHealthService,
+      useFactory: (db: Db, audit: AuditService, transactions: TransactionRunner) =>
+        new SourceHealthService(db, audit, transactions),
+      inject: [MONGO_DB, AuditService, TransactionRunner],
     },
     {
       provide: TransactionRunner,
@@ -366,6 +376,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         adapters: SourceAdapterSet,
         evidence: EvidenceStagingService,
         findings: FindingsService,
+        sourceHealth: SourceHealthService,
         config: AppConfig,
       ) =>
         new SearchPipeline(
@@ -376,6 +387,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           adapters,
           evidence,
           findings,
+          sourceHealth,
           config.mode,
         ),
       inject: [
@@ -386,6 +398,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         SOURCE_ADAPTERS,
         EvidenceStagingService,
         FindingsService,
+        SourceHealthService,
         APP_CONFIG,
       ],
     },
@@ -511,8 +524,9 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         ag: AssociationGraphService,
         fs2: FindingsService,
         tx: TaxonomyService,
+        sh: SourceHealthService,
         config: AppConfig,
-      ) => new SearchesService(db, e, s, t, a, o, i, st, ag, fs2, tx, config.mode),
+      ) => new SearchesService(db, e, s, t, a, o, i, st, ag, fs2, tx, sh, config.mode),
       inject: [
         MONGO_DB,
         EntitlementsService,
@@ -525,6 +539,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         AssociationGraphService,
         FindingsService,
         TaxonomyService,
+        SourceHealthService,
         APP_CONFIG,
       ],
     },
@@ -547,6 +562,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         indexer: IndexerService,
         adminRecords: VersionedRecordService,
         capabilities: CapabilityCoverageService,
+        sourceHealth: SourceHealthService,
       ) =>
         new StartupService(
           sessions,
@@ -564,6 +580,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           indexer,
           adminRecords,
           capabilities,
+          sourceHealth,
         ),
       inject: [
         SessionService,
@@ -581,6 +598,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         IndexerService,
         VersionedRecordService,
         CapabilityCoverageService,
+        SourceHealthService,
       ],
     },
 

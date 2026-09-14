@@ -823,3 +823,154 @@ fails, deletes or rolls back the run.
 
 Outcomes are keyed by source and replaced rather than appended, so a redelivered message cannot
 make one outage look like three.
+
+---
+
+## D-031 — Source health is a separate mutable document, and access is rechecked at the point of use
+
+**Status:** Accepted · **Decided at:** Phase D step D5, 2026-09-14
+
+**The document.** Observed availability, breaker state, budget counters and the kill switch live
+in `sourceHealth`, keyed by `sourceId`, referencing the version they observed. They are **not** on
+`SourceVersion`.
+
+`SourceVersion` is an immutable approved artefact — the record of what an approver permitted,
+frozen so that a search run six months ago can still explain itself under the terms it actually
+ran under. Health changes every few seconds and nobody approves it. Putting one inside the other
+forces a choice between breaking that immutability and losing the observations, and there is no
+version of that choice worth making. **The approved version says what is permitted; health says
+what is happening.**
+
+It is **shared, not tenant-owned**, on the same reasoning as source configuration (§6.3): a
+publisher's rate limit and a publisher's outage are properties of the publisher. Per-tenant budgets
+would let the sum of the tenants exceed the free tier the publisher actually grants. It joins
+`capabilityCoverage` and `nameFrequencyProfiles` in the documented cross-tenant collections.
+
+**The recheck.** A run pins its source versions at plan time, and `SourceHealthService.checkAccess`
+is called again immediately before **each** discovery query and **each** fetch. Deciding once, at
+plan time, would mean a source suspended for a rights violation kept being fetched for the length
+of every in-flight run — minutes or hours during which an operator believes they have stopped it.
+T36 forbids exactly that, and the point-of-use recheck is what makes the kill switch effective
+mid-run.
+
+There is deliberately **no cancellation message** chasing an in-flight run. A cancellation that has
+to arrive is one that can fail to arrive; making the run ask, every time, removes the delivery
+problem instead of adding a second one. The cost is bounded and stated: at most one request already
+on the wire completes after the switch is engaged (failure-injection row FI-18).
+
+**The breaker invents no failure taxonomy.** It reads FR-06's existing table. `domainAction:
+'SUSPEND'` or `alertOperator` opens it immediately — the source has told us to stop, or a human has
+to know. `domainAction !== 'NONE' || retryable` counts toward the threshold. What that excludes is
+the point: a `CONTENT_ERROR` (a 404 on one article) and an `OVERSIZE` (one enormous PDF) are facts
+about a **document**, and a breaker that counted them would hold open a source that is working
+perfectly and merely being asked for things that are not there.
+
+**Licence expiry is not a special case.** T36 names it explicitly, and `decideSourceAccess` puts it
+on the same path as an engaged kill switch: past the recorded `licenceExpiresAt` the source is
+refused identically. An expiry that cannot be parsed also refuses — a licence clock nobody can read
+is not a licence we can claim to be inside.
+
+**Refusal order is policy.** Rights first (kill switch, licence, an inactive version), then health
+(the breaker), then economics (budgets). A suspended source reports as suspended even when its
+breaker is also open and its budget also spent, because those are three different things to tell an
+operator and only the first is one somebody will be asked about.
+
+**Budget exhaustion is a coverage outcome, not an error** — `PARTIAL` with `TRUNCATED_BY_QUOTA`.
+Some of the plan ran. An open breaker is `FAILED` (we asked, repeatedly, and it did not answer);
+a kill switch, an expired licence or an inactive version is `SUSPENDED` (we chose not to ask).
+**None of the three is ever a silent skip**, because a run that quietly consulted one fewer source
+reads to a reviewer as a clean result from a search that was never made.
+
+**Consequence, accepted:** the six D2 fixture adapters are now registered in `sourceVersions` by the
+bootstrap. An adapter pointed at a source nobody approved is what the registry exists to prevent,
+and that rule has to hold for fixtures too — otherwise the mock stack exercises a path the live one
+does not have.
+
+---
+
+## D-032 — A result produced before a suspension is kept, and says so in both places
+
+**Status:** Accepted · **Decided at:** Phase D step D5, 2026-09-14
+
+T36 requires that a result produced under a source that is later suspended is **not**
+retro-actively deleted, and that a subsequent read of it shows the source has since been suspended.
+The brief asks where that surfaces — coverage view, evidence metadata, or both — and the answer is
+**both**, because the two answer different questions.
+
+- `sourceSuspendedSince` on the **finding's document** answers _"can I rely on this finding?"_. A
+  reviewer reading one finding must not have to go and check the run's coverage to learn that its
+  source is no longer trusted.
+- `sinceSuspendedSources` on the **findings page** answers _"has anything about this whole report
+  changed since it was written?"_. That is the question somebody re-opening a six-month-old result
+  actually asks, and without it they would have to reconstruct the answer by reading every finding.
+
+Not deleting is the substantive half. Deleting would destroy an accurate record of what was found
+and when — the result was true about the source at the time it was gathered, and a suspension is a
+fact about the present, not a retraction of the past.
+
+The note is computed at **read** time from the current health document rather than stamped onto the
+finding at write time, because "since suspended" is a statement about now. A stamped field would be
+wrong the moment the source was released, and correcting it would mean rewriting findings — which
+is the thing the whole records design refuses to do.
+
+A note is produced **only** when the suspension postdates the result. A result produced _after_ a
+suspension should not exist, and labelling it "since suspended" would state something false about
+when the data was gathered, so it says nothing at all rather than something wrong.
+
+---
+
+## D-033 — The Spanish lexicon ships unreviewed, and every surface says so
+
+**Status:** Accepted, with a named open action · **Decided at:** Phase D step D6, 2026-09-14
+
+**The state of the world.** `packages/domain/src/taxonomy/seed-lexicon.ts` carries 155 terms
+across `en` and `es` — conduct terms for all seventeen categories, procedural terms, and authority
+names. **No Spanish reader has reviewed the `es` half.** No Spanish-reading reviewer was available
+in this phase, and identifying one is still an open action owned outside engineering.
+
+The phase brief allowed exactly two honest outcomes and forbade the third:
+
+1. a list reviewed by someone who reads the language;
+2. an unreviewed list **whose unreviewed state is recorded** in the coverage statement and the
+   handoff;
+3. a **machine-translated** list — forbidden by D-010, because the usable Costa Rican Spanish
+   terms for "charged" or "indicted" are not dictionary translations of the English words, and a
+   translated list silently misses every real Costa Rican court report while looking fully
+   configured.
+
+This is (2). Nothing here is machine-translated; the terms were authored by hand against Costa
+Rican statutory vocabulary — `legitimación de capitales` rather than `lavado de dinero` (Ley 8204),
+`imputado` and `acusación formal` for the charge stages — and every one carries
+`reviewState: 'UNREVIEWED_AUTHORED'`.
+
+**Where the unreviewed state is recorded**, so that it cannot be lost by somebody forgetting:
+
+- **`TermReviewState` on every term.** A field, not a comment.
+- **Activation refuses `MACHINE_TRANSLATED` outright.** Recording provenance only means something
+  if one of its values is refused, and that is the one.
+- **The FR-13 coverage statement** carries an `Unreviewed term lists:` line naming the languages,
+  distinct from the `Unmeasured languages:` line. They are different facts and both are true:
+  unmeasured is "we have not checked how much this finds"; unreviewed is "we are not sure we asked
+  the right question".
+- **Every run's warnings** carry `unreviewedLexiconNote`, and the note **disappears by itself**
+  when a language's terms are all `REVIEWED_BY_SPEAKER` — so a review lands by editing the terms,
+  not by remembering to delete a warning.
+- **The handoff log**, as the brief requires.
+
+**Why ship it rather than ship `es` with no conduct terms.** The other branch the brief allowed is
+an empty Spanish list, and that is worse in a way that is easy to miss: with no terms, F3 builds no
+category queries at all in Spanish, the run reports nothing unusual, and the gap is invisible
+because "no terms" and "terms that found nothing" produce the same empty result. With terms marked
+unreviewed, the searches happen, the gap is named on every result, and a reviewer can act on it.
+
+**English is marked unreviewed too.** One engineer wrote both lists, and marking the English one
+`REVIEWED_BY_SPEAKER` because its author reads English would be exactly the self-certification the
+field exists to prevent. What differs between the two is the _cost_ of being wrong — an English
+error is visible to anyone reading the list, a Costa Rican Spanish one is not — and that asymmetry
+is what D-010 is about, not the review status itself.
+
+**The open action, stated so it is not lost:** a Spanish-reading reviewer must check the term list,
+in the priority order written at the top of `seed-lexicon.ts` — procedural terms first (they decide
+whether the Spanish half finds a real CR court report at all), then authority names, then conduct
+terms per category. Until they do, the Spanish half of this system may report no findings because
+the query was wrong rather than because nothing exists.

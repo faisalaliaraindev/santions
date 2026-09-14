@@ -32,10 +32,12 @@ import {
 import {
   coverageStatementSchema,
   declareCapabilitySchema,
+  killSwitchSchema,
   lifecycleTransitionSchema,
   proposeVersionSchema,
   rightsClearanceSchema,
   sourceContentSchema,
+  sourceHealthSchema,
   updateDraftSchema,
   versionSummarySchema,
 } from '../admin/admin.js';
@@ -119,6 +121,8 @@ export const COMPONENT_SCHEMAS = {
   VersionSummary: versionSummarySchema,
   CoverageStatement: coverageStatementSchema,
   DeclareCapabilityRequest: declareCapabilitySchema,
+  SourceHealth: sourceHealthSchema,
+  KillSwitchRequest: killSwitchSchema,
 
   SessionInfo: sessionInfoSchema,
   HealthStatus: healthStatusSchema,

@@ -31,6 +31,18 @@
  * That split is the reason the release gate can run with no infrastructure at all, and it is
  * why a bug in this file produces a wrong *record* rather than a wrong *rule*.
  *
+ * # Source health is checked at the point of use, not at plan time (D5, T36)
+ *
+ * Before each discovery query and before each fetch, the pipeline asks `SourceHealthService`
+ * whether that source may be used **right now**. Asking once, at plan time, would mean a source
+ * suspended for a rights violation kept being fetched for the length of every in-flight run —
+ * minutes or hours during which an operator believes they have stopped it. Asking at the point
+ * of use is what makes the kill switch effective mid-run.
+ *
+ * Every refusal becomes a `SourceCoverageOutcome` naming what stopped it. None of them is a
+ * silent skip: a run that quietly consulted one fewer source reads to a reviewer as a clean
+ * result from a search that was never made.
+ *
  * # Mode
  *
  * In mock mode every adapter is a fixture and every record is stamped `MOCK` (T55). Nothing in
@@ -55,7 +67,9 @@ import {
   matchNameForms,
   normaliseName,
   renderNoMatchStatement,
+  resolveEffectiveScope,
   unmeasuredLanguages,
+  unreviewedLexiconNote,
   type AnchorCompany,
   type ClusteredSource,
   type IdentityFactor,
@@ -74,6 +88,7 @@ import {
 } from './findings.service.js';
 import type { Lead } from '../sources/lead.js';
 import { hasData } from '../sources/source-adapter.js';
+import { SourceHealthService } from '../sources/source-health.service.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
 import { EvidenceStagingService } from '../storage/evidence-staging.service.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
@@ -109,6 +124,7 @@ export class SearchPipeline {
     private readonly adapters: SourceAdapterSet,
     private readonly evidence: EvidenceStagingService,
     private readonly findings: FindingsService,
+    private readonly sourceHealth: SourceHealthService,
     private readonly mode: 'mock' | 'live',
   ) {}
 
@@ -145,6 +161,43 @@ export class SearchPipeline {
         `Searched in ${unmeasured.join(', ')}, which carry no measured recall figure. ` +
           `Coverage in those languages is not established (FR-03, FR-16).`,
       );
+    }
+
+    // D6 / D-010. An unreviewed term list does not fail — it returns nothing — so a category
+    // searched with one may report no findings because the query was wrong rather than because
+    // nothing exists. The run says so rather than letting a reviewer assume otherwise.
+    for (const language of input.languages) {
+      const note = unreviewedLexiconNote(taxonomy.lexicon, language);
+      if (note !== null) {
+        warnings.push(note);
+      }
+    }
+
+    // The D6 effective scope, resolved per jurisdiction. `buildQueryPlan` resolves the same
+    // enablement itself; this is here for what the *coverage statement* needs — which enabled
+    // categories have no term to search with, and which requested languages the taxonomy does
+    // not declare at all. Both are silent narrowings if nobody reports them.
+    for (const jurisdiction of input.jurisdictions) {
+      const scope = resolveEffectiveScope({
+        taxonomy,
+        country: jurisdiction,
+        requestedLanguages: input.languages,
+      });
+      if (scope.undeclaredLanguages.length > 0) {
+        warnings.push(
+          `The taxonomy declares no terms in ${scope.undeclaredLanguages.join(', ')}, so ` +
+            `category queries were not built in ${scope.undeclaredLanguages.length === 1 ? 'it' : 'them'} for ${jurisdiction}.`,
+        );
+      }
+      if (scope.categoriesWithoutTerms.length > 0) {
+        warnings.push(
+          `${String(scope.categoriesWithoutTerms.length)} enabled categor` +
+            `${scope.categoriesWithoutTerms.length === 1 ? 'y has' : 'ies have'} no lexicon term ` +
+            `in the searched languages for ${jurisdiction} (${scope.categoriesWithoutTerms.join(', ')}). ` +
+            `They were searched only by the name-anchored query families, so an empty result for ` +
+            `them is weaker evidence than for a category with terms.`,
+        );
+      }
     }
 
     // ---- 1. Associations -------------------------------------------------------------------
@@ -203,7 +256,7 @@ export class SearchPipeline {
     }
 
     // ---- 4-6. Fetch, extract, band ---------------------------------------------------------
-    const { findings, rejected } = await this.assess({
+    const { findings, rejected, accessOutcomes } = await this.assess({
       sourced: leads,
       subject,
       graph,
@@ -213,6 +266,7 @@ export class SearchPipeline {
       tenantId: input.tenantId,
       now: input.now,
     });
+    sourceOutcomes.push(...accessOutcomes);
 
     return {
       findings,
@@ -254,7 +308,7 @@ export class SearchPipeline {
    */
   private async discover(
     queries: readonly PlannedQuery[],
-    input: { readonly tenantId: string },
+    input: { readonly tenantId: string; readonly now: Date },
   ): Promise<{
     leads: readonly SourcedLead[];
     rungReached: number | null;
@@ -288,11 +342,27 @@ export class SearchPipeline {
     let rungReached: number | null = null;
     let newsFailures = 0;
     let newsQueries = 0;
+    /** Set when health refuses the source, so the loop stops asking and the run says why. */
+    let newsRefusal: SourceCoverageOutcome | null = null;
 
     for (const query of queries) {
       if (news === null) {
         continue;
       }
+
+      // D5 / T36. Asked per query rather than once, because the answer can change between two
+      // queries of the same run: an operator engaging the kill switch, a breaker opening on the
+      // previous query's failure, or an hourly budget reaching its last call.
+      const access = await this.sourceHealth.checkAccess({
+        sourceId: news.descriptor.sourceId,
+        now: input.now,
+        queriesAffected: queries.length - newsQueries,
+      });
+      if (!access.decision.allowed) {
+        newsRefusal = access.coverageOutcome;
+        break;
+      }
+
       newsQueries += 1;
       const result = await news.discover({
         tenantId: input.tenantId,
@@ -306,8 +376,19 @@ export class SearchPipeline {
 
       if (result.status === 'FAILED') {
         newsFailures += 1;
+        // Fed back into the breaker through the FR-06 table, so a source that is failing this
+        // run is already refused on the next one rather than being rediscovered from scratch.
+        await this.sourceHealth.recordFailure({
+          sourceId: news.descriptor.sourceId,
+          signal: result.signal,
+          now: input.now,
+        });
         continue;
       }
+      await this.sourceHealth.recordSuccess({
+        sourceId: news.descriptor.sourceId,
+        now: input.now,
+      });
       if (!hasData(result)) {
         // The source answered and had nothing. Not a failure, and the rung was still reached.
         rungReached = Math.max(rungReached ?? 0, 2);
@@ -322,7 +403,12 @@ export class SearchPipeline {
       }
     }
 
-    if (news !== null) {
+    if (newsRefusal !== null) {
+      // The refusal replaces the source's own outcome rather than accompanying it. Reporting
+      // both would have the run claim the source completed *and* was suspended, and the fact a
+      // reviewer needs is the one that says why the plan stopped short.
+      outcomes.push({ ...newsRefusal, sourceName: 'News discovery' });
+    } else if (news !== null) {
       outcomes.push({
         sourceId: news.descriptor.sourceId,
         sourceName: 'News discovery',
@@ -357,11 +443,18 @@ export class SearchPipeline {
     readonly searchId: string;
     readonly tenantId: string;
     readonly now: Date;
-  }): Promise<{ findings: FindingRecord[]; rejected: RejectedLeadRecord[] }> {
+  }): Promise<{
+    findings: FindingRecord[];
+    rejected: RejectedLeadRecord[];
+    accessOutcomes: SourceCoverageOutcome[];
+  }> {
     const fetcher = this.adapters.evidenceFetch;
     const extractor = this.adapters.extractionModel;
     const findings: FindingRecord[] = [];
     const rejected: RejectedLeadRecord[] = [];
+    const accessOutcomes: SourceCoverageOutcome[] = [];
+    /** One coverage outcome per refused source, not one per lead it cost. */
+    const refusedSources = new Set<string>();
 
     if (fetcher === null || extractor === null) {
       for (const { lead, query } of input.sourced) {
@@ -373,13 +466,35 @@ export class SearchPipeline {
             'never retrieved. The lead stands; nothing was concluded from it.',
         });
       }
-      return { findings, rejected };
+      return { findings, rejected, accessOutcomes };
     }
 
     const enabledCategoryIds = input.taxonomy.categories.map((category) => category.category);
     const nameForms = [input.subject.fullName, ...input.subject.aliases.map((alias) => alias.name)];
 
     for (const { lead, query } of input.sourced) {
+      // D5 / T36, the second point of use. A lead discovered ten seconds ago from a source that
+      // has since been suspended is **not** fetched, and the run says so rather than dropping
+      // the lead silently.
+      const leadSourceId = lead.provenance.sourceId;
+      const access = await this.sourceHealth.checkAccess({
+        sourceId: leadSourceId,
+        now: input.now,
+        queriesAffected: 1,
+      });
+      if (!access.decision.allowed) {
+        if (!refusedSources.has(leadSourceId) && access.coverageOutcome !== null) {
+          refusedSources.add(leadSourceId);
+          accessOutcomes.push(access.coverageOutcome);
+        }
+        rejected.push({
+          ...this.leadRecord(lead, query, input),
+          stage: 'FETCH',
+          reason: `The document was not retrieved. ${access.decision.detail}`,
+        });
+        continue;
+      }
+
       const fetched = await fetcher.fetch({
         url: lead.url,
         attribution: {
@@ -412,6 +527,16 @@ export class SearchPipeline {
         fetchKey: `${input.searchId}:${lead.leadId}`,
         allowRender: false,
       });
+
+      if (fetched.status === 'FAILED') {
+        await this.sourceHealth.recordFailure({
+          sourceId: leadSourceId,
+          signal: fetched.signal,
+          now: input.now,
+        });
+      } else {
+        await this.sourceHealth.recordSuccess({ sourceId: leadSourceId, now: input.now });
+      }
 
       if (!hasData(fetched) || fetched.data.body === null) {
         rejected.push({
@@ -507,7 +632,7 @@ export class SearchPipeline {
       }
     }
 
-    return { findings, rejected };
+    return { findings, rejected, accessOutcomes };
   }
 
   private leadRecord(
@@ -711,6 +836,7 @@ export class SearchPipeline {
     readonly languages: readonly string[];
     readonly enabledCategories: readonly string[];
     readonly unmeasuredLanguages: readonly string[];
+    readonly unreviewedTermLanguages?: readonly string[] | undefined;
     readonly taxonomyVersion: number;
     readonly policyVersion: number;
     readonly coverage: ReturnType<typeof aggregateRun>['coverage'];
@@ -731,6 +857,7 @@ export class SearchPipeline {
         (outcome) => outcome.outcome === 'FAILED' || outcome.outcome === 'SKIPPED',
       ),
       unmeasuredLanguages: input.unmeasuredLanguages,
+      unreviewedTermLanguages: input.unreviewedTermLanguages ?? [],
     });
   }
 

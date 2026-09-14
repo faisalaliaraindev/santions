@@ -33,6 +33,22 @@ interface TaxonomyVersionRecord {
   readonly categories?: TaxonomyVersion['categories'];
   readonly languages?: TaxonomyVersion['languages'];
   readonly lexicon?: TaxonomyVersion['lexicon'];
+  /**
+   * The nested form, written by `VersionedRecordService`.
+   *
+   * Two shapes exist and both are real, which was discovered at D6 when the first taxonomy was
+   * activated through the admin API: the bootstrap writes the fields flat, and a version
+   * proposed through `/v1/admin/taxonomy` carries them under `content`. Reading only the flat
+   * shape meant an administrator could take a taxonomy all the way through four-eyes approval
+   * and activation and have the pipeline keep running under the seeded one — silently, with the
+   * admin API reporting success. So both are read, nested first, because a version that has
+   * both is one this service wrote.
+   */
+  readonly content?: {
+    readonly categories?: TaxonomyVersion['categories'];
+    readonly languages?: TaxonomyVersion['languages'];
+    readonly lexicon?: TaxonomyVersion['lexicon'];
+  };
   readonly proposedBy?: string;
   readonly approvedBy?: string | null;
   readonly activatedAt?: string | null;
@@ -60,11 +76,11 @@ export class TaxonomyService {
       taxonomyVersionId: `${tenantId}:v${String(version)}`,
       version,
       tenantId,
-      categories: record.categories ?? [],
-      lexicon: record.lexicon ?? [],
+      categories: record.content?.categories ?? record.categories ?? [],
+      lexicon: record.content?.lexicon ?? record.lexicon ?? [],
       // An absent language list means nothing is measured, which means nothing is enabled.
       // That is the correct reading of a missing field, and the coverage statement will say so.
-      languages: record.languages ?? [],
+      languages: record.content?.languages ?? record.languages ?? [],
       status: (record.status as TaxonomyVersion['status'] | undefined) ?? 'ACTIVE',
       proposedBy: record.proposedBy ?? 'bootstrap',
       approvedBy: record.approvedBy ?? null,

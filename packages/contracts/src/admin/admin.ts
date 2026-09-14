@@ -190,6 +190,15 @@ export const sourceContentSchema = z
     stabilityClass: z.enum(['DOCUMENTED_STABLE', 'UNDOCUMENTED_VOLATILE']),
     parserVersion: z.string().min(1).max(40),
     licenceTermsVersion: z.string().min(1).max(120),
+    /**
+     * When the recorded licence terms expire, if they do (Phase D step D5, T36).
+     *
+     * Optional because most free sources publish terms with no end date, and requiring an
+     * invented one would put a date into the registry that nobody agreed. Where it *is* set,
+     * `SourceHealth` refuses the source past this instant on exactly the path an engaged kill
+     * switch takes — T36 names licence expiry as equivalent, and it is not a special case.
+     */
+    licenceExpiresAt: z.string().datetime().nullable().optional(),
     /** Robots position, recorded per source. Exceptions are open decision D6. */
     robotsPosition: z.enum(['HONOURED', 'EXCEPTION_APPROVED', 'NOT_ESTABLISHED']),
     /** How the source publishes: CR's gazette is PDF, most news is HTML. Drives extraction. */
@@ -350,3 +359,50 @@ export const declareCapabilitySchema = z
   })
   .strict();
 export type DeclareCapabilityInput = z.infer<typeof declareCapabilitySchema>;
+
+/**
+ * Phase D step D5 — the source-health wire shapes.
+ *
+ * Health is a **separate** document from the approved version, and the split survives onto the
+ * wire: this schema carries no approved field, and `sourceContentSchema` carries no observation.
+ * A caller reading one and writing the other cannot accidentally make a runtime observation look
+ * like something an approver signed.
+ */
+export const breakerStateSchema = z.enum(['CLOSED', 'OPEN', 'HALF_OPEN']);
+
+export const budgetWindowSchema = z
+  .object({ windowStart: z.string(), spent: z.number().int().min(0) })
+  .strict();
+
+export const sourceHealthSchema = z
+  .object({
+    sourceId: z.string(),
+    /** The approved version these observations were made against. A reference, not a copy. */
+    observedVersion: z.number().int().min(0),
+    breaker: breakerStateSchema,
+    openedAt: z.string().nullable(),
+    halfOpenProbes: z.number().int().min(0),
+    consecutiveFailures: z.number().int().min(0),
+    lastFailureClass: z.string().nullable(),
+    lastFailureAt: z.string().nullable(),
+    lastSuccessAt: z.string().nullable(),
+    hourly: budgetWindowSchema,
+    daily: budgetWindowSchema,
+    killSwitch: z
+      .object({ engagedAt: z.string(), engagedBy: z.string(), reason: z.string() })
+      .strict()
+      .nullable(),
+    licenceExpiresAt: z.string().nullable(),
+  })
+  .strict();
+export type SourceHealthWire = z.infer<typeof sourceHealthSchema>;
+
+/**
+ * Engaging or releasing the kill switch.
+ *
+ * The reason is mandatory in both directions and is not a log line: it reaches the coverage
+ * statement of every run that wanted this source, so a reviewer reading a narrow result learns
+ * why it is narrow. SEC-06 requires a reason on every suspension regardless.
+ */
+export const killSwitchSchema = z.object({ reason: z.string().min(1).max(2000) }).strict();
+export type KillSwitchInput = z.infer<typeof killSwitchSchema>;

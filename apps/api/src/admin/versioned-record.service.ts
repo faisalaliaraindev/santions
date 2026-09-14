@@ -37,6 +37,7 @@ import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db, Document, Filter, UpdateFilter } from 'mongodb';
 
 import {
+  auditTaxonomyForActivation,
   canApprove,
   canTransition,
   clearancePermitsActivation,
@@ -44,6 +45,8 @@ import {
   isEditable,
   permissionsForRoles,
   ruleFor,
+  summariseTaxonomyRefusals,
+  type CountryCode,
   type LifecycleAction,
   type LifecycleState,
   type Permission,
@@ -52,6 +55,8 @@ import {
   type RightsOperation,
   type RightsPolicy,
   type RightsRequest,
+  type TaxonomyRefusal,
+  type TaxonomyVersion,
 } from '@erly/adverse-domain';
 
 import { ApiException } from '../common/api-exception.js';
@@ -586,48 +591,126 @@ export class VersionedRecordService {
     const identity = this.identityFilter(input.kind, input.recordId, input.principal);
     const auditTenant = this.auditTenant(input.principal);
 
-    return this.transactions.run(
-      async (session) => {
-        const current = await this.load(collection, identity, input.kind, input.version, session);
-        this.checkRevision(current, input.expectedRevision);
+    /**
+     * Set when D6's taxonomy audit refuses, and written after the transaction has aborted.
+     *
+     * A mutable holder rather than a `let`, because the assignment happens inside the transaction
+     * callback and TypeScript's control-flow analysis cannot see across it — it would narrow the
+     * variable to `null` in the `finally` and reject the read.
+     */
+    const taxonomyDenial: { refusal: { version: number; reason: string } | null } = {
+      refusal: null,
+    };
 
-        // The backstop. Submit already checked this, but a record can reach `APPROVED` by
-        // other routes — the bootstrap seeds versions directly, and a restore re-enters at the
-        // gate — and an active source whose fields the adapters cannot read is a source that
-        // silently contributes nothing while appearing in the coverage statement.
-        assertContentConforms(input.kind, current.content);
+    try {
+      return await this.transactions.run(
+        async (session) => {
+          const current = await this.load(collection, identity, input.kind, input.version, session);
+          this.checkRevision(current, input.expectedRevision);
 
-        const resuming = current.status === 'ACTIVATING';
-        const begin = canTransition(current.status, 'BEGIN_ACTIVATION');
-        if (!begin.allowed && !resuming) {
-          throw new ApiException('ALREADY_TERMINAL', begin.reason, {
-            internalDetail: `${input.kind} ${input.recordId} v${String(input.version)}`,
-          });
-        }
+          // The backstop. Submit already checked this, but a record can reach `APPROVED` by
+          // other routes — the bootstrap seeds versions directly, and a restore re-enters at the
+          // gate — and an active source whose fields the adapters cannot read is a source that
+          // silently contributes nothing while appearing in the coverage statement.
+          assertContentConforms(input.kind, current.content);
 
-        const activating = resuming
-          ? current
-          : await this.applyStatus(collection, identity, current, {
-              to: 'ACTIVATING',
-              action: 'BEGIN_ACTIVATION',
+          // Phase D step D6. `assertLexiconClean` already fails CI; this makes the same audit fail
+          // **activation**, because CI catches a term an engineer commits and catches nothing a
+          // `taxonomy_admin` types into this API. The refusal is audited before it is thrown, so
+          // "why is this taxonomy not live?" has an answer that survives the aborted transaction.
+          if (input.kind === 'TAXONOMY') {
+            const refusals = await this.auditTaxonomy(current, session);
+            if (refusals.length > 0) {
+              // Recorded on the closure, not audited here. A denial written inside the transaction
+              // that is about to throw is rolled back with it, and the refusal leaves no trace —
+              // which is the opposite of what SEC-06 wants, because a `taxonomy_admin` trying to
+              // activate a protected-characteristic term is precisely the event an auditor needs
+              // to see. The `finally` below writes it in its own transaction.
+              taxonomyDenial.refusal = {
+                version: current.version,
+                reason: summariseTaxonomyRefusals(refusals),
+              };
+              throw new ApiException(
+                'VALIDATION_FAILED',
+                `This taxonomy version cannot be activated (${String(refusals.length)} problem(s)). ` +
+                  `A taxonomy edited at runtime must meet the same bar the build enforces.`,
+                {
+                  details: refusals.map((refusal) => ({
+                    path: refusal.code,
+                    message: refusal.detail,
+                  })),
+                },
+              );
+            }
+          }
+
+          const resuming = current.status === 'ACTIVATING';
+          const begin = canTransition(current.status, 'BEGIN_ACTIVATION');
+          if (!begin.allowed && !resuming) {
+            throw new ApiException('ALREADY_TERMINAL', begin.reason, {
+              internalDetail: `${input.kind} ${input.recordId} v${String(input.version)}`,
+            });
+          }
+
+          const activating = resuming
+            ? current
+            : await this.applyStatus(collection, identity, current, {
+                to: 'ACTIVATING',
+                action: 'BEGIN_ACTIVATION',
+                actor: input.principal.subject,
+                reason: null,
+                now: input.now,
+                kind: input.kind,
+                session,
+              });
+
+          const clearance = this.clear(activating, input.now);
+
+          if (!clearancePermitsActivation(clearance)) {
+            const aborted = await this.applyStatus(collection, identity, activating, {
+              to: 'APPROVED',
+              action: 'ABORT_ACTIVATION',
               actor: input.principal.subject,
-              reason: null,
+              reason: summariseClearance(clearance),
               now: input.now,
               kind: input.kind,
+              clearance,
               session,
             });
 
-        const clearance = this.clear(activating, input.now);
+            await this.appendAudit(session, {
+              tenantId: auditTenant,
+              principal: input.principal,
+              action: `${input.kind.toLowerCase()}:activate`,
+              targetType: definition.targetType,
+              targetId: input.recordId,
+              version: current.version,
+              reason: summariseClearance(clearance),
+              correlationId: input.correlationId,
+              result: 'DENIED',
+              now: input.now,
+            });
 
-        if (!clearancePermitsActivation(clearance)) {
-          const aborted = await this.applyStatus(collection, identity, activating, {
-            to: 'APPROVED',
-            action: 'ABORT_ACTIVATION',
+            return { record: aborted, clearance };
+          }
+
+          // Supersede whatever is live now — in the same transaction, so there is never a moment
+          // with two active versions and never one with none.
+          await collection.updateMany(
+            { ...identity, status: 'ACTIVE', version: { $ne: input.version } },
+            { $set: { status: 'SUPERSEDED', supersededAt: input.now }, $inc: { revision: 1 } },
+            { session },
+          );
+
+          const activated = await this.applyStatus(collection, identity, activating, {
+            to: 'ACTIVE',
+            action: 'COMPLETE_ACTIVATION',
             actor: input.principal.subject,
-            reason: summariseClearance(clearance),
+            reason: null,
             now: input.now,
             kind: input.kind,
             clearance,
+            activatedAt: input.now,
             session,
           });
 
@@ -638,52 +721,78 @@ export class VersionedRecordService {
             targetType: definition.targetType,
             targetId: input.recordId,
             version: current.version,
-            reason: summariseClearance(clearance),
+            reason: `Rights clearance ${clearance.verdict} under policy ${clearance.policyId}.`,
             correlationId: input.correlationId,
-            result: 'DENIED',
+            result: 'ALLOWED',
             now: input.now,
           });
 
-          return { record: aborted, clearance };
-        }
-
-        // Supersede whatever is live now — in the same transaction, so there is never a moment
-        // with two active versions and never one with none.
-        await collection.updateMany(
-          { ...identity, status: 'ACTIVE', version: { $ne: input.version } },
-          { $set: { status: 'SUPERSEDED', supersededAt: input.now }, $inc: { revision: 1 } },
-          { session },
-        );
-
-        const activated = await this.applyStatus(collection, identity, activating, {
-          to: 'ACTIVE',
-          action: 'COMPLETE_ACTIVATION',
-          actor: input.principal.subject,
-          reason: null,
-          now: input.now,
-          kind: input.kind,
-          clearance,
-          activatedAt: input.now,
-          session,
-        });
-
-        await this.appendAudit(session, {
+          return { record: activated, clearance };
+        },
+        { name: `admin.activate.${input.kind}` },
+      );
+    } finally {
+      const refused = taxonomyDenial.refusal;
+      if (refused !== null) {
+        await this.auditDenial({
           tenantId: auditTenant,
           principal: input.principal,
-          action: `${input.kind.toLowerCase()}:activate`,
+          action: 'taxonomy:activate',
           targetType: definition.targetType,
           targetId: input.recordId,
-          version: current.version,
-          reason: `Rights clearance ${clearance.verdict} under policy ${clearance.policyId}.`,
+          version: refused.version,
+          reason: refused.reason,
           correlationId: input.correlationId,
-          result: 'ALLOWED',
           now: input.now,
         });
+      }
+    }
+  }
 
-        return { record: activated, clearance };
-      },
-      { name: `admin.activate.${input.kind}` },
+  /**
+   * The D6 activation audit for a taxonomy version.
+   *
+   * All the reasoning is in `auditTaxonomyForActivation`, which is pure. This supplies the two
+   * facts that need a database: the currently active version (so an administrative edit to a
+   * measured recall figure is detectable — FR-16 says only an evaluation run may set one), and
+   * the countries in which some source is actually approved and active.
+   *
+   * **The source-coverage read is deliberately of `sourceVersions`, not of `capabilityCoverage`.**
+   * Capability coverage is a human assertion about what the product can do; this question is
+   * narrower and mechanical — is there an approved, active source whose declared countries
+   * include this one? A category enabled where the answer is no is searched for and never found,
+   * which reads to a reviewer as a clean result for that category.
+   */
+  private async auditTaxonomy(
+    record: VersionedRecord,
+    session: ClientSession,
+  ): Promise<readonly TaxonomyRefusal[]> {
+    const candidate = toTaxonomyVersion(record);
+
+    const activeDocument = await this.collectionFor('TAXONOMY').findOne(
+      { tenantId: record.tenantId, status: 'ACTIVE', version: { $ne: record.version } },
+      { sort: { version: -1 }, session },
     );
+    const active =
+      activeDocument === null ? null : toTaxonomyVersion(toRecord(activeDocument, 'TAXONOMY'));
+
+    const sources = await this.collectionFor('SOURCE')
+      .find({ status: 'ACTIVE' }, { session })
+      .toArray();
+    const countries = new Set<CountryCode>();
+    for (const document of sources) {
+      // Seeded records store content flat; versions written through this service nest it.
+      const content = (document['content'] as Record<string, unknown> | undefined) ?? document;
+      for (const country of asStringArray(content['countries'])) {
+        countries.add(country);
+      }
+    }
+
+    return auditTaxonomyForActivation({
+      candidate,
+      active,
+      countriesWithApprovedSource: [...countries],
+    });
   }
 
   /**
@@ -1030,6 +1139,36 @@ function splitContent(document: Document): {
     }
   }
   return { content, knownKeys };
+}
+
+/**
+ * A stored taxonomy record as the domain's `TaxonomyVersion`.
+ *
+ * Every absent field defaults to the value that **narrows** what the service claims: no
+ * categories, no languages, an empty lexicon. A record missing its language list is one about
+ * which nothing is measured, which is the honest reading of a missing field rather than a claim
+ * that every language is fine.
+ */
+function toTaxonomyVersion(record: VersionedRecord): TaxonomyVersion {
+  const content = record.content;
+  return {
+    taxonomyVersionId: `${record.tenantId ?? ''}:v${String(record.version)}`,
+    version: record.version,
+    tenantId: record.tenantId ?? '',
+    categories: (content['categories'] as TaxonomyVersion['categories'] | undefined) ?? [],
+    lexicon: (content['lexicon'] as TaxonomyVersion['lexicon'] | undefined) ?? [],
+    languages: (content['languages'] as TaxonomyVersion['languages'] | undefined) ?? [],
+    status: record.status,
+    proposedBy: record.proposedBy ?? '',
+    approvedBy: record.approvedBy,
+    activatedAt: record.activatedAt?.toISOString() ?? null,
+  };
+}
+
+function asStringArray(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 /** A one-line summary of why a clearance refused, for an audit reason and an error message. */

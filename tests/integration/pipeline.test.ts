@@ -36,6 +36,7 @@ import { RetentionService } from '../../apps/api/src/persistence/retention.servi
 import { SourceDocumentService } from '../../apps/api/src/persistence/source-document.service.js';
 import { StageExecutionService } from '../../apps/api/src/persistence/stage-execution.service.js';
 import { TransactionRunner } from '../../apps/api/src/persistence/transaction.runner.js';
+import { SourceHealthService } from '../../apps/api/src/sources/source-health.service.js';
 import { FindingsService } from '../../apps/api/src/pipeline/findings.service.js';
 import { SearchJobHandler } from '../../apps/api/src/pipeline/search-job.handler.js';
 import { SearchPipeline } from '../../apps/api/src/pipeline/search-pipeline.service.js';
@@ -64,6 +65,7 @@ let runner: TransactionRunner;
 let searches: SearchesService;
 let handler: SearchJobHandler;
 let findings: FindingsService;
+let sourceHealth: SourceHealthService;
 
 const TENANT = `t-pipe-${randomUUID()}`;
 
@@ -189,6 +191,7 @@ beforeAll(async () => {
   const policies = new PolicyService(db);
   const documents = new SourceDocumentService(db);
   findings = new FindingsService(db);
+  sourceHealth = new SourceHealthService(db, audit, runner);
 
   const adapters = buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null });
   const graph = new AssociationGraphService(
@@ -214,6 +217,7 @@ beforeAll(async () => {
     graph,
     findings,
     taxonomies,
+    sourceHealth,
     'mock',
   );
 
@@ -232,6 +236,7 @@ beforeAll(async () => {
       'eu-west-2',
     ),
     findings,
+    sourceHealth,
     'mock',
   );
 

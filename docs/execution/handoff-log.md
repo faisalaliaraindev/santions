@@ -27,6 +27,214 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (night) — **Phase D complete, gate G5 passed**: D5 source health, D6 the lexicon and its activation audit
+
+**Context.** The session before this one built two pure modules for the live fetch gate and then
+stopped, because the project owner decided to finish Phase D first. This session did that. D5 and
+D6 are done, G5 is passed, and the live-source work is now unblocked rather than parked.
+
+---
+
+### D5 — source health: breaker, budgets, kill switch
+
+**The trap the brief warned about, and how it was avoided.** `SourceHealth` is a **separate
+mutable collection** (`sourceHealth`, `_id` = `sourceId`) holding breaker state, budget counters,
+the kill switch and the licence clock. It is **not** on `SourceVersion`, which is an immutable
+approved artefact. There is an integration test that asserts exactly this: suspending a source
+leaves the `sourceVersions` document byte-identical. The approved version says what is
+_permitted_; health says what is _happening_. Decision **D-031**.
+
+It is **shared, not tenant-owned** — a publisher's rate limit is a property of the publisher, and
+per-tenant budgets would let the sum of the tenants exceed the free tier the publisher grants.
+
+**The breaker invents no failure taxonomy.** It reads the existing FR-06 table and derives
+everything from two properties of a `FailurePolicy`:
+
+- `domainAction === 'SUSPEND' || alertOperator` → opens **immediately** (hard block, revoked
+  credential). Five more requests at a source that has already refused is what the hard
+  constraints exist to prevent.
+- `domainAction !== 'NONE' || retryable` → counts toward the threshold (default 3).
+
+What that **excludes** is the point: a `CONTENT_ERROR` (a 404 on one article) and an `OVERSIZE`
+(one enormous PDF) are facts about a **document**. A breaker that counted them would hold open a
+source that is working perfectly and merely being asked for things that are not there. There is a
+test that fires ten content errors in a row and asserts the breaker stays closed.
+
+`HALF_OPEN` exists so a recovering source is not knocked over by the whole backlog at the end of
+the cooldown; it admits exactly one probe, and a failed probe re-opens the breaker at once.
+
+**Budgets** are fixed clock windows (hourly, daily), read fresh from the **active version** on
+every check — so an administrator lowering a budget takes effect without a restart, and there is a
+test for that. Spent **before** the call, not after: the publisher counts requests, not successes,
+and a budget decremented on success would let a failing source be called without limit.
+**Exhaustion is a coverage outcome, not an error** — `PARTIAL` with `TRUNCATED_BY_QUOTA`.
+
+**The kill switch is effective mid-run (T36), and this is the part worth understanding.** The
+pipeline calls `SourceHealthService.checkAccess` immediately before **each** discovery query and
+**each** fetch, not at plan time. There is deliberately **no cancellation message** chasing an
+in-flight run: a cancellation that has to arrive is one that can fail to arrive, and making the
+run ask every time removes the delivery problem instead of adding a second one. The cost is
+bounded and written down — at most one request already on the wire completes after the switch is
+engaged.
+
+**Licence expiry is the same path.** T36 names it explicitly; past a recorded `licenceExpiresAt`
+the source is refused exactly as a suspended one is. An expiry that cannot be parsed also refuses.
+`licenceExpiresAt` was added to `sourceContentSchema` as an optional nullable field.
+
+**Refusal order is policy:** rights (kill switch, licence, inactive version) → health (breaker) →
+economics (budgets). A suspended source reports as suspended even when its breaker is also open
+and its budget also spent, because only the first is a reason somebody will be asked about.
+
+**No refusal is ever a silent skip.** Each produces a `SourceCoverageOutcome`: `SUSPENDED` (we
+chose not to ask), `FAILED` (we asked and it did not answer), `PARTIAL`/`TRUNCATED_BY_QUOTA` (the
+budget ran out). Un-fetched leads are kept as **rejected leads carrying the suspension as their
+reason**, so nothing is lost.
+
+**T36's "or after result" half** (decision **D-032**): a result produced before a suspension is
+**not deleted** — deleting it would destroy an accurate record of what was found and when — and a
+later read shows `sourceSuspendedSince` on the finding's document **and** `sinceSuspendedSources`
+on the findings page. Both, because they answer different questions: "can I rely on this finding?"
+and "has anything about this whole report changed?". Computed at read time from current health,
+never stamped at write time, because "since suspended" is a statement about now.
+
+**Routes:** `GET /v1/admin/source-health` (needs `platform:read_health`, so an operator can see
+breaker state without being handed evidence access), `POST /v1/admin/sources/{id}/kill-switch`
+(one person — stopping is the safe direction, and requiring a second approver means the fetching
+continues while they are found) and `.../kill-switch/release` (**four eyes**, and refused to
+whoever engaged it).
+
+**Failure-injection rows FI-17 and FI-18** appended in the existing format, with the row-to-test
+map and the where-tested table updated. FI-18's reconciler is the point-of-use recheck, not a
+sweeper, for the reason above.
+
+---
+
+### D6 — the lexicon audit on the activation path, and the term lists
+
+**`auditTaxonomyForActivation` now blocks `ACTIVE`** on four things. `assertLexiconClean` already
+failed CI, and CI catches a term an engineer commits — it catches nothing a `taxonomy_admin` types
+into the admin API. Refused:
+
+1. a **protected-characteristic term** (T79, SEC-05);
+2. a **`MACHINE_TRANSLATED`** term (D-010) — recording provenance means nothing unless one of its
+   values is refused;
+3. a **recall figure an administrator authored**. `measuredRecall` is settable only by an
+   evaluation run (FR-16), enforced by comparing the candidate's language profiles against the
+   currently active version: any difference is an admin edit, because the admin API is the only
+   thing that produced this version. Until the FR-16 evaluation seam exists (G10), **no language
+   can become enabled** — which is the honest state and exactly what the coverage statement says.
+4. a **category enabled for a country with no approved active source** — enablement without
+   sources produces a category that is searched for and never found, which reads as a clean result
+   for that category.
+
+**The denial is audited in its own transaction**, following the D1 pattern: a denial written
+inside the transaction that then throws is rolled back with it and leaves no trace, which is the
+opposite of what SEC-06 wants.
+
+**`resolveEffectiveScope` is exposed pure**, so "a disabled category is never queried" is provable
+**here** rather than being an assertion about Phase E code. It also reports what a coverage
+statement needs: enabled categories with no term to search with, and requested languages the
+taxonomy does not declare at all — both silent narrowings if nobody reports them.
+
+**The lexicon is no longer empty.** `packages/domain/src/taxonomy/seed-lexicon.ts` carries **155
+hand-authored terms** across `en` and `es`: conduct terms for all seventeen categories, Costa Rican
+procedural vocabulary (`imputado`, `acusación formal`, `allanamiento`, `prisión preventiva`,
+`sobreseimiento`), and authority names (`Ministerio Público`, `OIJ`, `Sala Tercera`, `Contraloría
+General de la República`). It lives in the pure package so `auditLexicon` gates it in CI. F3
+category queries are now actually built; before this they were not, because the list was empty.
+
+**⚠️ NO SPANISH READER HAS REVIEWED THE SPANISH TERMS.** This is the brief's second allowed
+outcome — an unreviewed list whose state is recorded — taken because no Spanish-reading reviewer
+was available. It is **not** the forbidden third option: nothing is machine-translated, and
+activation refuses `MACHINE_TRANSLATED` outright. Recorded in five places so it cannot be
+forgotten: `reviewState` on every term; the activation refusal; an `Unreviewed term lists:` line
+in the FR-13 coverage statement (distinct from the unmeasured-languages line — unmeasured is "we
+have not checked how much this finds", unreviewed is "we are not sure we asked the right
+question"); a warning on every run; and decision **D-033**. The note **disappears by itself** when
+terms become `REVIEWED_BY_SPEAKER`, so a review lands by editing terms rather than by remembering
+to delete a warning.
+
+**English is marked unreviewed too** — one engineer wrote both lists, and marking English reviewed
+because its author reads English is exactly the self-certification the field exists to prevent.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         571 passed  (was 509: +32 source-health, +27 taxonomy activation, +3 coverage)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  206 passed  (was 189: +12 source-health, +5 taxonomy-activation)
+test:security     106 passed
+coverage          94.21% statements / 91.14% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+pnpm demo:api      runs end to end; findings, associations, rejected leads and coverage printed
+```
+
+**Left half-done:** nothing in code. The **open action** is the Spanish review (D-033), which is
+not engineering work and is owned outside engineering.
+
+**Found — three things worth knowing:**
+
+1. **A real defect, fixed.** `TaxonomyService` read only the _flat_ field shape the bootstrap
+   writes. A version proposed through `/v1/admin/taxonomy` stores its fields nested under
+   `content`, so an administrator could take a taxonomy all the way through four-eyes approval and
+   activation, see the API report success, and have the pipeline keep running under the seeded
+   version — silently. Both shapes are now read, nested first. Caught only because the D6
+   integration test loaded an activated version through the service the pipeline uses rather than
+   asserting on the raw document.
+2. **The six D2 fixture adapters had no registry entry.** D5 makes an unregistered source a
+   refusal — an adapter pointed at a source nobody approved is what the registry exists to
+   prevent — so the mock stack broke until the fixtures were seeded into `sourceVersions` like any
+   other source. That is the right fix rather than weakening the gate: otherwise the mock stack
+   exercises a path the live one does not have.
+3. **`pnpm local:bootstrap` now runs `pnpm build` first**, because the seed lexicon is imported
+   from the built domain package rather than copied into the script. Copying it would create a
+   second term list beside the one CI gates, and the copy is the one that acquires a
+   protected-characteristic term nobody checks.
+
+**Next session should: expand `docs/execution/phase-e.md` into a full brief, then build
+`HttpEvidenceFetchAdapter`** — the real `EvidenceFetchPort`, replacing the mock. Everything else in
+the live work depends on it. The parked plan below is still the right plan and is now unblocked,
+with one addition D5 makes mandatory:
+
+**The fetch adapter must call `SourceHealthService.checkAccess` immediately before every external
+call**, and feed the result back with `recordFailure` (passing the `FailureSignal`, never a class —
+the FR-06 table classifies) or `recordSuccess`. Not at plan time. That is what makes the kill
+switch, the breaker and the budgets real rather than decorative.
+
+Then, in order:
+
+1. Resolve the host with `node:dns` and call `screenResolvedAddress` on **every** returned address
+   before connecting. Do not cache the resolution.
+2. Fetch and cache robots.txt per host; `UNKNOWN` refuses unless the source registry carries an
+   approved exception (`robotsPosition: EXCEPTION_APPROVED` with a named approver — the field
+   already exists). **Raise open decision D6 — how robots exceptions are approved and recorded —
+   with a source admin at the start of the phase**, not when the adapter is half-written.
+3. Enforce the byte, decompressed-byte, redirect and timeout budgets. Re-screen the URL on
+   **every** redirect hop: a 302 to `http://169.254.169.254/` is the obvious bypass.
+4. Conditional GET with stored ETag / Last-Modified.
+5. An honest user agent naming the service with a contact URL (FR-06 requires it).
+6. Return `FailureSignal` values, never classes.
+
+Then: news discovery connectors (Google News RSS, Bing News RSS, GDELT — GDELT has a JSON mode, so
+only the two RSS sources need an XML parser and that dependency decision is still open); the
+SearXNG connector against the instance already in the local stack; then real extraction to replace
+the keyword placeholder.
+
+**The largest remaining quality gap is now FR-10 clustering**, which is still not wired: a
+syndicated copy counts as a second independent source on axis D. The lexicon was the other one and
+is closed.
+
+**Decisions touched:** **D-031**, **D-032** and **D-033** recorded. **D6** (robots exceptions) is
+now in the direct path and due at G6 — raise it early. **D-010** is now enforced in code rather
+than only written down. Nothing closed, nothing newly blocked.
+
+**Still true:** no live source has been contacted by this project. No language is enabled — none
+has a measured recall figure. Every seeded record is stamped `MOCK`.
+
+---
+
 ## 2026-09-14 (late) — Started the live fetch gate: URL policy and robots, both pure
 
 **Context for whoever picks this up.** The session before this one built the search pipeline and

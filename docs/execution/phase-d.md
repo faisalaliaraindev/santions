@@ -1,6 +1,6 @@
 # Phase D — Sources, association graph and taxonomy administration
 
-**Gate:** G5 · **Status:** IN PROGRESS — D0 through D4 done, D5 next · **Prerequisite:** Phase C complete (it is)
+**Gate:** G5 · **Status:** COMPLETE — D0 through D6 done, gate G5 passed 2026-09-14 · **Prerequisite:** Phase C complete (it is)
 
 ---
 
@@ -409,21 +409,21 @@ configured.
 - [x] D3 — `Company`, `AssociationAssertion`, `GraphSnapshot`; resolution is an identity grade through Axis A (decision D-025); the snapshot is created in the search-creation transaction and never rewritten (D-026); `GET /v1/searches/{searchId}/associations` serves it
 - [~] D3 — **absence recorded, which is the branch the brief allows.** No distribution is loaded: the TSE padrón needs the SEC-05 aggregate-only approval (D-011), which does not exist. `scripts/bootstrap/name-frequency.mjs` is the loader, refuses to invent data, and prints the gap and its cost on every bootstrap; the decile derivation is pure and tested
 - [x] D4 — all three bounds configurable on the tenant policy version and pinned to the run (D-028), each producing a structured `BoundApplication` when it binds; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` kept distinct and mapped into the run without collapsing (D-030); a registry outage records a failed source outcome and leaves the run alive
-- [ ] D5 — `SourceHealth` separate from the immutable version; breaker over the FR-06 classes; budgets enforced; kill switch effective **mid-run**; licence expiry equivalent
-- [ ] D5 — two new rows appended to `docs/failure-injection-matrix.md`
-- [ ] D6 — lexicon audit blocks activation; a language cannot be enabled without a measured recall figure; effective-scope resolution exposed for Phase E
-- [ ] D6 — Spanish lexicon reviewed by a Spanish reader, **or** its unreviewed state recorded in the coverage statement and the handoff
+- [x] D5 — `SourceHealth` is a separate mutable collection keyed by `sourceId` (`packages/domain/src/reliability/source-health.ts` + `apps/api/src/sources/source-health.service.ts`); the breaker reads the FR-06 table rather than restating it (`domainAction: 'SUSPEND'` or `alertOperator` opens immediately, `CONTENT_ERROR` and `OVERSIZE` never count); hourly and daily budgets enforced as fixed clock windows read from the active version; kill switch effective **mid-run** via a point-of-use recheck; licence expiry on the same path (D-031)
+- [x] D5 — **FI-17** (registry read → snapshot commit) and **FI-18** (source suspension → in-flight run) appended, with the row-to-test map and the where-tested table updated
+- [x] D6 — `auditTaxonomyForActivation` blocks `ACTIVE` on a protected-characteristic term, a machine-translated term, a recall figure an admin authored, and a category enabled where no approved source covers the country; the denial is audited in its own transaction so it survives the abort; `resolveEffectiveScope` is exposed and proves "a disabled category is never queried" here rather than in Phase E
+- [~] D6 — **the second branch, which the brief allows.** 155 hand-authored terms across `en` and `es` in `packages/domain/src/taxonomy/seed-lexicon.ts`, none machine-translated. **No Spanish reader has reviewed the `es` half**; every term carries `reviewState: 'UNREVIEWED_AUTHORED'`, the FR-13 coverage statement carries an `Unreviewed term lists:` line, every run warns, and the handoff says so. Decision **D-033** records the open action and who owns it
 - [x] **T14** — two officers share a byte-identical name; the contradicted one is excluded, the near match is a `CANDIDATE_FOR_REVIEW` that attaches nothing, and only a second independent signal resolves either. Asserted in the pure resolver and against the real replica set
 - [x] **T15** — all five tenure labels; `YEAR`-precision appointment and missing resignation stored with their precision and never backfilled; approved historical scope enforced and refused without the entitlement (D-027)
 - [~] **T20** — outage, empty answer and bound overrun are three distinct statuses, tested separately; each produces its own honest coverage on the snapshot and on the run, and a registry outage provably leaves the run alive with `INCOMPLETE` coverage. **Still open: that the person search itself completes**, which needs the Phase E job handler — there is no person search to complete yet
-- [ ] **T36** — a source suspended mid-run stops being used within that run; blocked actions and coverage gaps reported; a result produced before suspension is unchanged but reads as sourced from a since-suspended source
+- [x] **T36** — asserted in `packages/domain/test/reliability/source-health.test.ts` and against the replica set in `tests/integration/source-health.test.ts`: access is rechecked before every discovery query and every fetch, a refusal always produces a `SourceCoverageOutcome` naming the suspension (never a silent skip), un-fetched leads are kept as rejected leads carrying the suspension as their reason, and a result produced before the suspension is unchanged but reads with `sourceSuspendedSince` on its document and `sinceSuspendedSources` on the findings page (D-032)
 - [x] **T45** — the proposer of a source, taxonomy or policy version cannot approve it; the denial is audited (and the audit survives the aborted transaction)
-- [ ] **T79** — a protected-characteristic term fails the build **and** is refused at activation
-- [ ] `pnpm openapi:generate` re-run and `openapi/openapi.json` committed, so the panel's generated client sees the admin routes
-- [ ] `verify:local` reports every suite green except end-to-end, which stays `[n/i]` and still exits non-zero
-- [ ] `docs/implementation-status.md` moves G5 to Complete with the commands as evidence
-- [ ] `START-HERE.md` active-phase pointer moved to Phase E
-- [ ] Handoff entry written
+- [x] **T79** — fails the build (unchanged) **and** is refused at activation, with the denial audited
+- [x] `pnpm openapi:generate` re-run and committed: `GET /v1/admin/source-health`, `POST /v1/admin/sources/{sourceId}/kill-switch` and its `/release`, plus `sourceSuspendedSince` and `sinceSuspendedSources` on the findings page
+- [x] `verify:local` reports every suite green except end-to-end, which stays `[n/i]` and still exits non-zero
+- [x] `docs/implementation-status.md` moves G5 to Complete with the commands as evidence
+- [x] `START-HERE.md` active-phase pointer moved to Phase E
+- [x] Handoff entry written
 
 ## Do not
 

@@ -7,108 +7,72 @@ of previous sessions. It is deliberately short.
 
 ## 1. Active phase
 
-> **Phase D — Sources, association graph and taxonomy administration (gate G5)**
+> **Phase E — Query planning, discovery cascade and fetch (gate G6)**
 >
-> 🔧 **Current work: finish Phase D — D5, then D6.** Decided by the project owner on 2026-09-14
-> after the demo, in preference to continuing straight into live sources.
+> 🔧 **Current work: the live-source path, which has been parked since 2026-09-14 and is now
+> unblocked.** Phase D closed on 2026-09-14 and **gate G5 is passed**. The reason the live work
+> was parked is the reason it can start now: D5 built source health — rate limits, circuit
+> breakers, per-source budgets and a mid-run kill switch — so a real source can be dialled
+> without pointing an unthrottled fetcher at it.
 >
-> **D5 is source health** — rate limits, circuit breakers, per-source budgets, mid-run kill
-> switch. It has to land before any real source is dialled, or an unthrottled fetcher gets us
-> blocked. **D6 is the lexicon and its activation audit** — the largest quality gap in the
-> system, because the term list is empty and a search currently looks only for the bare name.
+> **The first concrete action is in the top handoff entry**, and the ordered plan is there too.
+> In short: build `HttpEvidenceFetchAdapter`, the real `EvidenceFetchPort`. The two pure modules
+> it needs are already written and tested — `packages/domain/src/fetch/url-policy.ts` (the SEC-02
+> gate, in two halves: `screenUrl` before DNS and `screenResolvedAddress` on **every** resolved
+> address, which is what defeats DNS rebinding) and `fetch/robots.ts` (where a robots.txt that
+> times out yields `UNKNOWN`, never `ALLOWED`).
 >
-> The live-source work is **parked, not cancelled**: the SEC-02 URL gate and robots parser are
-> already done and tested, and the full ordered plan is in the top handoff entry.
+> Brief: [`phase-e.md`](./phase-e.md) — **an outline that must be expanded into a full brief
+> before work starts**, as every phase brief has been.
 >
-> ⚠️ **The phase order was broken deliberately on 2026-09-14.** A customer call needed something
-> demonstrable, so a compressed slice of **Phase E** was built ahead of D5 and D6: the search
-> pipeline, the first job handler, the findings API, and a typed client for an integrator.
-> **A search now runs end to end in mock mode** — `pnpm demo:api`.
+> **What D5 built, and what a fetch adapter must therefore do.** Source health is a **separate
+> mutable document** (`sourceHealth`, keyed by `sourceId`) beside the immutable `SourceVersion`:
+> the approved version says what is _permitted_, health says what is _happening_. Call
+> `SourceHealthService.checkAccess` **immediately before every external call**, not at plan time
+> — that point-of-use recheck is what makes the kill switch effective mid-run (T36) — then feed
+> the outcome back with `recordFailure` / `recordSuccess`. The breaker reads the existing FR-06
+> table and invents nothing. A refusal is **never** a silent skip: it becomes a
+> `SourceCoverageOutcome` naming what stopped it. See `docs/decisions.md` D-031 and D-032, and
+> failure-injection rows FI-17 and FI-18.
 >
-> **Phase D is NOT complete and G5 is NOT passed.** D5 (source health, breakers, budgets, the
-> mid-run kill switch) and D6 (the lexicon audit on the activation path, the Spanish lexicon)
-> are untouched. Read the top handoff entry before deciding what to do next: it lists what the
-> pipeline does not yet do, and the largest gap — FR-10 clustering is not wired, so a syndicated
-> copy counts as a second independent source.
->
-> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 through D4
-> are done; D5 is next.**
->
-> **D4 made the graph's limits visible and configurable.** The three FR-02 traversal bounds live
-> on the tenant's **policy version**, go through the D1 four-eyes lifecycle, and are **pinned to
-> the run** — so an old report explains its own truncation under the bounds it actually used. A
-> bad bound falls back to a documented default and says so rather than failing the search. The
-> association source now contributes a `SourceCoverageOutcome` to the run, keeping "we never
-> asked" (`SKIPPED`) apart from "we asked and it failed" (`FAILED`) and from "a bound bound"
-> (`PARTIAL`). See `docs/decisions.md` D-028 through D-030.
->
-> **D4 also corrected D3:** the historical-scope approval reads from the policy version's
-> `historicalScopeApproved`, not from a commercial entitlement capability. FR-02 calls it an
-> _approved_ scope, and the policy version is the record that carries approvals — and that a
-> historical search can cite.
->
-> **D3 built the association graph:** officer resolution through the same FR-08 Axis A grading a
-> document match uses, so there is no register-specific notion of "matched enough";
-> `Company`/`AssociationAssertion`/`GraphSnapshot` with the snapshot created inside the
-> search-creation transaction and never rewritten; and `GET /v1/searches/{searchId}/associations`
-> serving the frozen graph. **A `PARTIAL` grade does not attach a company** — it is a candidate a
-> reviewer may act on, and nothing anchors a query to it (T14). See `docs/decisions.md` D-024
-> through D-027.
+> **What D6 built, and the gap it leaves open.** The taxonomy lexicon is **no longer empty** —
+> 155 hand-authored terms across `en` and `es`, so F3 category queries are now built — and the
+> lexicon audit now fails **activation** as well as CI (T79), along with three other refusals a
+> `taxonomy_admin` could otherwise slip through. **⚠️ No Spanish reader has reviewed the Spanish
+> terms.** Every term is marked `UNREVIEWED_AUTHORED`, the coverage statement says so on every
+> run, and `docs/decisions.md` D-033 records the open action. An unreviewed term does not fail —
+> it returns nothing — so the Spanish half may report no findings because the query was wrong
+> rather than because nothing exists. **Finding a Spanish-reading reviewer is still open and is
+> owned outside engineering.**
 >
 > **No Costa Rican name-frequency distribution is loaded**, and nothing invents one. It is
 > blocked on the SEC-05 aggregate-only approval for the TSE padrón (D-011). The cost is real and
 > is printed on every bootstrap: the FR-08 top-decile penalty never fires for CR names, so a
 > common name reaches a higher identity grade than it should.
 >
-> **D2 built the source seams:** all six FR-05 ports in `apps/api/src/sources`, deterministic
-> mocks for all six, and one real adapter — **UK Companies House, GB only, which is the proving
-> ground for the FR-02 graph and is _not_ Costa Rican coverage**. Every port returns a four-way
-> `SourceOutcome`, so a registry outage, an empty answer and a bound overrun stay three
-> different facts (T20); a mock cannot be constructed in live mode because its constructor
-> needs a witness a live process cannot obtain (T55); and FR-05 content conformance is now
-> enforced at submit and at activation. See `docs/decisions.md` D-021, D-022, D-023. The T14 and
-> T15 fixtures are already written and are waiting for D3's resolver.
+> **The largest gap in the pipeline is unchanged: FR-10 clustering is not wired**, so a
+> syndicated copy still counts as a second independent source on axis D.
 >
-> **D1 built the administrative spine:** one propose → approve → activate lifecycle for sources,
-> taxonomy and policy with four-eyes enforcement (T45), the SEC-05 rights engine as an actual
-> gate in front of `ACTIVE` (`ALLOW` / `DENY` / `REQUIRES_APPROVAL`, default-deny, prohibited
-> collection methods non-approvable), and per-jurisdiction capability coverage where only
-> `SUPPORTED` lets an empty result be called "no findings". See `docs/decisions.md` D-018, D-019,
-> D-020. **D16 was opened**: any tenant's `source_admin` can change shared registry entries that
-> every tenant screens against, and narrowing that to a platform role needs product and security.
+> **Phase D is complete — gate G5 passed.** D0 the CR source dossier (opening **D14** and
+> **D15**, both owned outside engineering); D1 the propose → approve → activate lifecycle with
+> four eyes and the SEC-05 rights gate (opening **D16**); D2 the six FR-05 ports, six
+> deterministic mocks and one real adapter (UK Companies House, **GB only — not Costa Rican
+> coverage**); D3 the FR-02 association graph, where a `PARTIAL` identity grade attaches nothing;
+> D4 the traversal bounds as policy-version configuration pinned to the run; D5 source health;
+> D6 the lexicon and its activation audit. Decisions D-018 through D-033.
 >
-> **Read [`../sources/cr-dossier.md`](../sources/cr-dossier.md) before building anything in this
-> phase.** D0 established that there is **no free automatable officer-level company source in
-> Costa Rica** — the Registro Nacional is behind a CAPTCHA, and `api.hacienda.go.cr` returns no
-> directors — so FR-02's association graph has no data source in the only enabled jurisdiction
-> (**D14**), and that published CR judgments are probably depersonalised, which moves the
-> evidence base off court records onto lower-authority channels (**D15**). Both are open, both
-> owned outside engineering. It also found a real free source for the D-011 name-frequency
-> prior. No source was contacted to establish any of it.
->
-> **No decision is due at G5.** D1, D3 and D8 were the three this phase was meant to close, and
-> all three closed on 2026-09-11 (see `docs/decisions.md` D-010, D-009, D-012) — Costa Rica with
-> es+en requested, all seventeen categories, and a configurable 30-day retention default. The
-> phase brief's "Decisions to close" section still named them until C6 corrected it; check
+> **No decision is due at G5** and none was left open by it. Check
 > [`../open-decisions.md`](../open-decisions.md) rather than a phase brief for what is actually
-> open. The nearest live one is **D6** — how robots exceptions for official sources are approved
-> and recorded — which is due at G6 but is shaped by the source registry D1 builds, so raise it
-> with a source admin during this phase rather than at the start of the next.
+> open. **D6 — how robots exceptions for official sources are approved and recorded — is due at
+> G6 and is now in the direct path**: the `robotsPosition: EXCEPTION_APPROVED` field exists on
+> the source schema and the fetch adapter will need to honour it, so raise it with a source admin
+> at the **start** of this phase rather than when the adapter is half-written.
 >
-> **Phase C is complete — gate G4 passed.** The whole path from an accepted search to a
-> survivable unit of work exists: the section 6.3 records, the transaction runner with the
-> outbox, the search index behind the (now closed) D12 seam, evidence staging with its orphan
-> sweep and retention deletion, and — at C6 — the consumer that turns a queued message into
-> fenced, deduplicated, retryable work.
->
-> **What C6 left deliberately unbuilt:** there is no job handler. The worker
-> (`pnpm dev:worker`) **refuses to start** because a handler-less consumer would dead-letter
-> every queued search as unroutable. Registering the first handler is Phase E's work, and the
-> fetch pipeline behind it is what it handles. See `docs/decisions.md` D-016.
->
-> Phases A and B are complete. The stack starts, seeds and survives a restart; auth, tenancy,
-> entitlements, subjects and idempotent search creation are built and tested against it; the
-> OpenAPI document is generated and the panel generates its client from it.
+> **Phases A, B, C and D are complete.** The stack starts, seeds and survives a restart; auth,
+> tenancy, entitlements, subjects and idempotent search creation are built and tested against it;
+> persistence, jobs, the search index and evidence storage exist with their reconcilers; and a
+> search runs end to end in mock mode (`pnpm demo:api`). The worker refuses to start without a
+> handler (D-016); the handler exists as of the Phase E slice built early for a demo.
 
 Update this pointer when a phase completes. It is the one line every session depends on.
 
@@ -151,12 +115,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **509 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **571 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**189 integration** tests and `pnpm test:security` **106 security** tests.
+**206 integration** tests and `pnpm test:security` **106 security** tests.
 
-Coverage is gated at 85/80 and currently reports 93.56% / 90.73% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 94.21% / 91.14% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by
@@ -200,13 +164,13 @@ product that states something untrue about a real person.
 | A     | G1     | Make the local stack real            | [`phase-a.md`](./phase-a.md) |
 | B     | G3     | Identity, tenancy, API contract      | [`phase-b.md`](./phase-b.md) |
 | C     | G4     | Persistence, jobs, index, storage    | [`phase-c.md`](./phase-c.md) |
-| **D** | G5     | Sources, graph, taxonomy admin       | [`phase-d.md`](./phase-d.md) |
-| E     | G6     | Planning, cascade, fetch             | [`phase-e.md`](./phase-e.md) |
+| D     | G5     | Sources, graph, taxonomy admin       | [`phase-d.md`](./phase-d.md) |
+| **E** | G6     | Planning, cascade, fetch             | [`phase-e.md`](./phase-e.md) |
 | F     | G7     | Extraction and the full pipeline     | [`phase-f.md`](./phase-f.md) |
 | G     | G8     | Control panel                        | [`phase-g.md`](./phase-g.md) |
 | H     | G9–G11 | Integration, live sources, hardening | [`phase-h.md`](./phase-h.md) |
 
-Briefs for A, B and C are complete, and all three phases are done. D through H are outlines that must be expanded into full
+Briefs for A, B, C and D are complete, and all four phases are done. E through H are outlines that must be expanded into full
 briefs **at the start of their phase** — deliberately, because their detail depends on what
 earlier phases reveal. Writing them out now would harden guesses into instructions. Each
 outline says what expanding it involves.

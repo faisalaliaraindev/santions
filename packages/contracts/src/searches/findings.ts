@@ -68,6 +68,16 @@ export const findingDocumentSchema = z
     cascadeRung: z.number().int().min(0).max(7),
     /** `MOCK` means fixture data. It is never servable as a live result (T55). */
     mode: z.enum(['MOCK', 'LIVE']),
+    /**
+     * Set when the source this document came from has been suspended **since** the run produced
+     * it (T36, decision D-031).
+     *
+     * The result is not retro-actively deleted — deleting it would destroy an accurate record of
+     * what was found and when — but a later read must show that the source has since been
+     * suspended, or a reviewer re-reading a six-month-old report is relying on a source this
+     * service has stopped using without being told.
+     */
+    sourceSuspendedSince: z.string().nullable().optional(),
   })
   .strict();
 
@@ -210,6 +220,15 @@ export const findingsPageSchema = z
     ),
     /** Languages searched without a measured recall figure (FR-03, T80). */
     unmeasuredLanguages: z.array(z.string()),
+    /**
+     * Sources that have been suspended since this run produced its results (T36, D-031).
+     *
+     * Surfaced here as well as on each document deliberately. The per-document note answers "can
+     * I rely on this finding?"; this list answers "has anything about this whole report changed?",
+     * which is the question a reviewer re-opening an old result actually asks, and which they
+     * would otherwise have to reconstruct by reading every finding.
+     */
+    sinceSuspendedSources: z.array(z.object({ sourceId: z.string(), note: z.string() }).strict()),
     /** MOCK for the whole run when no live source was contacted. */
     mode: z.enum(['MOCK', 'LIVE']),
   })

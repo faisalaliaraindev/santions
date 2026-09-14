@@ -28,12 +28,15 @@ import type { Response } from 'express';
 
 import {
   declareCapabilitySchema,
+  killSwitchSchema,
   lifecycleTransitionSchema,
   proposeVersionSchema,
   updateDraftSchema,
   type CoverageStatementWire,
   type DeclareCapabilityInput,
+  type KillSwitchInput,
   type LifecycleTransitionInput,
+  type SourceHealthWire,
   type ProposeVersionInput,
   type UpdateDraftInput,
   type VersionSummary,
@@ -51,6 +54,7 @@ import { CorrelationId, CurrentPrincipal } from '../common/principal.decorator.j
 import { validate } from '../common/zod-validation.pipe.js';
 import { parseIfMatch } from '../searches/searches.controller.js';
 import { CapabilityCoverageService } from './capability-coverage.service.js';
+import { SourceHealthService } from '../sources/source-health.service.js';
 import {
   ADMIN_RECORD_KINDS,
   VersionedRecordService,
@@ -78,7 +82,27 @@ export class AdminController {
   constructor(
     @Inject(VersionedRecordService) private readonly records: VersionedRecordService,
     @Inject(CapabilityCoverageService) private readonly coverage: CapabilityCoverageService,
+    @Inject(SourceHealthService) private readonly health: SourceHealthService,
   ) {}
+
+  // Declared before the `:collection` routes on purpose: Nest matches in declaration order, and
+  // `source-health` is a single segment that `@Get(':collection')` would otherwise swallow into
+  // a 404 for an unknown record kind.
+  /**
+   * Phase D step D5 — what every source is actually doing.
+   *
+   * Read with `platform:read_health`, which `platform_operator` holds and which grants no access
+   * to a single customer finding (T06). Breaker state and budget spend are properties of the
+   * publisher, not of anybody's data, and an operator has to be able to see them without being
+   * handed evidence access to do it.
+   */
+  @Get('source-health')
+  @RequirePermission('platform:read_health')
+  @RequireScope('admin:read')
+  async sourceHealth(): Promise<{ sources: SourceHealthWire[] }> {
+    const records = await this.health.list(new Date());
+    return { sources: records };
+  }
 
   /**
    * Propose a new version.
@@ -311,6 +335,85 @@ export class AdminController {
     });
     return statement as CoverageStatementWire;
   }
+
+  /**
+   * Engage the kill switch — stop using this source, **now**.
+   *
+   * `source:approve` rather than `source:propose`: this takes effect immediately across every
+   * tenant and every in-flight run, which is closer to approving a source than to drafting one.
+   * One person, deliberately — D1 settled the same question for suspension, and requiring a
+   * second approver to stop fetching from a publisher who has just complained means the fetching
+   * continues while the second approver is found.
+   *
+   * It is honoured **mid-run** (T36): the pipeline rechecks access immediately before each call,
+   * so a run that started an hour ago stops using this source on its very next request.
+   */
+  @Post('sources/:sourceId/kill-switch')
+  @RequirePermission('source:approve')
+  @RequireScope('admin:write')
+  async engageKillSwitch(
+    @CurrentPrincipal() principal: Principal,
+    @Param('sourceId') sourceId: string,
+    @Body(validate(killSwitchSchema)) body: KillSwitchInput,
+    @CorrelationId() correlationId: string,
+  ): Promise<SourceHealthWire> {
+    const health = await this.health.engage({
+      sourceId,
+      reason: body.reason,
+      actor: principal.subject,
+      tenantId: requireAuditTenant(principal),
+      now: new Date(),
+      correlationId,
+    });
+    return health;
+  }
+
+  /**
+   * Release the kill switch — four eyes.
+   *
+   * The releaser must not be the person who engaged it. A source is normally suspended because
+   * somebody believes we should not be fetching it, and the person who formed that belief is the
+   * wrong person to decide unilaterally that it no longer holds. The service enforces it on
+   * identity, not on role; this route only carries the request.
+   */
+  @Post('sources/:sourceId/kill-switch/release')
+  @RequirePermission('source:approve')
+  @RequireScope('admin:write')
+  async releaseKillSwitch(
+    @CurrentPrincipal() principal: Principal,
+    @Param('sourceId') sourceId: string,
+    @Body(validate(killSwitchSchema)) body: KillSwitchInput,
+    @CorrelationId() correlationId: string,
+  ): Promise<SourceHealthWire> {
+    const health = await this.health.release({
+      sourceId,
+      reason: body.reason,
+      actor: principal.subject,
+      tenantId: requireAuditTenant(principal),
+      now: new Date(),
+      correlationId,
+    });
+    return health;
+  }
+}
+
+/**
+ * The tenant an administrative action is audited under.
+ *
+ * Source records are shared, so a kill switch has no tenant of its own — but SEC-06 requires
+ * every action to be attributable, and the audit log is per-tenant. It is recorded under the
+ * actor's own tenant, which is what makes "who suspended this source" answerable. Open decision
+ * **D16** is the same question from the other end: whether shared-registry administration should
+ * belong to a platform role at all.
+ */
+function requireAuditTenant(principal: Principal): string {
+  if (principal.tenantId === null) {
+    throw new ApiException(
+      'FORBIDDEN',
+      'An administrative action must be attributable to a tenant, and this caller carries none.',
+    );
+  }
+  return principal.tenantId;
 }
 
 function parseVersion(raw: string): number {

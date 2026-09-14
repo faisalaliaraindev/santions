@@ -13,6 +13,7 @@
  * Phase C.
  */
 
+import { SourceHealthService } from '../../apps/api/src/sources/source-health.service.js';
 import { randomUUID } from 'node:crypto';
 
 import { MongoClient, type Db } from 'mongodb';
@@ -578,6 +579,7 @@ describe('degraded execution — the run survives a registry outage (FR-02)', ()
       graph,
       new FindingsService(db),
       new TaxonomyService(db),
+      new SourceHealthService(db, audit, runner),
       'mock',
     );
 
@@ -723,6 +725,7 @@ describe('the historical scope needs an approval (FR-02)', () => {
       graphOver(mockAdapters()),
       new FindingsService(db),
       new TaxonomyService(db),
+      new SourceHealthService(db, audit, runner),
       'mock',
     );
   }

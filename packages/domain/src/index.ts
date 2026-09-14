@@ -9,6 +9,8 @@
 export * from './taxonomy/categories.js';
 export * from './taxonomy/types.js';
 export * from './taxonomy/lexicon-audit.js';
+export * from './taxonomy/activation.js';
+export * from './taxonomy/seed-lexicon.js';
 
 export * from './stages/ladder.js';
 export * from './stages/transitions.js';
@@ -42,6 +44,7 @@ export * from './rights/rights.js';
 export * from './capability/capability.js';
 
 export * from './reliability/failure-classification.js';
+export * from './reliability/source-health.js';
 
 export * from './fetch/url-policy.js';
 export * from './fetch/robots.js';

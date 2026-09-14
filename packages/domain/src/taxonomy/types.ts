@@ -1,9 +1,28 @@
 /** FR-03 — versioned taxonomy records. */
 
+import type { LifecycleState } from '../lifecycle/versioned-lifecycle.js';
+
 import type { AdverseCategory } from './categories.js';
 
 /** How a lexicon term is used, per FR-03. Only `CONDUCT` terms narrow F3. */
 export type TermKind = 'CONDUCT' | 'PROCEDURAL' | 'AUTHORITY_NAME';
+
+/**
+ * Where a term came from, and whether a human who reads the language has looked at it (D-010).
+ *
+ * This is not metadata. Decision D-010 records that the Spanish lexicon **cannot be
+ * machine-translated**: the usable Costa Rican Spanish terms for "charged" or "indicted" are not
+ * dictionary translations of the English words, and a machine-translated list silently misses
+ * every real Costa Rican court report while looking fully configured. Recording provenance is
+ * what lets activation refuse `MACHINE_TRANSLATED` outright, and what lets the coverage statement
+ * say honestly that a language's terms are unreviewed.
+ *
+ * - `REVIEWED_BY_SPEAKER` — a person who reads the language has read this term in context.
+ * - `UNREVIEWED_AUTHORED` — written deliberately, by hand, and **not yet reviewed**. Usable, and
+ *   the coverage statement must declare it.
+ * - `MACHINE_TRANSLATED` — produced by translation of another language's term. Never activatable.
+ */
+export type TermReviewState = 'REVIEWED_BY_SPEAKER' | 'UNREVIEWED_AUTHORED' | 'MACHINE_TRANSLATED';
 
 /** BCP-47 language tag, e.g. `en`, `ar`, `ur`, `id`. */
 export type LanguageTag = string;
@@ -22,6 +41,14 @@ export interface LexiconTerm {
    * bounded to top-N terms (FR-04).
    */
   readonly rank: number;
+  /**
+   * Review provenance (D-010).
+   *
+   * Optional so that a version written before D6 still reads, and an absent value is treated as
+   * `UNREVIEWED_AUTHORED` — the reading that narrows what the service claims rather than widening
+   * it. It is never treated as reviewed.
+   */
+  readonly reviewState?: TermReviewState | undefined;
 }
 
 export interface CategoryConfig {
@@ -53,7 +80,15 @@ export interface TaxonomyVersion {
   readonly categories: readonly CategoryConfig[];
   readonly lexicon: readonly LexiconTerm[];
   readonly languages: readonly LanguageProfile[];
-  readonly status: 'DRAFT' | 'ACTIVE' | 'SUPERSEDED' | 'SUSPENDED';
+  /**
+   * The D1 lifecycle state, as `lifecycle/versioned-lifecycle.ts` defines it.
+   *
+   * Widened at D6 from a four-value list that predated the lifecycle. A taxonomy version is
+   * audited at `ACTIVATING`, so the states it is actually observed in are the lifecycle's, and a
+   * narrower type here meant the admin service had to cast — which is how a state that should
+   * never reach a query path gets read as `ACTIVE`.
+   */
+  readonly status: LifecycleState;
   readonly proposedBy: string;
   /** Four-eyes: must differ from `proposedBy` before status can become ACTIVE (T45). */
   readonly approvedBy: string | null;

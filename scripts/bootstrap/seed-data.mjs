@@ -9,6 +9,12 @@
  * Idempotent throughout: every write is an upsert keyed on a stable id.
  */
 
+// The FR-03 seed lexicon is imported from the built domain package rather than copied here.
+// Copying it would put a second term list beside the one `auditLexicon` gates in CI (T79), and
+// the copy is the one that acquires a protected-characteristic term nobody checks. `pnpm
+// local:bootstrap` builds first, so the import always resolves.
+import { SEED_LEXICON } from '../../packages/domain/dist/index.js';
+
 import { log, waitFor } from '../lib/local-guard.mjs';
 import { loadNameFrequency } from './name-frequency.mjs';
 
@@ -141,6 +147,47 @@ const SEED_SOURCES = [
     contentFormat: 'PDF',
     status: 'ACTIVE',
   },
+  // The six D2 mock adapters, registered as what they are (Phase D step D5).
+  //
+  // **Why they have to be here.** D5 makes the pipeline ask `SourceHealthService.checkAccess`
+  // before every call, and a source with no active version is *refused* — because an adapter
+  // pointed at a source nobody approved is exactly what the registry exists to prevent. That
+  // rule has to hold for the fixtures too, or the mock stack would be exercising a path the
+  // live one does not have. So the fixtures are registered, approved and budgeted like any
+  // other source, and the only thing that distinguishes them is `connectorType: 'FIXTURE_MOCK'`
+  // and a `mode: 'MOCK'` stamp that T55 refuses to let them shed.
+  ...[
+    ['src-mock-news-discovery', 'Mock news discovery', 2, 'XML_FEED'],
+    ['src-mock-web-discovery', 'Mock web discovery', 3, 'JSON'],
+    ['src-mock-primary', 'Mock primary source', 1, 'HTML'],
+    ['src-mock-cr-registry', 'Mock company registry', 1, 'JSON'],
+    ['src-mock-fetch', 'Mock evidence fetch', 0, 'HTML'],
+    ['src-mock-extraction', 'Mock extraction model', 0, 'JSON'],
+  ].map(([sourceId, sourceName, cascadeRung, contentFormat]) => ({
+    sourceId,
+    sourceName: `${sourceName} (fixture)`,
+    publisher: 'Deterministic fixture',
+    connectorType: 'FIXTURE_MOCK',
+    authorityTier: 3,
+    cascadeRung,
+    canonicalDomains: ['fixtures.local'],
+    countries: ['CR', 'GB'],
+    languages: ['es', 'en'],
+    credentialsRef: null,
+    // Null, not zero. A fixture has no free tier to exhaust, and zero would mean "no requests
+    // permitted" and stop every mock-mode run with an exhausted-budget coverage gap.
+    freeTierHourlyBudget: null,
+    freeTierDailyBudget: null,
+    stabilityClass: 'DOCUMENTED_STABLE',
+    parserVersion: 'fixture-1',
+    licenceTermsVersion: 'fixture-local-1',
+    // No end date: a fixture's terms do not expire, and inventing one would put a licence clock
+    // into the registry that nobody agreed.
+    licenceExpiresAt: null,
+    robotsPosition: 'NOT_ESTABLISHED',
+    contentFormat,
+    status: 'ACTIVE',
+  })),
 ];
 
 /**
@@ -318,7 +365,11 @@ export async function seedData(db) {
           measuredRecall: null,
           measuredByEvaluationRunId: null,
         })),
-        lexicon: [],
+        // The D6 term list. Every term is `UNREVIEWED_AUTHORED` and nothing is machine
+        // translated: no Spanish reader has reviewed the `es` half, the coverage statement says
+        // so on every run that searches in Spanish, and `packages/domain/src/taxonomy/
+        // seed-lexicon.ts` says what a reviewer should check first. See D-033.
+        lexicon: SEED_LEXICON,
         proposedBy: 'bootstrap',
         approvedBy: 'bootstrap',
         decisionRef:

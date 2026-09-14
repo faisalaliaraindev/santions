@@ -26,7 +26,7 @@
     "local:up": "node scripts/local-up.mjs",
     "local:down": "docker compose -f infra/local/docker-compose.yml down",
     "local:reset": "node scripts/local-reset.mjs",
-    "local:bootstrap": "node scripts/local-bootstrap.mjs",
+    "local:bootstrap": "pnpm build && node scripts/local-bootstrap.mjs",
     "dev": "node scripts/dev.mjs",
     "demo:api": "pnpm build && node scripts/demo-api.mjs",
     "demo:zquence": "echo \"[pending G9] zquence demo not implemented\" && exit 1",

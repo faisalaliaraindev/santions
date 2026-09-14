@@ -15,6 +15,7 @@
  * Requires `pnpm local:up && pnpm local:bootstrap`.
  */
 
+import { SourceHealthService } from '../../apps/api/src/sources/source-health.service.js';
 import { randomUUID } from 'node:crypto';
 
 import { MongoClient, type Db } from 'mongodb';
@@ -279,6 +280,7 @@ beforeAll(async () => {
     associationGraphFor(db, subjects, runner, audit),
     new FindingsService(db),
     new TaxonomyService(db),
+    new SourceHealthService(db, audit, runner),
     'mock',
   );
 

@@ -868,6 +868,101 @@ function buildPaths(): Record<string, SchemaObject> {
       },
     },
 
+    '/v1/admin/source-health': {
+      get: {
+        operationId: 'getSourceHealth',
+        tags: ['admin'],
+        summary: 'Breaker state, budget spend and kill switch, per source',
+        description: [
+          'Source health is a **separate mutable document** from the approved source version,',
+          'and the separation is visible here: this response carries no approved field, and',
+          '`SourceContent` carries no observation. The approved version says what is',
+          '*permitted*; health says what is *happening*.',
+          '',
+          'Needs `platform:read_health`, which `platform_operator` holds and which grants no',
+          'access to a single customer finding. Breaker state and budget spend are properties',
+          'of the publisher, not of anybody customer data - an operator must be able to see',
+          'them without being handed evidence access to do it.',
+        ].join('\n'),
+        responses: {
+          '200': {
+            description: 'Every source this service has observed.',
+            content: json({
+              type: 'object',
+              required: ['sources'],
+              properties: { sources: { type: 'array', items: ref('SourceHealth') } },
+            }),
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+        },
+      },
+    },
+
+    '/v1/admin/sources/{sourceId}/kill-switch': {
+      post: {
+        operationId: 'engageSourceKillSwitch',
+        tags: ['admin'],
+        summary: 'Stop using a source, immediately and across every in-flight run',
+        description: [
+          '**Effective mid-run.** The pipeline rechecks source access immediately before each',
+          'call it makes, so a run that started an hour ago stops using this source on its very',
+          'next request. Checking only at plan time would mean a source suspended for a rights',
+          'violation kept being fetched for the length of every in-flight run.',
+          '',
+          'Blocked work is **recorded as a coverage gap naming the suspension**, never silently',
+          'skipped: a run that quietly consulted one fewer source reads to a reviewer as a clean',
+          'result from a search that was never made.',
+          '',
+          'One person, deliberately. Stopping a source is the safe direction, and requiring a',
+          'second approver to stop fetching from a publisher who has just complained means the',
+          'fetching continues while the second approver is found. Releasing needs four eyes.',
+          '',
+          'Results already produced are **not** deleted. A later read of them shows that the',
+          'source has since been suspended (`sourceSuspendedSince` on the finding document, and',
+          '`sinceSuspendedSources` on the findings page).',
+        ].join('\n'),
+        parameters: [
+          { name: 'sourceId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: { required: true, content: json(ref('KillSwitchRequest')) },
+        responses: {
+          '200': { description: 'The suspended source.', content: json(ref('SourceHealth')) },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '409': errorRef(409),
+        },
+      },
+    },
+
+    '/v1/admin/sources/{sourceId}/kill-switch/release': {
+      post: {
+        operationId: 'releaseSourceKillSwitch',
+        tags: ['admin'],
+        summary: 'Resume using a suspended source (four eyes)',
+        description:
+          'The releaser must not be the person who engaged the switch. A source is normally ' +
+          'suspended because somebody believes we should not be fetching it, and the person ' +
+          'who formed that belief is the wrong person to decide unilaterally that it no longer ' +
+          'holds. Releasing also closes the breaker, whose accumulated failures describe the ' +
+          'suspension rather than the source.',
+        parameters: [
+          { name: 'sourceId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: { required: true, content: json(ref('KillSwitchRequest')) },
+        responses: {
+          '200': { description: 'The released source.', content: json(ref('SourceHealth')) },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '409': errorRef(409),
+        },
+      },
+    },
+
     ...reservedPath(
       '/v1/admin/plans',
       'reservedAdminPlans',

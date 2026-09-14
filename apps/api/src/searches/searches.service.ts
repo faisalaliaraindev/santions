@@ -24,12 +24,14 @@ import {
   renderNoMatchStatement,
   REVIEW_DISCLAIMER,
   unmeasuredLanguages,
+  unreviewedLexiconNote,
   type AssociationScope,
   type Principal,
   type SourceCoverageOutcome,
 } from '@erly/adverse-domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
+import { SourceHealthService } from '../sources/source-health.service.js';
 import { TaxonomyService } from '../admin/taxonomy.service.js';
 import { FindingsService, type FindingRecord } from '../pipeline/findings.service.js';
 import { ApiException } from '../common/api-exception.js';
@@ -89,6 +91,7 @@ export class SearchesService {
     private readonly associations: AssociationGraphService,
     private readonly findings: FindingsService,
     private readonly taxonomies: TaxonomyService,
+    private readonly sourceHealth: SourceHealthService,
     private readonly mode: 'mock' | 'live',
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
@@ -633,6 +636,18 @@ export class SearchesService {
     const sourceOutcomes = run.sourceOutcomes ?? [];
     const unmeasured = unmeasuredLanguages(taxonomy, run.requestedScope.languages);
 
+    // T36's "or after result" half. A result produced under a source that has since been
+    // suspended is not deleted and is not altered — but this read must say so, in both the
+    // per-document note and the run-level list. See decision D-031.
+    const suspensionNotes = await this.sourceHealth.suspensionNotesFor({
+      sourceIds: [
+        ...findings.map((finding) => finding.document.sourceId),
+        ...sourceOutcomes.map((outcome) => outcome.sourceId),
+      ],
+      producedAt: run.createdAt,
+      asOf: new Date(),
+    });
+
     const noMatchStatement =
       findings.length > 0
         ? null
@@ -655,6 +670,12 @@ export class SearchesService {
               (outcome) => outcome.outcome === 'FAILED' || outcome.outcome === 'SKIPPED',
             ),
             unmeasuredLanguages: unmeasured,
+            // D-010 / D6: distinct from unmeasured, and both are true today. An unreviewed term
+            // list does not fail — it returns nothing — so an empty result in that language is
+            // weaker evidence than an empty result in a reviewed one.
+            unreviewedTermLanguages: run.requestedScope.languages.filter(
+              (language) => unreviewedLexiconNote(taxonomy.lexicon, language) !== null,
+            ),
           });
 
     return {
@@ -670,7 +691,7 @@ export class SearchesService {
               limitations: [...noMatchStatement.lines],
               disclaimer: REVIEW_DISCLAIMER,
             },
-      findings: findings.map(toFindingWire),
+      findings: findings.map((finding) => toFindingWire(finding, suspensionNotes)),
       rejectedLeads: rejectedLeads.map((lead) => ({
         leadId: lead.leadId,
         url: lead.url,
@@ -690,6 +711,10 @@ export class SearchesService {
         truncation: outcome.truncation,
       })),
       unmeasuredLanguages: [...unmeasured],
+      sinceSuspendedSources: Object.entries(suspensionNotes).map(([sourceId, note]) => ({
+        sourceId,
+        note,
+      })),
       mode: this.mode === 'live' ? 'LIVE' : 'MOCK',
     };
   }
@@ -783,7 +808,12 @@ function toWire(record: SearchRecord): SearchSummary {
  * and internal keys that are operational detail, and a response built by spreading a database
  * record grows a field the day somebody adds one to the collection.
  */
-function toFindingWire(record: FindingRecord): Finding {
+/**
+ * @param suspensionNotes note per `sourceId` whose source has been suspended since the run.
+ *        T36: the finding is unchanged, and a later read must say the source has since stopped
+ *        being used. See decision D-031.
+ */
+function toFindingWire(record: FindingRecord, suspensionNotes: Record<string, string>): Finding {
   return {
     findingId: record.findingId,
     searchId: record.searchId,
@@ -824,6 +854,7 @@ function toFindingWire(record: FindingRecord): Finding {
       retrievalDate: record.document.retrievalDate,
       cascadeRung: record.document.cascadeRung,
       mode: record.document.mode,
+      sourceSuspendedSince: suspensionNotes[record.document.sourceId] ?? null,
     },
     subjectMentionSpans: record.subjectMentionSpans.map((span) => ({
       start: span.start,
