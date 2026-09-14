@@ -139,3 +139,46 @@ describe('canonicalisation', () => {
     expect(screenUrl('https://example.cr/article?id=7').canonical).toContain('id=7');
   });
 });
+
+describe('IPv4 addresses wearing an IPv6 costume (SEC-02, T37)', () => {
+  // Found in Phase E step 1, while writing the fetch adapter's tests: `screenUrl` passed
+  // `https://[::ffff:127.0.0.1]/` as a public host. The dotted form was checked, but the WHATWG
+  // URL parser canonicalises that host to `[::ffff:7f00:1]` — the same address in hex groups —
+  // and the hex form matched nothing. For an IP literal there is no DNS step, so `screenUrl` is
+  // the only gate there is, and loopback was reachable through it.
+  it.each([
+    '::ffff:127.0.0.1',
+    '::ffff:7f00:1',
+    '::ffff:10.0.0.5',
+    '::ffff:a00:5',
+    '::ffff:169.254.169.254',
+    '::ffff:a9fe:a9fe',
+    '::ffff:192.168.1.1',
+    '::7f00:1',
+    '::127.0.0.1',
+  ])('refuses %s', (address) => {
+    expect(isForbiddenAddress(address)).toBe(true);
+    expect(isForbiddenAddress(`[${address}]`)).toBe(true);
+  });
+
+  it('refuses them through screenUrl, in whichever spelling the URL parser produces', () => {
+    for (const url of [
+      'https://[::ffff:127.0.0.1]/',
+      'https://[::ffff:7f00:1]/',
+      'https://[::ffff:169.254.169.254]/latest/meta-data/',
+      'https://[::1]/',
+    ]) {
+      const screening = screenUrl(url);
+      expect(screening.allowed).toBe(false);
+      expect(screening.rejection).toBe('HOST_IS_FORBIDDEN_ADDRESS');
+    }
+  });
+
+  it('still allows a genuine public IPv6 address, including one with a dotted tail', () => {
+    // The opposite mistake: treating every address whose text ends in a dotted quad as IPv4
+    // would refuse real public addresses. Only the `::` and `::ffff:` prefixes mean IPv4.
+    expect(isForbiddenAddress('2001:db8:1:2:3:4:5:6')).toBe(false);
+    expect(isForbiddenAddress('2606:4700:4700::1111')).toBe(false);
+    expect(isForbiddenAddress('2001:db8::192.0.2.1')).toBe(false);
+  });
+});

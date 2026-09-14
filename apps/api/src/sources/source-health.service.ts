@@ -122,6 +122,20 @@ export class SourceHealthService {
     readonly sourceId: string;
     readonly now: Date;
     readonly queriesAffected?: number | undefined;
+    /**
+     * Whether this check consumes one of the source's budgeted requests. Defaults to `true`.
+     *
+     * The budget counts **requests put on the wire**, which is what the publisher counts, so the
+     * component that opens the socket is the component that spends. Phase E made that a real
+     * distinction: the pipeline asks "may I try this lead at all?" before handing it to the fetch
+     * adapter, and the adapter then makes one, two or three actual requests — robots.txt, the
+     * document, a redirect hop. If both spent, the budget would drain at a rate unrelated to the
+     * traffic the publisher sees.
+     *
+     * So the pipeline passes `spend: false` for its rights-and-breaker check, and
+     * `HttpEvidenceFetchAdapter` spends once per request it actually issues.
+     */
+    readonly spend?: boolean | undefined;
   }): Promise<AccessCheck> {
     const facts = await this.versionFacts(input.sourceId);
     const current = await this.load(input.sourceId, facts, input.now);
@@ -135,9 +149,10 @@ export class SourceHealthService {
 
     // `decision.health` carries the cooldown transition and the rolled windows; the spend is
     // applied on top of it so a half-open probe is counted exactly once.
-    const next = decision.allowed
-      ? spendAccess({ health: decision.health, now: input.now })
-      : decision.health;
+    const next =
+      decision.allowed && input.spend !== false
+        ? spendAccess({ health: decision.health, now: input.now })
+        : decision.health;
     await this.save(next, input.now);
 
     if (!decision.allowed) {

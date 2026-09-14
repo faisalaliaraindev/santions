@@ -165,6 +165,21 @@ export interface FailureSignal {
   readonly emptyBody?: boolean | undefined;
   /** robots.txt disallows this URL, or the source registry records an explicit refusal. */
   readonly robotsDisallow?: boolean | undefined;
+  /**
+   * Our own gate refused this URL: the SEC-02 URL policy, a resolved address we must never
+   * connect to, or a robots position we could not establish.
+   *
+   * A **signal**, not a new class — the FR-06 table's `HARD_BLOCK` row already names "explicit
+   * refusal" and already says do not retry, abandon, and tell an operator, which is exactly
+   * right for a discovery source handing us a link to `169.254.169.254`. What the signal adds is
+   * that the record says *we* refused rather than implying the publisher did.
+   *
+   * Note the consequence a caller must respect: `HARD_BLOCK` carries `domainAction: 'SUSPEND'`,
+   * so this signal must never be fed to a per-source breaker. A refusal about one URL is not
+   * evidence that the source is unwell; recording it as such would suspend a working feed
+   * because one of the articles it listed was unreachable.
+   */
+  readonly policyRefusal?: boolean | undefined;
   /** This domain has already refused from more than one egress identity. */
   readonly repeatedAcrossIdentities?: boolean | undefined;
   readonly unparsableBody?: boolean | undefined;
@@ -197,7 +212,7 @@ export function classifyFailure(signal: FailureSignal): FailurePolicy {
   if (signal.limitExceeded === true) {
     return failurePolicy('OVERSIZE');
   }
-  if (signal.robotsDisallow === true) {
+  if (signal.robotsDisallow === true || signal.policyRefusal === true) {
     return failurePolicy('HARD_BLOCK');
   }
   if (signal.httpStatus === 401) {

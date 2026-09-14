@@ -65,19 +65,29 @@ describe('the mode rule', () => {
   it('refuses to build mock adapters in live mode, at the composition root', () => {
     // The whole point of the witness: a live process cannot reach a mock adapter even if every
     // per-adapter check were deleted, because there is no value that would let it construct one.
-    const live = buildSourceAdapters({ mode: 'LIVE', companiesHouseApiKey: null });
+    const live = buildSourceAdapters({
+      mode: 'LIVE',
+      companiesHouseApiKey: null,
+      fetchContactUrl: null,
+    });
     expect(live.newsDiscovery).toBeNull();
     expect(live.webDiscovery).toBeNull();
     expect(live.primarySource).toBeNull();
-    expect(live.evidenceFetch).toBeNull();
     expect(live.extractionModel).toBeNull();
-    // Five seams have no live adapter (Phase E) and are null rather than mocked — an
-    // unavailable capability, not an empty one.
+    // Null rather than mocked — an unavailable capability, not an empty one.
     expect(live.companyRegistry).toBeNull();
+    // The live fetch adapter exists as of Phase E step 1, but it is not constructed without a
+    // contact URL and a source-health service. Neither is defaulted: an anonymous crawler and
+    // an unthrottled one are both things the requirements forbid rather than degraded modes.
+    expect(live.evidenceFetch).toBeNull();
   });
 
   it('gives a live process the real GB registry when a key is configured', () => {
-    const live = buildSourceAdapters({ mode: 'LIVE', companiesHouseApiKey: 'ch-key' });
+    const live = buildSourceAdapters({
+      mode: 'LIVE',
+      companiesHouseApiKey: 'ch-key',
+      fetchContactUrl: null,
+    });
     expect(live.companyRegistry?.descriptor.adapterId).toBe('companies-house-gb');
     expect(live.companyRegistry?.descriptor.mode).toBe('LIVE');
     // GB, not CR. This is the assertion that stops a UK adapter reading as Costa Rican
@@ -86,7 +96,11 @@ describe('the mode rule', () => {
   });
 
   it('gives a mock process all six seams, every one stamped MOCK', () => {
-    const mock = buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null });
+    const mock = buildSourceAdapters({
+      mode: 'MOCK',
+      companiesHouseApiKey: null,
+      fetchContactUrl: null,
+    });
     const all = [
       mock.newsDiscovery,
       mock.webDiscovery,
@@ -104,7 +118,11 @@ describe('the mode rule', () => {
 
 describe('every adapter declares a parser version and a stability class (FR-05)', () => {
   it('does so on all six mocks and on the real adapter', () => {
-    const mock = buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null });
+    const mock = buildSourceAdapters({
+      mode: 'MOCK',
+      companiesHouseApiKey: null,
+      fetchContactUrl: null,
+    });
     const descriptors = [
       mock.newsDiscovery?.descriptor,
       mock.webDiscovery?.descriptor,

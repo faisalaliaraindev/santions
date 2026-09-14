@@ -47,6 +47,21 @@ describe('FR-06 classification', () => {
     expect(classifyFailure({ robotsDisallow: true }).failureClass).toBe('HARD_BLOCK');
   });
 
+  it('classifies our own gate refusal as a hard block, with the never-retry policy', () => {
+    // Added in Phase E step 1. A URL the SEC-02 gate refused, an address we must never connect
+    // to, or a robots position we could not establish. The FR-06 table's HARD_BLOCK row already
+    // names "explicit refusal", so this adds a signal rather than a class — what it buys is a
+    // record that says *we* refused rather than implying the publisher did.
+    const policy = classifyFailure({ policyRefusal: true });
+    expect(policy.failureClass).toBe('HARD_BLOCK');
+    expect(policy.retryable).toBe(false);
+    expect(policy.maxAttempts).toBe(1);
+    // And the consequence a caller must respect: SUSPEND is why a policy refusal must never be
+    // fed to a per-source breaker. One unreachable article would otherwise suspend the feed
+    // that merely listed it.
+    expect(policy.domainAction).toBe('SUSPEND');
+  });
+
   it('classifies 404, 410, an unparsable body and a wrong content type as content errors', () => {
     expect(classifyFailure({ httpStatus: 404 }).failureClass).toBe('CONTENT_ERROR');
     expect(classifyFailure({ httpStatus: 410 }).failureClass).toBe('CONTENT_ERROR');

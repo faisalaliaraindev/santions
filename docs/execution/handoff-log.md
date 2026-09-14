@@ -27,6 +27,196 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (night, later) — **Phase E begins**: D6 raised, the brief expanded, and the real fetch adapter built
+
+**Context.** Phase D closed and G5 passed earlier the same day. This session started Phase E in the
+order `START-HERE.md` and the previous handoff both specified: raise the open decision first, expand
+the outline into a brief second, build the adapter third.
+
+---
+
+### D6 raised, before a line of the adapter was written
+
+`docs/open-decisions.md` now carries a full **D6** section — how robots exceptions for official
+sources are approved and recorded. **It needs a source admin and it is still open.** Raising it
+meant writing down what the decision is actually about, which turned out to be three concrete gaps
+rather than one abstract question:
+
+1. **There is nowhere to record the approver.** `FetchAuthorisation.robotsExceptionApprovedBy`
+   demands a name and `sourceContentSchema` has no field that holds one — so a source marked
+   `EXCEPTION_APPROVED` **cannot be fetched at all** today. The gate is safe and the feature is
+   unreachable, which is exactly the state a decision exists to end.
+2. **`robotsPosition` is per source, and FR-06 requires per source _and_ per jurisdiction.** One
+   field spanning a source's whole `countries` list is a smaller global setting, not an exception.
+3. **An exception has no scope and no expiry** — it currently means "this source, all of it,
+   forever".
+
+Three options are written out with a recommendation: a structured exception record carried through
+the existing four-eyes lifecycle, so the approver is the person the lifecycle recorded rather than a
+name typed into a box. The provisional behaviour is recorded so it cannot harden into a default:
+**no exception can be applied today**, `UNKNOWN` robots refuses, and a source needing an exception
+is blocked and says so.
+
+One thing the decision owner should see. The first question — "does any approved CR official source
+actually block what we need?" — is desk research, **but reading those robots.txt files is itself an
+outbound request**. No live source has been contacted by this project, so that is a deliberate
+first-contact decision, not something to do quietly while answering the question.
+
+### `phase-e.md` expanded from an outline into a brief
+
+53 lines to ~290. The substantive addition is an **execution order that is not the step numbering**.
+`E1`–`E6` are kept exactly as `docs/delivery-plan.md` names them, so the plan and the traceability
+matrix keep meaning what they say, and a separate table says which order they are worked in and why.
+
+The fetch transport (E5's HTTP half) is worked **first** because every other live step is an
+outbound HTTP request: Google News RSS, GDELT and SearXNG each have to screen a URL, screen every
+resolved address, respect a budget and a timeout, carry an honest user agent, and check source
+health before opening a socket. Writing the connectors first means writing a second, weaker HTTP
+path — and the weaker of two paths is the one that ends up used for something it should not be.
+
+---
+
+### `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort`
+
+`apps/api/src/sources/http-evidence-fetch.adapter.ts` and `http-transport.ts`.
+
+**It uses `node:https` with a custom `lookup`, not `fetch`, and that is the load-bearing choice**
+(decision **D-034**). Two reasons, both requirements rather than preferences:
+
+- **The address that was screened must be the address the socket uses.** Screening with `dns.lookup`
+  and then calling `fetch(hostname)` resolves twice, and the second resolution **is** the rebinding
+  attack. `https.request` takes a `lookup` that the connection itself calls, so the screening sits
+  inside the only path from a hostname to a socket. `servername` stays the hostname, so TLS is
+  untouched. Every address is screened, and **one forbidden address refuses the whole host** — a
+  host answering with both a public and a private address is a signature, not a usable host with one
+  bad entry.
+- **Two byte budgets cannot be enforced through one number.** `fetch` decompresses transparently, so
+  wire size is unobservable and `maxBytes` and `maxDecompressedBytes` collapse into one. Here wire
+  bytes are counted as they arrive — aborting on the chunk that crosses the line, not after
+  buffering the body — and decompressed bytes are bounded by `zlib`'s own `maxOutputLength`, which
+  stops a bomb inside the decompressor rather than by measuring a buffer already allocated. A 40KB
+  body that inflates to a gigabyte trips the second while the first is nowhere near its limit. That
+  is T38's compression half.
+
+**Redirects are followed by the adapter, one hop at a time, never by the transport** — which is what
+lets every hop be re-screened, re-checked against robots for its possibly different host, and
+re-checked against source health. A transport that followed them would carry a request past the gate
+without the gate being consulted, and a `302` to the metadata service is the obvious way to try it.
+
+**What it refuses**, in order: an unauthorised or unattributable request (throws — a caller that
+cannot name its authorisation has a bug); a URL the SEC-02 policy rejects; a source whose health
+refuses right now; a robots `DISALLOWED`; and a robots **`UNKNOWN`**, because an outage at the
+publisher is not consent. A 404 robots.txt is permission; an HTML error page served as a 200
+robots.txt is **unreadable**, not "no rules" — that is the commonest way a robots fetch succeeds
+while telling us nothing, and parsing it would find no rules and read as permission.
+
+**The two health rules — decision D-035. The first is the one that matters most:**
+
+- **A gate refusal is never recorded as the source's failure.** A robots disallow and a refused
+  address both classify as `HARD_BLOCK`, whose `domainAction` is `SUSPEND`, on which D5's breaker
+  opens **immediately**. Feeding either to `recordFailure` would suspend an entire working news feed
+  because one article it listed was disallowed. Health hears only what the **server** did: a status
+  code, a reset connection, a timeout, an oversize body. A refusal is still returned as `FAILED`, so
+  the lead survives with its reason and the coverage view shows it — it just never becomes evidence
+  that the publisher is unwell.
+
+  This surfaced a real gap worth knowing about: **FR-06 asks for per-source _and per-domain_ circuit
+  breakers, and D5 built only the per-source half.** For a primary source the two coincide. For a
+  discovery lead they do not — the `sourceId` is the feed, the domain is whatever the feed linked
+  to. This rule is what keeps the missing half harmless until step 3 builds it.
+
+- **Whoever opens the socket spends the budget.** `checkAccess` gained an optional `spend` flag
+  (default true). The pipeline's pre-fetch check now passes `spend: false` — it asks "may this lead
+  be attempted at all?", a rights-and-breaker question rather than a request. The adapter spends
+  once per request it actually issues, **robots.txt included**, which is a real request to the
+  publisher and was counted nowhere at all before.
+
+**Deliberately absent:** Playwright, rendering, any escalation. Three of FR-06's four render triggers
+are judgements about extracted text, and the extractor is still a keyword placeholder; inventing a
+trigger would put a fabricated justification into a record that exists to be audited. `allowRender`
+is accepted and ignored, and `renderTrigger` is always null, which is the truth. A recognised
+challenge is abandoned after one attempt — no solve, no bypass, no retry from a second identity.
+
+**One gate, not two copies.** `assertAuthorised` / `assertAttributable` moved out of the mock into
+`apps/api/src/sources/fetch-authorisation.ts`, and both adapters call them. The port's own header
+warns about "a second, subtly different copy of the gate growing inside the HTTP client", and two
+copies is how the live one ends up the more permissive.
+
+**Wired into `buildSourceAdapters`, and null unless it can be honest.** It needs a contact URL
+(`FETCH_CONTACT_URL`, new, **no default**) and a source-health service. Missing either means no
+adapter and a logged reason: an anonymous crawler and an unthrottled one are both things the
+requirements forbid, not degraded modes. The constructor also throws on an empty contact URL.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         614 passed  (was 571: +31 fetch adapter, +11 url-policy, +1 classification)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  206 passed
+test:security     106 passed
+coverage          94.07% statements / 90.46% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+pnpm demo:api      runs end to end, unchanged
+```
+
+**Left half-done:** nothing in step 1. Steps 2 through 8 of the brief are untouched.
+
+**Found — one real defect, fixed, and worth reading.**
+
+**`screenUrl` passed `https://[::ffff:127.0.0.1]/` as a public host.** `isForbiddenIpv6` matched the
+dotted form `::ffff:127.0.0.1`, but the WHATWG URL parser canonicalises that host to
+`[::ffff:7f00:1]` — the same address in hex groups — and the hex form matched nothing. `::7f00:1`
+(IPv4-compatible) got through the same way. **For an IP literal there is no DNS step, so `screenUrl`
+is the only gate that exists on that path**, and loopback, the metadata service and every private
+range were reachable through a URL literal. Found because a parameterised SSRF test in the new
+adapter suite asserted the mapped form and failed.
+
+Fixed in `packages/domain/src/fetch/url-policy.ts`: the address is expanded to its eight groups and
+judged **numerically**, so the notation cannot decide the answer — matching a shape is what let the
+hex spelling through. Regression tests cover every spelling of the same address, and the opposite
+mistake too: a genuine public IPv6 address with a dotted tail (`2001:db8::192.0.2.1`) must still be
+allowed.
+
+**Also found — a dead configuration placeholder, replaced.** `.env.example` carried
+`OUTBOUND_USER_AGENT="ErlyAdverseSearch/0.1 (+https://erlystage.com/bots/adverse-search)"`, written
+for exactly this purpose at some earlier point and **read by nothing**. It is now replaced by
+`FETCH_CONTACT_URL` rather than adopted, and the file says why: a free-text user agent can be set to
+a string with no contact URL in it at all, which is the dishonest case FR-06 forbids. Configuring the
+contact URL instead means it can be validated as a URL and the user agent is built from it, so an
+honest one is the only one that exists. Leaving both would have meant an operator eventually setting
+the one that does nothing.
+
+**Also found, left as a known gap rather than fixed:** `SourceOutcome.FAILED` carries a failure class
+but no human detail, so a rejected lead reads as "could not be retrieved (HARD_BLOCK)" rather than
+saying robots disallowed it. The adapter logs the detail; the coverage record does not get it. Step 2
+should add it, and the brief's risk table says so.
+
+**Next session should: build step 2 — `FetchGateService`.** The first concrete action is to delete
+the fabricated `FetchAuthorisation` in `search-pipeline.service.ts` and derive it instead. Today that
+object is built inline with `urlPolicyPassed: true`, `ssrfValidated: true`,
+`jurisdictionEnabled: true`, `sourceVersionId: 'fixture-source-v1'` and `relevanceScore: 0.9` — none
+of it derived from anything. Against the mock that was harmless. Against the adapter that now exists
+it is a signed statement that gates were passed which were never run, in the one record whose whole
+purpose is to be audited. The same step wants one honest egress identity, so that
+`egressIdentityId: 'mock-egress-1'` stops being written into live attribution records.
+
+Then, in brief order: step 3 (discovery connectors and the cascade — decide the XML parser dependency
+explicitly; a parser that resolves entities is an XXE hole pointed at a third party's feed), step 4
+(relevance filtering before the gate), step 5 (plan generation proved against the now non-empty
+taxonomy), step 6 (contract tests — the detection mechanism for the worst failure this product has).
+
+**Decisions touched:** **D-034** and **D-035** recorded. **D6 raised with specifics and still open** —
+it needs a source admin and is due at G6. **D15** is also due at G6 and is untouched. Nothing closed.
+
+**Still true:** **no live source has been contacted by this project.** The real transport is
+constructed only by the live composition root; every test in the new suite runs against an injected
+one, and the suite's header says why. No language is enabled. The Spanish lexicon is still unreviewed
+(D-033). FR-10 clustering is still not wired.
+
+---
+
 ## 2026-09-14 (night) — **Phase D complete, gate G5 passed**: D5 source health, D6 the lexicon and its activation audit
 
 **Context.** The session before this one built two pure modules for the live fetch gate and then

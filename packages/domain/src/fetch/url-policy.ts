@@ -189,17 +189,24 @@ function isForbiddenIpv4(value: string): boolean {
 }
 
 function isForbiddenIpv6(value: string): boolean {
-  const address = value.replace(/^\[|\]$/g, '');
-
-  // An IPv4-mapped or IPv4-compatible address is an IPv4 address wearing a costume, and it
-  // reaches the same host. Judge it as IPv4 rather than letting the notation bypass the rules.
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
-  if (mapped?.[1] !== undefined) {
-    return isForbiddenIpv4(mapped[1]);
-  }
+  const address = value.replace(/^\[|\]$/g, '').toLowerCase();
 
   if (address === '::' || address === '::1') {
     return true; // unspecified, loopback
+  }
+
+  // An IPv4-mapped or IPv4-compatible address is an IPv4 address wearing a costume, and it
+  // reaches the same host. Judge it as IPv4 rather than letting the notation bypass the rules.
+  //
+  // **Both notations, and this is the part that was once wrong.** `::ffff:127.0.0.1` is what a
+  // person writes, but the WHATWG URL parser canonicalises the host of
+  // `https://[::ffff:127.0.0.1]/` to `[::ffff:7f00:1]` — the same address in hex groups. A check
+  // that matched only the dotted form therefore passed `https://[::ffff:127.0.0.1]/` as a public
+  // host, and loopback was reachable through a URL literal with no DNS step to catch it. The
+  // groups are expanded and judged numerically so that the notation cannot decide the answer.
+  const quad = mappedIpv4(address);
+  if (quad !== null) {
+    return isForbiddenIpv4(quad);
   }
 
   const first = address.split(':')[0] ?? '';
@@ -258,6 +265,76 @@ export function canonicalise(url: URL): string {
   canonical.searchParams.sort();
 
   return canonical.toString();
+}
+
+/**
+ * The IPv4 address inside an IPv4-mapped or IPv4-compatible IPv6 address, or null.
+ *
+ * Accepts every spelling of the same thing — `::ffff:127.0.0.1`, `::ffff:7f00:1`, `::127.0.0.1`,
+ * `::7f00:1` — by expanding the address to its eight groups and reading the last two, rather than
+ * by matching a shape. Matching a shape is how the hex spelling got through.
+ */
+function mappedIpv4(address: string): string | null {
+  const dotted = /^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (dotted?.[1] !== undefined && dotted[2] !== undefined) {
+    // A trailing dotted quad is only an IPv4 address in disguise when everything ahead of it is
+    // the `::ffff:` or `::` prefix. Anything else is a genuine IPv6 address that happens to be
+    // written with a dotted tail, and judging it as IPv4 would be the opposite mistake.
+    const prefix = dotted[1];
+    return prefix === '::ffff:' || prefix === '::' ? dotted[2] : null;
+  }
+
+  const groups = expandIpv6(address);
+  if (groups === null) {
+    return null;
+  }
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
+  const highIsZero = [g0, g1, g2, g3, g4].every((g) => g === 0);
+  if (!highIsZero || (g5 !== 0xffff && g5 !== 0)) {
+    return null;
+  }
+  if (g5 === 0 && g6 === 0 && (g7 ?? 0) <= 1) {
+    // `::` and `::1`, already refused above. Not IPv4.
+    return null;
+  }
+  const upper = g6 ?? 0;
+  const lower = g7 ?? 0;
+  return [upper >> 8, upper & 0xff, lower >> 8, lower & 0xff].map(String).join('.');
+}
+
+/** The eight 16-bit groups of an IPv6 address, or null when it does not parse as one. */
+function expandIpv6(address: string): number[] | null {
+  const halves = address.split('::');
+  if (halves.length > 2) {
+    return null;
+  }
+  const parse = (part: string): number[] | null => {
+    if (part === '') {
+      return [];
+    }
+    const groups: number[] = [];
+    for (const token of part.split(':')) {
+      if (!/^[0-9a-f]{1,4}$/.test(token)) {
+        return null;
+      }
+      groups.push(parseInt(token, 16));
+    }
+    return groups;
+  };
+
+  const head = parse(halves[0] ?? '');
+  const tail = halves.length === 2 ? parse(halves[1] ?? '') : [];
+  if (head === null || tail === null) {
+    return null;
+  }
+  if (halves.length === 1) {
+    return head.length === 8 ? head : null;
+  }
+  const fill = 8 - head.length - tail.length;
+  if (fill < 0) {
+    return null;
+  }
+  return [...head, ...Array<number>(fill).fill(0), ...tail];
 }
 
 function reject(rejection: UrlRejection, detail: string): UrlScreening {

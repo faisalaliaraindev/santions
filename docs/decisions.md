@@ -974,3 +974,95 @@ in the priority order written at the top of `seed-lexicon.ts` — procedural ter
 whether the Spanish half finds a real CR court report at all), then authority names, then conduct
 terms per category. Until they do, the Spanish half of this system may report no findings because
 the query was wrong rather than because nothing exists.
+
+---
+
+## D-034 — The live fetch adapter uses `node:https` with a screening lookup, not `fetch`
+
+**Status:** Accepted · **Decided at:** Phase E step 1, 2026-09-14
+
+`HttpEvidenceFetchAdapter` opens its connections through `node:https` and a custom `lookup`,
+rather than through the global `fetch`. Two requirements make that a necessity rather than a
+preference, and both of them are things `fetch` cannot express.
+
+**1. The address that was screened must be the address the socket uses.**
+`screenResolvedAddress` exists to defeat DNS rebinding. Screening with `dns.lookup` and then
+calling `fetch(hostname)` resolves the host **twice**, and the second resolution is the attack:
+the name that answered publicly a moment ago answers `127.0.0.1` now. `https.request` accepts a
+`lookup` function that the connection itself calls, so the screening sits **inside** the only
+path from a hostname to a socket. An unscreened address is not reachable — not because somebody
+remembered to check first, but because there is no route that skips the check. `servername` stays
+the hostname, so TLS verification is unaffected: the certificate is still checked against the
+name, never against the address.
+
+The lookup asks for **every** address rather than the first, and **one forbidden address refuses
+the whole host**. A host answering with both a public and a private address is a rebinding or
+split-horizon signature, not a usable host with one bad entry. A false positive costs one lead; a
+false negative costs cloud credentials, and `isForbiddenAddress` is deliberately broad for the
+same reason.
+
+**2. Two byte budgets cannot be enforced through one number.** `FetchBudget` declares `maxBytes`
+and `maxDecompressedBytes` separately, and it is right to: they defend against different attacks.
+`fetch` decompresses transparently, so the wire size is not observable and the two collapse into
+one. Here the wire bytes are counted as they arrive — aborting on the chunk that crosses the line,
+not after buffering the body — and the decompressed bytes are bounded by `zlib`'s own
+`maxOutputLength`, which stops a bomb inside the decompressor rather than by measuring a buffer
+that has already been allocated. A 40KB response that inflates to a gigabyte trips the second
+budget while the first is nowhere near its limit. That is the compression half of **T38**, and one
+budget cannot express it.
+
+**Cost.** More code than `fetch`, and it is ours to maintain: redirects are followed by hand,
+headers are flattened by hand, and the timeout is a timer rather than a signal. That cost is paid
+deliberately, because following redirects by hand is also what lets **every hop be re-screened** —
+a transport that followed them internally would carry a request past the gate without the gate
+being consulted, and a `302` to the metadata service is the obvious way to try it.
+
+The residual limit, stated: an IP **literal** in a URL never reaches the lookup at all, because
+there is nothing to resolve. `screenUrl` is the only gate on that path, which is why the
+IPv4-mapped IPv6 gap found while writing this adapter mattered — see the handoff for 2026-09-14.
+
+---
+
+## D-035 — A gate refusal is never source health, and whoever opens the socket spends the budget
+
+**Status:** Accepted · **Decided at:** Phase E step 1, 2026-09-14
+
+Two rules about what the fetch adapter tells `SourceHealthService`. They were decided together
+because both are answers to the same question: what, exactly, is this health record about?
+
+**A gate refusal is never recorded as the source's failure.** A robots disallow and a refused
+address both classify as `HARD_BLOCK` through the FR-06 table, and `HARD_BLOCK` carries
+`domainAction: 'SUSPEND'`, on which D5's breaker opens **immediately**. So handing either to
+`recordFailure` would suspend an entire working news feed because one of the articles it listed
+happened to be disallowed or unreachable — and the suspension would then be reported as a coverage
+gap for a source that was answering perfectly.
+
+The distinction is the one the whole `sources/` directory already keeps: a gate refusal is **our**
+decision not to ask, not the source's failure to answer. So the adapter records health only for
+failures the **server produced** — a status code, a reset connection, a timeout, an oversize body.
+A refusal is still returned as a `FAILED` outcome, so the lead survives with its reason attached
+and the coverage view shows it; it simply does not become evidence that the publisher is unwell.
+
+This exposed a second thing worth writing down: FR-06 asks for per-source **and per-domain**
+circuit breakers, and D5 built only the per-source half. For a primary source the two coincide.
+For a discovery lead they do not — the `sourceId` is the feed, and the domain is whatever the feed
+linked to. Until the per-domain breaker exists (Phase E step 3), this rule is what keeps the
+missing half from doing harm.
+
+**Whoever opens the socket spends the budget.** The publisher counts **requests**, so the
+component that puts one on the wire is the component that spends. `checkAccess` gained an optional
+`spend` flag, defaulting to true. The pipeline's pre-fetch check passes `spend: false` — it is
+asking "may this lead be attempted at all?", which is a rights-and-breaker question, not a
+request. The adapter then spends once per request it actually issues, **including the robots.txt
+fetch**, which is a real request to the publisher and was counted nowhere at all before.
+
+The alternative — leaving the spend in the pipeline — charges for requests that a robots refusal
+means we never make, and charges once for a fetch that turns into three (robots, the document, a
+redirect hop). Either way the counter stops describing the traffic the publisher sees, which is
+the only thing it is for.
+
+**Cost.** Two components now both call `checkAccess`, and the rule for which one spends lives in a
+comment and a flag rather than in the type system. A third caller that forgets the rule will
+over-count. The mitigation is that the flag is named for what it means and that the default is the
+safe direction — a caller that forgets it spends, and over-counting slows fetching down rather
+than exceeding a publisher's free tier.

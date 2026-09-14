@@ -115,7 +115,7 @@ async function seedPolicy(input: {
 }
 
 function mockAdapters(): SourceAdapterSet {
-  return buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null });
+  return buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null, fetchContactUrl: null });
 }
 
 /**

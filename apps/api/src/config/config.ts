@@ -122,6 +122,17 @@ const rawSchema = z.object({
    * `credentialsRef` and nothing more.
    */
   COMPANIES_HOUSE_API_KEY: optional(z.string().min(1)),
+
+  /**
+   * The contact URL the outbound user agent carries (FR-06).
+   *
+   * "The user agent identifies the service honestly with a contact URL." There is deliberately
+   * no default: a default would be a URL nobody reads, on a host nobody owns, and a publisher
+   * who wanted us to stop would have nowhere to write. Without it the live fetch adapter is not
+   * constructed at all, which is the honest failure — the alternative is a polite-looking lie
+   * attached to every request this service makes.
+   */
+  FETCH_CONTACT_URL: optional(z.string().url()),
 });
 
 export type AppConfig = Readonly<{
@@ -165,6 +176,8 @@ export type AppConfig = Readonly<{
   sources: {
     /** Null when no key is configured. See `COMPANIES_HOUSE_API_KEY` for why that is fine. */
     companiesHouseApiKey: string | null;
+    /** Null when unset, which leaves the live fetch adapter unconstructed. See FR-06. */
+    fetchContactUrl: string | null;
   };
 }>;
 
@@ -403,6 +416,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     },
     sources: {
       companiesHouseApiKey: raw.COMPANIES_HOUSE_API_KEY ?? null,
+      fetchContactUrl: raw.FETCH_CONTACT_URL ?? null,
     },
   };
 }

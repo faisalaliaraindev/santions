@@ -481,6 +481,13 @@ export class SearchPipeline {
         sourceId: leadSourceId,
         now: input.now,
         queriesAffected: 1,
+        // Asks whether this lead may be attempted at all; does not spend. The fetch adapter
+        // makes one, two or three actual requests behind this call — robots.txt, the document,
+        // a redirect hop — and spends once for each, because the budget counts requests put on
+        // the wire. Spending here as well would drain it at a rate unrelated to the traffic the
+        // publisher sees, and spending here *instead* would charge for requests that a robots
+        // refusal means we never make.
+        spend: false,
       });
       if (!access.decision.allowed) {
         if (!refusedSources.has(leadSourceId) && access.coverageOutcome !== null) {

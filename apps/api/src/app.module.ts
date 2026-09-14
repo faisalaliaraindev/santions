@@ -271,12 +271,17 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       // the mode rule — a mock is unreachable in live mode — is a single rule, and six
       // factories would be six places to get it right. See `sources/sources.registry.ts`.
       provide: SOURCE_ADAPTERS,
-      useFactory: (config: AppConfig): SourceAdapterSet =>
+      useFactory: (config: AppConfig, sourceHealth: SourceHealthService): SourceAdapterSet =>
         buildSourceAdapters({
           mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
           companiesHouseApiKey: config.sources.companiesHouseApiKey,
+          fetchContactUrl: config.sources.fetchContactUrl,
+          // The live fetch adapter checks access immediately before every external call, which
+          // is what makes the D5 kill switch effective mid-run (T36). Without it the adapter is
+          // not constructed at all.
+          sourceAccess: sourceHealth,
         }),
-      inject: [APP_CONFIG],
+      inject: [APP_CONFIG, SourceHealthService],
     },
     {
       provide: IndexerService,

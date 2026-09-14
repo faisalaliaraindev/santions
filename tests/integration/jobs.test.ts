@@ -959,7 +959,7 @@ function associationGraphFor(
   return new AssociationGraphService(
     db,
     subjects,
-    buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null }),
+    buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null, fetchContactUrl: null }),
     new CapabilityCoverageService(db),
     transactions,
     audit,

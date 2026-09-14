@@ -20,6 +20,10 @@
  * in this directory: a gate refusal is our decision not to ask, not the source's failure to
  * answer, and recording it as a coverage gap would misreport what happened.
  *
+ * The refusals themselves now live in `../fetch-authorisation.ts` and are shared with the real
+ * `HttpEvidenceFetchAdapter`. They were written here first and moved there unchanged when the
+ * real adapter arrived: two copies of a gate is how the live one ends up the more permissive.
+ *
  * The fixtures then cover the three fetch outcomes that behave differently downstream: a
  * normal 200, a 304 conditional hit (a success with no body — never an empty document), and an
  * oversize body that trips the budget.
@@ -34,6 +38,7 @@ import {
   type MockModeWitness,
   type SourceOutcome,
 } from '../source-adapter.js';
+import { assertAttributable, assertAuthorised } from '../fetch-authorisation.js';
 import type { EvidenceFetchPort, FetchRequest, FetchResult } from '../evidence-fetch.port.js';
 
 export const MOCK_EVIDENCE_FETCH_DESCRIPTOR: AdapterDescriptor = {
@@ -208,47 +213,3 @@ export class MockEvidenceFetchAdapter implements EvidenceFetchPort {
 
 /** The URL that trips the byte budget. Exported so a test does not have to know the string. */
 export const OVERSIZE_FIXTURE_URL = OVERSIZE_URL;
-
-function assertAuthorised(request: FetchRequest): void {
-  const a = request.authorisation;
-  const failures: string[] = [];
-  if (!a.jurisdictionEnabled) {
-    failures.push('jurisdiction not enabled');
-  }
-  if (!a.languageEnabled) {
-    failures.push('language not enabled');
-  }
-  if (!a.urlPolicyPassed) {
-    failures.push('URL policy not passed');
-  }
-  if (!a.ssrfValidated) {
-    failures.push('SSRF validation not performed');
-  }
-  if (a.robotsPosition === 'NOT_ESTABLISHED') {
-    failures.push('robots position not established');
-  }
-  if (a.robotsPosition === 'EXCEPTION_APPROVED' && a.robotsExceptionApprovedBy === null) {
-    // FR-06: the exception process is "approved by a named person — never a global setting".
-    // An unattributed exception is a global setting wearing a record's clothes.
-    failures.push('robots exception approved by nobody');
-  }
-  if (failures.length > 0) {
-    throw new Error(
-      `Refusing to fetch ${request.url}: ${failures.join('; ')}. Every FR-06 gate must pass ` +
-        `before a fetch is issued, and a gate failure is our decision not to ask — not the ` +
-        `source's failure to answer.`,
-    );
-  }
-}
-
-function assertAttributable(request: FetchRequest): void {
-  const missing = Object.entries(request.attribution)
-    .filter(([, value]) => value === '' || value === null || value === undefined)
-    .map(([key]) => key);
-  if (missing.length > 0) {
-    throw new Error(
-      `Unattributable outbound request (missing: ${missing.join(', ')}). FR-06: an ` +
-        `unattributable outbound request is a defect.`,
-    );
-  }
-}

@@ -193,7 +193,11 @@ beforeAll(async () => {
   findings = new FindingsService(db);
   sourceHealth = new SourceHealthService(db, audit, runner);
 
-  const adapters = buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null });
+  const adapters = buildSourceAdapters({
+    mode: 'MOCK',
+    companiesHouseApiKey: null,
+    fetchContactUrl: null,
+  });
   const graph = new AssociationGraphService(
     db,
     subjects,

@@ -1,0 +1,85 @@
+/**
+ * The FR-06 refusals every `EvidenceFetchPort` implementation must make, in one place.
+ *
+ * These were written first inside `MockEvidenceFetchAdapter`, because the mock's job is to
+ * perform every *refusal* the real adapter must perform — a fetch mock that happily returns
+ * bytes lets a caller pass its tests while omitting the gate. Phase E adds the real adapter, and
+ * the header of `evidence-fetch.port.ts` is explicit about what would happen next if each
+ * implementation kept its own copy: "a second, subtly different copy of the gate growing inside
+ * the HTTP client". Two copies is how the live one ends up the more permissive of the two.
+ *
+ * So there is one copy, and both adapters call it.
+ *
+ * **Why these throw rather than returning `FAILED`.** A gate refusal is our decision not to ask,
+ * not the source's failure to answer. Recording it as a coverage gap would say a source was
+ * consulted and did not respond, when it was never consulted at all. And every condition here is
+ * a programming error at the call site — a caller that could not name its authorisation or its
+ * attribution has a bug, not a bad day.
+ *
+ * The runtime refusals that are **not** here, deliberately, are the ones that are facts about the
+ * world rather than about the caller: a robots.txt that disallows the path, a host that resolves
+ * to a private address, a redirect into one. Those are discovered while fetching, they are not
+ * the caller's mistake, and they are returned as outcomes so that the lead survives with its
+ * reason attached.
+ */
+
+import type { FetchRequest } from './evidence-fetch.port.js';
+
+/**
+ * Refuse a request whose authorisation does not show every FR-06 gate passing.
+ *
+ * @throws if any gate is unmet, listing all of them rather than the first.
+ */
+export function assertAuthorised(request: FetchRequest): void {
+  const a = request.authorisation;
+  const failures: string[] = [];
+  if (!a.jurisdictionEnabled) {
+    failures.push('jurisdiction not enabled');
+  }
+  if (!a.languageEnabled) {
+    failures.push('language not enabled');
+  }
+  if (!a.urlPolicyPassed) {
+    failures.push('URL policy not passed');
+  }
+  if (!a.ssrfValidated) {
+    failures.push('SSRF validation not performed');
+  }
+  if (a.robotsPosition === 'NOT_ESTABLISHED') {
+    failures.push('robots position not established');
+  }
+  if (a.robotsPosition === 'EXCEPTION_APPROVED' && a.robotsExceptionApprovedBy === null) {
+    // FR-06: the exception process is "approved by a named person — never a global setting".
+    // An unattributed exception is a global setting wearing a record's clothes. Open decision
+    // D6 decides how the name is recorded; until it closes, nothing can supply one, so an
+    // `EXCEPTION_APPROVED` source is refused here rather than fetched on an unnamed exception.
+    failures.push('robots exception approved by nobody');
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `Refusing to fetch ${request.url}: ${failures.join('; ')}. Every FR-06 gate must pass ` +
+        `before a fetch is issued, and a gate failure is our decision not to ask — not the ` +
+        `source's failure to answer.`,
+    );
+  }
+}
+
+/**
+ * Refuse a request that cannot be attributed.
+ *
+ * FR-06: "Every outbound request records tenant, job, subject, query, source, egress identity,
+ * region and policy decision. An unattributable outbound request is a defect."
+ *
+ * @throws naming every missing field.
+ */
+export function assertAttributable(request: FetchRequest): void {
+  const missing = Object.entries(request.attribution)
+    .filter(([, value]) => value === '' || value === null || value === undefined)
+    .map(([key]) => key);
+  if (missing.length > 0) {
+    throw new Error(
+      `Unattributable outbound request (missing: ${missing.join(', ')}). FR-06: an ` +
+        `unattributable outbound request is a defect.`,
+    );
+  }
+}

@@ -9,23 +9,32 @@ of previous sessions. It is deliberately short.
 
 > **Phase E — Query planning, discovery cascade and fetch (gate G6)**
 >
-> 🔧 **Current work: the live-source path, which has been parked since 2026-09-14 and is now
-> unblocked.** Phase D closed on 2026-09-14 and **gate G5 is passed**. The reason the live work
-> was parked is the reason it can start now: D5 built source health — rate limits, circuit
-> breakers, per-source budgets and a mid-run kill switch — so a real source can be dialled
-> without pointing an unthrottled fetcher at it.
+> 🔧 **Current work: the live-source path. Step 1 of eight is done.**
+> `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and tested.
+> **The next concrete action is step 2: `FetchGateService`**, and specifically deleting the
+> fabricated `FetchAuthorisation` in `search-pipeline.service.ts`, which today asserts
+> `urlPolicyPassed: true` and `ssrfValidated: true` without either having been run. Against the
+> mock that was harmless; against the adapter that now exists it is a signed statement about
+> gates that were never checked, in the one record whose purpose is to be audited.
 >
-> **The first concrete action is in the top handoff entry**, and the ordered plan is there too.
-> In short: build `HttpEvidenceFetchAdapter`, the real `EvidenceFetchPort`. The two pure modules
-> it needs are already written and tested — `packages/domain/src/fetch/url-policy.ts` (the SEC-02
-> gate, in two halves: `screenUrl` before DNS and `screenResolvedAddress` on **every** resolved
-> address, which is what defeats DNS rebinding) and `fetch/robots.ts` (where a robots.txt that
-> times out yields `UNKNOWN`, never `ALLOWED`).
+> Brief: [`phase-e.md`](./phase-e.md) — **expanded into a full brief on 2026-09-14**. It carries
+> an execution order that deliberately differs from the `E1`–`E6` step numbering, and says why.
 >
-> Brief: [`phase-e.md`](./phase-e.md) — **an outline that must be expanded into a full brief
-> before work starts**, as every phase brief has been.
+> **What step 1 settled, and what a later step must not undo.** The adapter talks HTTPS through
+> `node:https` with the SEC-02 screening inside the connection's own `lookup` (**D-034**) — that
+> is what defeats DNS rebinding, and screening before a `fetch` call would not. Wire bytes and
+> decompressed bytes are separate budgets, because they defend against different attacks. Robots
+> `UNKNOWN` **refuses**: an outage at the publisher is not consent. And **a gate refusal is never
+> recorded against source health** (**D-035**) — a robots disallow classifies as `HARD_BLOCK`,
+> which suspends, so recording one would suspend a working news feed because a single article it
+> linked to was disallowed.
 >
-> **What D5 built, and what a fetch adapter must therefore do.** Source health is a **separate
+> **`pnpm demo:api` and the whole test suite still run without any live call.** The real
+> transport is constructed only by the live composition root, and every test in the fetch suite
+> uses an injected one.
+>
+> **What D5 built, and what the fetch adapter now does** (kept here because every later
+> connector must do the same). Source health is a **separate
 > mutable document** (`sourceHealth`, keyed by `sourceId`) beside the immutable `SourceVersion`:
 > the approved version says what is _permitted_, health says what is _happening_. Call
 > `SourceHealthService.checkAccess` **immediately before every external call**, not at plan time
@@ -61,12 +70,15 @@ of previous sessions. It is deliberately short.
 > D4 the traversal bounds as policy-version configuration pinned to the run; D5 source health;
 > D6 the lexicon and its activation audit. Decisions D-018 through D-033.
 >
-> **No decision is due at G5** and none was left open by it. Check
+> **Two decisions are due at G6 and both are open.** Check
 > [`../open-decisions.md`](../open-decisions.md) rather than a phase brief for what is actually
-> open. **D6 — how robots exceptions for official sources are approved and recorded — is due at
-> G6 and is now in the direct path**: the `robotsPosition: EXCEPTION_APPROVED` field exists on
-> the source schema and the fetch adapter will need to honour it, so raise it with a source admin
-> at the **start** of this phase rather than when the adapter is half-written.
+> open. **D6 — how robots exceptions for official sources are approved and recorded — was raised
+> with specifics on 2026-09-14** and is written up there with three options and a recommendation.
+> **It needs a source admin, not an engineer.** Until it closes, no robots exception can be
+> applied at all: the schema has no field for the named approver the fetch gate demands, so an
+> `EXCEPTION_APPROVED` source is refused rather than fetched. That is the safe direction and it
+> is recorded as provisional. **D15 — the Costa Rican primary-source evidence base — is also due
+> at G6** and is untouched.
 >
 > **Phases A, B, C and D are complete.** The stack starts, seeds and survives a restart; auth,
 > tenancy, entitlements, subjects and idempotent search creation are built and tested against it;
@@ -115,12 +127,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **571 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **614 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
 **206 integration** tests and `pnpm test:security` **106 security** tests.
 
-Coverage is gated at 85/80 and currently reports 94.21% / 91.14% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 94.07% / 90.46% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by

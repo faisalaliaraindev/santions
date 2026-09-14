@@ -10,18 +10,24 @@
  * and a `LIVE` process throws before it constructs anything. The module then registers what
  * this returns.
  *
- * **What a live process gets today, honestly stated.** Five of the six seams have **no live
- * adapter** — they are Phase E — so in live mode they are `null` rather than a mock. Not a
- * fallback, not a stub: null, so that a caller has to handle "this capability has no source"
- * explicitly. Falling back to a mock would make a live process serve fixtures (T55), and
- * falling back to an adapter that returns empty results would make a live process report clean
- * results from sources that were never consulted, which is the failure this whole service is
- * built to avoid.
+ * **What a live process gets today, honestly stated.** Two of the six seams have a live adapter:
+ * the GB company registry (D2) and, as of Phase E step 1, evidence fetch. The other four are
+ * `null` in live mode rather than a mock. Not a fallback, not a stub: null, so that a caller has
+ * to handle "this capability has no source" explicitly. Falling back to a mock would make a live
+ * process serve fixtures (T55), and falling back to an adapter that returns empty results would
+ * make a live process report clean results from sources that were never consulted, which is the
+ * failure this whole service is built to avoid.
+ *
+ * **The fetch adapter is null unless it can be honest.** It needs a contact URL for its user
+ * agent (FR-06) and a source-health service to consult before every call (D5). Neither is
+ * defaulted, because the default in each case is a lie: a contact URL nobody owns, or an
+ * unthrottled fetcher pointed at a publisher.
  */
 
 import { Logger } from '@nestjs/common';
 
 import { CompaniesHouseAdapter } from './companies-house.adapter.js';
+import { HttpEvidenceFetchAdapter, type SourceAccessPort } from './http-evidence-fetch.adapter.js';
 import type { CompanyRegistryPort } from './company-registry.port.js';
 import type { EvidenceFetchPort } from './evidence-fetch.port.js';
 import type { ExtractionModelPort } from './extraction-model.port.js';
@@ -65,6 +71,20 @@ export interface SourceRegistryOptions {
    * because it produces a coverage gap that looks like an outage at the source.
    */
   readonly companiesHouseApiKey: string | null;
+  /**
+   * The contact URL the outbound user agent carries (FR-06). Null when unconfigured, and the
+   * live fetch adapter is then **not constructed** — an anonymous crawler is not a degraded
+   * version of an honest one, it is the thing the requirement forbids.
+   */
+  readonly fetchContactUrl: string | null;
+  /**
+   * Source health, which the fetch adapter consults immediately before every external call.
+   *
+   * Required in live mode and unused in mock mode. Passing it in rather than having the adapter
+   * reach for it keeps `buildSourceAdapters` the one place an adapter is constructed, and keeps
+   * the adapter testable against a stub.
+   */
+  readonly sourceAccess?: SourceAccessPort | undefined;
 }
 
 export const SOURCE_ADAPTERS = 'SOURCE_ADAPTERS';
@@ -90,10 +110,11 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
     };
   }
 
-  // Live. Five seams have no adapter yet; see the file header for why they are null.
+  // Live. Four seams still have no adapter; see the file header for why they are null rather
+  // than stubbed. Fetch is the one Phase E step 1 fills.
   logger.log(
-    'ADVERSE_SEARCH_MODE=live: discovery, fetch and extraction have no live adapter yet ' +
-      '(Phase E). Those capabilities are unavailable, not empty.',
+    'ADVERSE_SEARCH_MODE=live: discovery and extraction have no live adapter yet (Phase E ' +
+      'steps 3 and F). Those capabilities are unavailable, not empty.',
   );
 
   if (options.companiesHouseApiKey === null) {
@@ -109,6 +130,37 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
     );
   }
 
+  // The fetch seam, Phase E step 1. Two things must both be present, and neither is defaulted:
+  // an honest contact URL (FR-06 requires the user agent to carry one, and a made-up default is
+  // worse than no adapter), and source health (the kill switch, the breaker and the budgets are
+  // consulted immediately before every external call — an adapter without them is an unthrottled
+  // fetcher pointed at a publisher, which is exactly what D5 was built first to prevent).
+  const evidenceFetch =
+    options.fetchContactUrl === null || options.sourceAccess === undefined
+      ? null
+      : new HttpEvidenceFetchAdapter({
+          access: options.sourceAccess,
+          contactUrl: options.fetchContactUrl,
+        });
+
+  if (evidenceFetch === null) {
+    logger.warn(
+      'No live evidence-fetch adapter: ' +
+        (options.fetchContactUrl === null
+          ? 'FETCH_CONTACT_URL is unset, and FR-06 requires the user agent to identify this ' +
+            'service honestly with a contact URL. Fetching is unavailable rather than anonymous.'
+          : 'source health was not supplied, and nothing fetches without the breaker, the ' +
+            'budgets and the kill switch in front of it.'),
+    );
+  } else {
+    logger.log(
+      'Live evidence fetch enabled. Every request screens its URL and every resolved address ' +
+        '(SEC-02), honours robots.txt with UNKNOWN refusing, and checks source health ' +
+        'immediately before opening a socket. No robots exception can be applied: open ' +
+        'decision D6 has not closed, so no approver can be recorded.',
+    );
+  }
+
   return {
     newsDiscovery: null,
     webDiscovery: null,
@@ -117,7 +169,7 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
       options.companiesHouseApiKey === null
         ? null
         : new CompaniesHouseAdapter({ apiKey: options.companiesHouseApiKey }),
-    evidenceFetch: null,
+    evidenceFetch,
     extractionModel: null,
   };
 }

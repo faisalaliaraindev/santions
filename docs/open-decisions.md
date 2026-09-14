@@ -13,7 +13,7 @@ force, it is stated as such and the code reflects that it is provisional.
 | D3      | Which categories are on by default                                                                             | Taxonomy admin         | G5       | **CLOSED 2026-09-11** — all seventeen (see D-009)                 |
 | D4      | The exact boundary between adverse media and list matching for designations                                    | Product + compliance   | G7       | Open                                                              |
 | D5      | The reviewer capacity assumption that thresholds are set against                                               | Product + compliance   | G7       | Open                                                              |
-| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin           | G6       | Open                                                              |
+| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin           | G6       | Open — **raised with specifics 2026-09-14**, in the direct path   |
 | D7      | Which open-weight extraction model, benchmarked on the labelled set                                            | Engineering            | G7       | Open                                                              |
 | D8      | Retention per source and jurisdiction for evidence text                                                        | Compliance             | G5       | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)  |
 | D9      | Whether numeric confidence figures are ever shown (default: no)                                                | Product                | G7       | Open — default no, enforced                                       |
@@ -27,7 +27,83 @@ force, it is stated as such and the code reflects that it is provisional.
 
 ---
 
-## Detail on the decisions this implementation has surfaced
+## Detail on individual decisions
+
+The seeded decisions (D1-D10) appear here once they are raised with specifics; the rest were
+surfaced by the implementation itself.
+
+### D6 — How robots exceptions for official sources are approved and recorded
+
+**A seeded decision (D1–D10), raised with specifics at the start of Phase E, 2026-09-14.** It is
+due at **G6** and it is in the direct path rather than ahead of it: `HttpEvidenceFetchAdapter` is
+being written now, and it has to honour whatever this decides.
+
+**What exists in code today, which is two halves that do not meet.**
+
+- `sourceContentSchema.robotsPosition` — an enum, `HONOURED | EXCEPTION_APPROVED |
+NOT_ESTABLISHED`, one value per source version. It already travels through the D1 four-eyes
+  lifecycle like any other registry content, so changing it is proposed by one person, approved by
+  a second, and immutable once active. That part is sound.
+- `FetchAuthorisation.robotsExceptionApprovedBy` — a nullable string on the fetch port. The mock
+  refuses an `EXCEPTION_APPROVED` authorisation with nobody named, and the real adapter does the
+  same, because FR-06 requires the exception be "approved by a named person — never a global
+  setting".
+
+**Three gaps between those halves. They are why this cannot be left to a working assumption.**
+
+1. **There is nowhere to record the approver.** The port demands a name; the registry schema has
+   no field that holds one. So a source marked `EXCEPTION_APPROVED` today **cannot be fetched at
+   all** — there is no value the adapter could put in that field, and a null is refused. The gate
+   is safe and the feature is unreachable, which is exactly the state a decision exists to end.
+2. **The position is per source, and FR-06 requires per source _and_ per jurisdiction.** A source
+   version declares `countries` (up to fifty of them) and a single `robotsPosition`. One field
+   spanning a source's whole country list is a smaller global setting, not an exception.
+3. **An exception has no scope and no expiry.** `EXCEPTION_APPROVED` currently means "this source,
+   all of it, forever". Real robots exceptions are narrower than that: one gazette path, on one
+   stated legal basis, reviewed periodically.
+
+**What this decision does _not_ touch**, so it is not asked to carry more than it is. Robots is
+honoured by default; `UNKNOWN` refuses rather than being read as permission; and CAPTCHAs, bot
+challenges, paywalls, login walls and access controls are never bypassed by any path, exception or
+no exception. This is only about the narrow case of an **official publisher whose robots.txt blocks
+a document we are entitled to read** — a gazette, a court bulletin, a regulator's enforcement
+archive.
+
+**Options.**
+
+1. **Keep the bare enum, add a free-text approver field.** Cheapest. Per-source only, no scope, no
+   expiry, and the approver is a string somebody types.
+2. **A structured exception record on the source version**: the approver, the approval date, the
+   jurisdictions covered, the path prefixes covered, the legal basis relied on, and a review date.
+   Carried through the existing four-eyes lifecycle, so the approver is **the person the lifecycle
+   recorded** rather than a name typed into a box. The adapter then checks the URL's path against
+   the recorded prefixes, so an exception for `/boletines/` does not authorise the rest of the site.
+3. **No exceptions at all in the first release.** Robots is honoured absolutely, and a blocked
+   official source is a permanent, named coverage gap.
+
+**Recommendation to the decision owner: option 2**, with **option 3 as the honest fallback** if it
+turns out no exception is actually needed for Costa Rica. Option 1 is the one that looks like a
+record and is not: an unattributed, unscoped, non-expiring exception is the global setting FR-06
+names, wearing a record's clothes.
+
+**What engineering does while this is open, stated as provisional so it cannot harden.** The fetch
+adapter refuses `UNKNOWN` robots, and refuses `EXCEPTION_APPROVED` with no named approver.
+**No exception can be applied today.** A source that needs one is blocked and says so in its
+coverage outcome — it is never quietly fetched.
+
+**What the decision owner is being asked, concretely.**
+
+- **Does any approved Costa Rican official source actually block what we need?** This is desk
+  research, not a decision, and it should be settled first, because option 3 may turn out to be
+  free. Note that reading those robots.txt files is itself an outbound request: **no live source
+  has ever been contacted by this project**, so doing it is a deliberate first-contact decision,
+  not something engineering should do quietly in the course of answering this question.
+- **Who approves an exception** — is the named person the lifecycle's second approver, or a
+  separate named legal owner who has to be recorded as well?
+- **Is an exception scoped to paths and to one jurisdiction, and does it expire?**
+
+**Must close by G6**, because the fetch adapter's authorisation gate encodes the answer and
+shipping the adapter against option 1 makes option 2 a migration rather than a configuration change.
 
 ### D11 — Visual weight of stage and outcome status relative to the band
 
