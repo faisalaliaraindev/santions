@@ -27,6 +27,127 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (later still) — Phase D step **D4 done**: configurable bounds, visible truncation, and association coverage that reaches the run
+
+**Did — four things, one of which corrects D3.**
+
+**1. The three FR-02 traversal bounds are configuration, not constants.**
+`maxOfficerCandidates`, `maxCompaniesPerOfficer` and `maxEdgesPerSnapshot` now live on the
+tenant's **policy version**, read through a new `PolicyService`, and are **pinned onto the
+snapshot at creation**. Decision **D-028**.
+
+Pinning is the load-bearing half. A bound raised in October must not change what a search from
+March is reported to have covered, or the truncation note stops matching the graph printed beside
+it. `loadPinned` reads by version with **no `status` filter** for the same reason: a superseded
+version is still the one that run used, and refusing to read it would make an old search
+unexplainable the moment its policy was revised.
+
+A bad bound never fails a search: `resolveGraphBounds` falls back to a documented default per
+field and returns a problem string that travels into the coverage statement. Stated, not silent —
+a run that quietly fell back is a run whose truncation nobody can explain. Each bound also has a
+**ceiling**; a policy may narrow the traversal, never remove the limit.
+
+`maxEdgesPerSnapshot` is new — D3 had only two bounds. It is the backstop on the other two: a
+handful of officers each with a few hundred directorships passes both per-call caps and still
+produces a graph nobody can review.
+
+**2. A bound that binds is a record, not a sentence.** Every bound produces a structured
+`BoundApplication` — which bound, its limit, how many existed (**null** when the source does not
+say, which is a different fact), and what it applied to. D3 stored only the rendered sentence,
+which meant the only way to ask "did the edge cap bind?" was to match on a string.
+
+**3. Association coverage reaches the run.** `summariseAssociationCoverage` is the pure mapping
+from the graph's three outcomes into a `SourceCoverageOutcome`, and
+`SearchesService.recordAssociationCoverage` stores it on the run and re-runs `aggregateRun` —
+which existed, was tested, and had **no caller in the application** until now.
+
+| Graph outcome | Meaning                                  | Run outcome          |
+| :------------ | :--------------------------------------- | :------------------- |
+| `COMPLETE`    | Answered, within bounds                  | `COMPLETED`          |
+| `INCOMPLETE`  | Asked; something failed or a bound bound | `FAILED` / `PARTIAL` |
+| `UNKNOWN`     | **Never asked** — no register covers it  | `SKIPPED`            |
+
+Both `INCOMPLETE` and `UNKNOWN` make the run's coverage `INCOMPLETE`, which is correct — but they
+map to **different** source outcomes with **different** details, so "we never asked" and "we asked
+and it failed" never become the same fact. A bound is `PARTIAL` with `TRUNCATED_BY_PLAN`, not
+`FAILED`: a bounded traversal still produced real associations.
+
+**Only the `coverage` dimension is written back** (decision **D-030**). `aggregateRun` also
+returns `execution` and `findings`, and applying those here would be wrong: with a single failed
+source outcome it correctly concludes `FAILED`, which is right for a run in which nothing else ran
+and quite wrong for a real one whose person search is still to come. That is what makes FR-02's
+degraded execution real — a registry outage leaves the run alive with honest coverage, and no path
+in that method fails, deletes or rolls back the run.
+
+**4. Corrected D3: the historical-scope approval was on the wrong record.** See "Found" below.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         460 passed  (was 442: +18 domain tests for bounds and coverage mapping)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  179 passed  (was 170: +9, all in associations.test.ts)
+test:security     106 passed  (unchanged)
+coverage          94.92% statements / 90.72% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+```
+
+Run against the real stack: `pnpm local:up` and `pnpm local:bootstrap`.
+
+**Found — three things.**
+
+1. **D3 gated the historical scope on the wrong record, and duplicated a field that already
+   existed.** I added a `historical_directorships` **entitlement capability** in D3. The seeded
+   policy version has carried `historicalScopeApproved` since Phase A, and nothing read it. FR-02
+   calls it an _approved_ historical scope: an entitlement describes what a customer **bought**, a
+   policy version describes what has been **approved** for them to do, and those are different
+   questions with different owners. The policy version is also what goes through four eyes, writes
+   an audit entry and is pinned to the run — so a historical search can cite the version that
+   permitted it. Moved to the policy, entitlement capability removed, error message now names the
+   policy field so an administrator is sent to the record they actually have to change. Decision
+   **D-029**. The refusal itself is unchanged and still the point.
+2. **A missing entry in a Nest `inject` array is a runtime error, not a compile error.** Adding
+   `PolicyService` to the `AssociationGraphService` factory's parameters without adding it to
+   `inject` typechecked cleanly and failed at container construction with
+   `Cannot read properties of undefined (reading 'mode')` — a message that points at the last
+   argument rather than the missing one. Only the security suite caught it, because it is the only
+   suite that builds the real module. Worth knowing: the factory signature and the `inject` array
+   are two lists that must agree and nothing checks that they do.
+3. **A test regex that was wrong in a way that looked like a code failure.** My assertion that no
+   coverage detail ever claims "no associations exist" used a negative lookahead for the denial —
+   but the denial ("no result from a registry does not prove...") _precedes_ the phrase, so it
+   failed against correct text. Fixed the assertion, not the message. The rewritten version is
+   also clearer about what it wants: any mention of the phrase must be a denial of it.
+
+**Left half-done:** nothing in D4, but **T20 stays `[~]`** and the reason is unchanged from D3 —
+the graph half is fully done (outage, empty answer and bound overrun are three distinct outcomes,
+each with honest coverage on both the snapshot and the run, and the run provably survives the
+outage), but "the person search itself completes" needs the Phase E job handler. There is no
+person search to complete yet, so claiming that half would be claiming a test nobody can run.
+
+`recordAssociationCoverage` has no caller in the running service either: the worker will call it
+when Phase E registers a handler. Today it is driven by tests, the same arrangement `build()` and
+`JobConsumer.handle()` use.
+
+**Next session should:** start **D5** — `SourceHealth` as a separate mutable document keyed by
+source (never inside the immutable `SourceVersion`; the brief's "trap to avoid first" is explicit
+about this), the FR-06 breaker over the existing `failure-classification.ts` classes, per-source
+hourly and daily budgets the planner spends against, and a kill switch that takes effect
+**mid-run** rather than at the next run (T36). D5 also appends two rows to
+`docs/failure-injection-matrix.md` — read the format there before appending. See
+[`phase-d.md`](./phase-d.md) step D5.
+
+**Decisions touched:** **D-028, D-029, D-030 recorded.** D-029 **corrects D-027** (the
+historical-scope approval moved from the entitlement to the policy version); D-028 supersedes part
+of D-026 on where bounds come from. No open decision closed. **D-011 is unchanged and still the
+most consequential open item for identity quality** — no Costa Rican name-frequency distribution
+is loaded, so the top-decile penalty never fires for CR names, and the bootstrap says so on every
+run.
+
+---
+
 ## 2026-09-14 (later) — Phase D step **D3 done**: sourced identity resolution, the `DIRECTOR_OF` edges, and the frozen snapshot
 
 **Did — five things.**

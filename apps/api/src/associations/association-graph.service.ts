@@ -53,12 +53,17 @@ import {
   mayAttachCompanies,
   normaliseName,
   resolveOfficer,
+  summariseAssociationCoverage,
+  type AssociationCoverage,
   type AssociationScope,
+  type BoundApplication,
   type CurrencyState,
+  type GraphBounds,
   type IdentityFactor,
   type NameMatchForm,
   type PreciseDate,
   type ResolutionStatus,
+  type SourceCoverageOutcome,
   type Tenure,
 } from '@erly/adverse-domain';
 
@@ -70,46 +75,34 @@ import type { CompanyRegistryPort } from '../sources/company-registry.port.js';
 import { hasData } from '../sources/source-adapter.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
-
-/**
- * The entitlement a tenant needs before a former-director search is honoured.
- *
- * FR-02: "former-director search is selectable only under an approved historical scope". The
- * seeded tenants do **not** hold it, which is the correct default — asking for history and
- * being refused is a better failure than asking for history and quietly receiving a
- * current-only result labelled as though it were historical.
- */
-export const HISTORICAL_DIRECTORSHIPS = 'historical_directorships';
-
-/** How far a single snapshot may go. D4 makes these configurable and reports when they bind. */
-export interface GraphBounds {
-  readonly maxOfficerCandidates: number;
-  readonly maxCompaniesPerOfficer: number;
-}
-
-export const DEFAULT_GRAPH_BOUNDS: GraphBounds = {
-  maxOfficerCandidates: 25,
-  maxCompaniesPerOfficer: 50,
-};
+import { PolicyService } from '../tenancy/policy.service.js';
 
 export type SnapshotStatus = 'PENDING' | 'BUILT';
 
 /**
- * Association coverage, in the three values D4 requires to stay distinct.
+ * Association coverage as stored on the snapshot.
  *
- * `UNKNOWN` is not a worse `INCOMPLETE`. `INCOMPLETE` means we asked and something went wrong;
- * `UNKNOWN` means **we never asked**, because no approved registry covers this jurisdiction at
- * all. Reporting Costa Rica — which has no free automatable officer source (D14) — as
- * `INCOMPLETE` would imply an attempt that never happened.
+ * The three-way `outcome` and its mapping into the run live in
+ * `packages/domain/src/association/association-coverage.ts` — pure, because deciding what a
+ * bounded or failed traversal amounts to is a decision, and this file's job is to record it.
+ *
+ * `boundsApplied` is a structured list rather than prose. Every bound that bound is a row, so a
+ * consumer can count them, filter them or re-render them; `limitations` carries the rendered
+ * sentences for a reviewer. The D3 version stored only the sentences, which meant the only way
+ * to ask "did the edge cap bind?" was to match on a string.
  */
-export type AssociationCoverage = 'COMPLETE' | 'INCOMPLETE' | 'UNKNOWN';
-
 export interface SnapshotCoverage {
   readonly outcome: AssociationCoverage;
   /** Always populated for INCOMPLETE and UNKNOWN. A gap with no reason is not a statement. */
   readonly detail: string | null;
   readonly sourceId: string | null;
-  readonly boundsApplied: readonly string[];
+  readonly boundsApplied: readonly BoundApplication[];
+  readonly limitations: readonly string[];
+  /**
+   * What the run's own coverage aggregation consumes (`aggregateRun`). Stored rather than
+   * derived on read, so the run and the snapshot cannot come to disagree about what happened.
+   */
+  readonly sourceOutcome: SourceCoverageOutcome | null;
 }
 
 interface GraphSnapshotRecord {
@@ -122,6 +115,16 @@ interface GraphSnapshotRecord {
   readonly scope: AssociationScope;
   readonly status: SnapshotStatus;
   readonly coverage: SnapshotCoverage;
+  /**
+   * The policy version this run pinned, and the bounds resolved from it **at creation**.
+   *
+   * Copied onto the snapshot rather than re-read at build time, for the same reason companies
+   * are copied: a bound raised next month must not change what this search is reported to have
+   * covered. The truncation note on an old report has to keep matching the graph beside it.
+   */
+  readonly policyVersion: number;
+  readonly bounds: GraphBounds;
+  readonly boundProblems: readonly string[];
   readonly refreshOfSnapshotId: string | null;
   readonly createdAt: Date;
   readonly builtAt: Date | null;
@@ -208,6 +211,8 @@ export interface AssociationGraphView {
   readonly status: SnapshotStatus;
   readonly scope: AssociationScope;
   readonly coverage: SnapshotCoverage;
+  readonly bounds: GraphBounds;
+  readonly policyVersion: number;
   readonly edges: readonly AssociationAssertionRecord[];
   readonly companies: readonly CompanyRecord[];
   readonly unresolvedCandidates: readonly UnresolvedCandidateRecord[];
@@ -231,8 +236,8 @@ export class AssociationGraphService {
     private readonly capabilities: CapabilityCoverageService,
     private readonly transactions: TransactionRunner,
     private readonly audit: AuditService,
+    private readonly policies: PolicyService,
     private readonly mode: 'mock' | 'live',
-    private readonly bounds: GraphBounds = DEFAULT_GRAPH_BOUNDS,
   ) {
     this.snapshots = db.collection<GraphSnapshotRecord>('graphSnapshots');
     this.companies = db.collection<CompanyRecord>('companies');
@@ -262,25 +267,39 @@ export class AssociationGraphService {
   /**
    * Which scope this search actually runs under.
    *
-   * Default-deny: a tenant that has not been granted the historical entitlement is **refused**,
-   * not silently downgraded to current-only. A silent downgrade produces a result that answers
-   * a narrower question than the one asked, labelled as though it answered the asked one — and
-   * the caller has no way to tell.
+   * Default-deny: a tenant whose policy has not approved a historical scope is **refused**, not
+   * silently downgraded to current-only. A silent downgrade produces a result that answers a
+   * narrower question than the one asked, labelled as though it answered the asked one, and the
+   * caller has no way to tell.
+   *
+   * **The approval reads from the policy version, not from the commercial entitlement.** D3 put
+   * it on the entitlement, which was the wrong home and duplicated a field the seeded policy
+   * already carried. FR-02 calls it an *approved* historical scope, and the policy version is
+   * what carries approvals: it goes through the D1 four-eyes lifecycle, it writes an audit
+   * entry, and it is pinned to the run — so a historical search can cite the policy version
+   * that permitted it. An entitlement is what a customer bought, which is a different question.
    */
-  resolveScope(input: {
-    readonly capabilities: readonly string[];
+  async resolveScope(input: {
+    readonly tenantId: string;
     readonly includeFormerDirectorships: boolean;
-  }): AssociationScope {
+  }): Promise<AssociationScope> {
     if (!input.includeFormerDirectorships) {
       return 'CURRENT_ONLY';
     }
-    if (!input.capabilities.includes(HISTORICAL_DIRECTORSHIPS)) {
+    const policy = await this.policies.loadActive(input.tenantId);
+    if (!policy.historicalScopeApproved) {
       throw new ApiException(
         'INVALID_SCOPE',
-        'A former-director search requires an approved historical scope, which this tenant ' +
-          'does not hold (FR-02).',
+        'A former-director search requires an approved historical scope. The active policy ' +
+          'version for this tenant does not approve one (FR-02).',
         {
-          details: [{ path: 'requestedScope.includeFormerDirectorships', message: 'not entitled' }],
+          details: [
+            {
+              path: 'requestedScope.includeFormerDirectorships',
+              message: 'historicalScopeApproved is not set on the active policy version',
+            },
+          ],
+          internalDetail: `tenant=${input.tenantId} policyVersion=${String(policy.version)}`,
         },
       );
     }
@@ -300,10 +319,17 @@ export class AssociationGraphService {
     readonly subjectVersion: number;
     readonly jurisdictions: readonly string[];
     readonly scope: AssociationScope;
+    /** The version `pinVersions` pinned. The bounds are resolved from exactly this one. */
+    readonly policyVersion: number;
     readonly refreshOfSnapshotId?: string | null;
     readonly now: Date;
     readonly session: ClientSession;
   }): Promise<string> {
+    // Resolved here, at creation, and copied onto the snapshot. Reading them at build time
+    // instead would let a policy change between acceptance and execution silently alter what
+    // the run covered — and the run would report the new bounds as though it had used them.
+    const policy = await this.policies.loadPinned(input.tenantId, input.policyVersion);
+
     const snapshotId = randomUUID();
     await this.snapshots.insertOne(
       {
@@ -322,7 +348,12 @@ export class AssociationGraphService {
           detail: 'The association graph has not been built for this search yet.',
           sourceId: null,
           boundsApplied: [],
+          limitations: [],
+          sourceOutcome: null,
         },
+        policyVersion: input.policyVersion,
+        bounds: policy.graphBounds,
+        boundProblems: policy.boundProblems,
         refreshOfSnapshotId: input.refreshOfSnapshotId ?? null,
         createdAt: input.now,
         builtAt: null,
@@ -375,7 +406,13 @@ export class AssociationGraphService {
       return this.commit({
         snapshot,
         now: input.now,
-        coverage: { outcome: 'UNKNOWN', detail, sourceId: null, boundsApplied: [] },
+        coverage: this.summarise(snapshot, {
+          sourceId: null,
+          answered: false,
+          failure: null,
+          boundsApplied: [],
+          notAskedReason: detail,
+        }),
         companies: [],
         assertions: [],
         candidates: [],
@@ -386,7 +423,7 @@ export class AssociationGraphService {
       tenantId: input.tenantId,
       jurisdiction,
       name: subject.fullName,
-      limit: this.bounds.maxOfficerCandidates,
+      limit: snapshot.bounds.maxOfficerCandidates,
     });
 
     if (officers.status === 'FAILED') {
@@ -400,15 +437,13 @@ export class AssociationGraphService {
       return this.commit({
         snapshot,
         now: input.now,
-        coverage: {
-          outcome: 'INCOMPLETE',
-          detail:
-            `The company register did not answer (${officers.policy.failureClass}). ` +
-            `Association coverage for this search is incomplete; no result from a registry ` +
-            `does not prove no associations exist.`,
+        coverage: this.summarise(snapshot, {
           sourceId: registry.descriptor.sourceId,
+          answered: false,
+          failure: officers.policy.failureClass,
           boundsApplied: [],
-        },
+          notAskedReason: null,
+        }),
         companies: [],
         assertions: [],
         candidates: [],
@@ -425,25 +460,30 @@ export class AssociationGraphService {
         input.now,
       );
       const meaning = interpretEmptyResult(capability.status);
+      const summarised = this.summarise(snapshot, {
+        sourceId: registry.descriptor.sourceId,
+        answered: true,
+        failure: null,
+        boundsApplied: [],
+        notAskedReason: null,
+      });
       return this.commit({
         snapshot,
         now: input.now,
         coverage:
           meaning === 'NO_FINDINGS'
-            ? {
-                outcome: 'COMPLETE',
-                detail: null,
-                sourceId: registry.descriptor.sourceId,
-                boundsApplied: [],
-              }
+            ? summarised
             : {
+                // The register answered, so this is not a failure — but the capability is not
+                // SUPPORTED here, so the empty answer is not established as absence (D-020).
+                // The outcome is overridden to UNKNOWN while the source outcome still records
+                // that the register was asked and did reply.
+                ...summarised,
                 outcome: 'UNKNOWN',
                 detail:
                   `The register returned no officers, but officer associations are ` +
                   `${capability.status} in ${jurisdiction}, so an empty result is not ` +
                   `established as "no associations". ${capability.rationale}`,
-                sourceId: registry.descriptor.sourceId,
-                boundsApplied: [],
               },
         companies: [],
         assertions: [],
@@ -451,14 +491,17 @@ export class AssociationGraphService {
       });
     }
 
-    const boundsApplied: string[] = [];
+    const boundsApplied: BoundApplication[] = [];
+    /** Registry calls that failed mid-traversal. Separate from a bound: nothing was capped. */
+    const partialFailures: string[] = [];
+
     if (officers.status === 'BOUNDED') {
-      boundsApplied.push(
-        `Officer candidates capped at ${String(officers.truncation.limit)}` +
-          (officers.truncation.availableCount === null
-            ? '; the register did not say how many exist.'
-            : ` of ${String(officers.truncation.availableCount)} the register reports.`),
-      );
+      boundsApplied.push({
+        bound: 'MAX_OFFICER_CANDIDATES',
+        limit: officers.truncation.limit,
+        available: officers.truncation.availableCount,
+        appliedTo: subject.fullName,
+      });
     }
 
     const resolutions = this.resolveAll(subject, officers.data, jurisdiction);
@@ -515,21 +558,25 @@ export class AssociationGraphService {
         tenantId: input.tenantId,
         officerRef: candidate.officerRef,
         jurisdiction,
-        limit: this.bounds.maxCompaniesPerOfficer,
+        limit: snapshot.bounds.maxCompaniesPerOfficer,
       });
 
       if (appointments.status === 'FAILED') {
-        boundsApplied.push(
+        // Not a bound. The register was asked and did not answer for this officer, which is a
+        // different limitation from a cap and reads differently to a reviewer.
+        partialFailures.push(
           `Appointments for officer ${candidate.officerRef} could not be read ` +
             `(${appointments.policy.failureClass}).`,
         );
         continue;
       }
       if (appointments.status === 'BOUNDED') {
-        boundsApplied.push(
-          `Companies for officer ${candidate.officerRef} capped at ` +
-            `${String(appointments.truncation.limit)}.`,
-        );
+        boundsApplied.push({
+          bound: 'MAX_COMPANIES_PER_OFFICER',
+          limit: appointments.truncation.limit,
+          available: appointments.truncation.availableCount,
+          appliedTo: candidate.officerRef,
+        });
       }
       if (!hasData(appointments)) {
         // The register holds the officer but attributes no company to them. Recorded as a
@@ -557,6 +604,22 @@ export class AssociationGraphService {
       });
 
       for (const directorship of appointments.data) {
+        // The third bound, and the backstop on the other two: a handful of officers each with a
+        // few hundred directorships passes both per-call caps and still produces a graph nobody
+        // can review. Recorded once — the first time it binds — rather than once per discarded
+        // edge, which would bury the coverage statement in identical lines.
+        if (assertions.length >= snapshot.bounds.maxEdgesPerSnapshot) {
+          if (!boundsApplied.some((b) => b.bound === 'MAX_EDGES_PER_SNAPSHOT')) {
+            boundsApplied.push({
+              bound: 'MAX_EDGES_PER_SNAPSHOT',
+              limit: snapshot.bounds.maxEdgesPerSnapshot,
+              available: null,
+              appliedTo: `officer ${candidate.officerRef}`,
+            });
+          }
+          break;
+        }
+
         const scope = edgeInScope(directorship.tenure, snapshot.scope, {
           value: input.now.toISOString().slice(0, 10),
           precision: 'DAY',
@@ -627,18 +690,55 @@ export class AssociationGraphService {
       }
     }
 
-    const coverage: SnapshotCoverage = {
-      outcome:
-        boundsApplied.length > 0 || officers.status === 'BOUNDED' ? 'INCOMPLETE' : 'COMPLETE',
-      detail:
-        boundsApplied.length > 0
-          ? 'Some of the requested association work was bounded or failed; see boundsApplied.'
-          : null,
+    const coverage = this.summarise(snapshot, {
       sourceId: registry.descriptor.sourceId,
+      answered: true,
+      failure: null,
       boundsApplied,
-    };
+      extraLimitations: partialFailures,
+      notAskedReason: null,
+    });
 
     return this.commit({ snapshot, now: input.now, coverage, companies, assertions, candidates });
+  }
+
+  /**
+   * Turn what happened into the snapshot's coverage.
+   *
+   * The decision itself is pure (`summariseAssociationCoverage`); this adds the two things it
+   * cannot know — the bound problems the policy carried, and any per-officer failure that is a
+   * limitation without being a bound.
+   */
+  private summarise(
+    snapshot: GraphSnapshotRecord,
+    input: {
+      readonly sourceId: string | null;
+      readonly answered: boolean;
+      readonly failure: string | null;
+      readonly boundsApplied: readonly BoundApplication[];
+      readonly extraLimitations?: readonly string[];
+      readonly notAskedReason: string | null;
+    },
+  ): SnapshotCoverage {
+    const summary = summariseAssociationCoverage({
+      sourceId: input.sourceId,
+      sourceName: 'Company register (FR-02 association graph)',
+      jurisdiction: snapshot.jurisdictions[0] ?? 'unspecified',
+      answered: input.answered,
+      failure: input.failure,
+      boundsApplied: input.boundsApplied,
+      policyProblems: [...snapshot.boundProblems, ...(input.extraLimitations ?? [])],
+      notAskedReason: input.notAskedReason,
+    });
+
+    return {
+      outcome: summary.outcome,
+      detail: summary.detail,
+      sourceId: input.sourceId,
+      boundsApplied: input.boundsApplied,
+      limitations: summary.limitations,
+      sourceOutcome: summary.sourceOutcome,
+    };
   }
 
   /** Resolve every candidate. Pure work, separated so the loop above stays about I/O. */
@@ -807,6 +907,8 @@ export class AssociationGraphService {
       status: snapshot.status,
       scope: snapshot.scope,
       coverage: snapshot.coverage,
+      bounds: snapshot.bounds,
+      policyVersion: snapshot.policyVersion,
       edges,
       companies,
       unresolvedCandidates: candidates,

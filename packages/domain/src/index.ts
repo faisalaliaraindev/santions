@@ -46,3 +46,5 @@ export * from './identity/name-frequency-distribution.js';
 
 export * from './association/officer-resolution.js';
 export * from './association/scope.js';
+export * from './association/bounds.js';
+export * from './association/association-coverage.js';

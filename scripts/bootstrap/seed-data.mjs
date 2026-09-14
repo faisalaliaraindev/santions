@@ -291,17 +291,7 @@ export async function seedData(db) {
       {
         tenantId: tenant.tenantId,
         version: 1,
-        // `historical_directorships` (FR-02, Phase D step D3) is granted to **one** tenant on
-        // purpose. A former-director search is selectable only under an approved historical
-        // scope, so the two seeded tenants differ in exactly that: `tenant-beta` holds it and
-        // `tenant-alpha` does not. Granting it to both would make the refusal path untestable
-        // against the seeded stack, and the refusal is the half that matters — a tenant who
-        // asks for history and is silently given current-only has been answered a narrower
-        // question than the one they asked.
-        capabilities:
-          tenant.tenantId === 'tenant-beta'
-            ? ['adverse_media', 'historical_directorships']
-            : ['adverse_media'],
+        capabilities: ['adverse_media'],
         environments: ['sandbox'],
         status: 'ACTIVE',
         activatedAt: now,
@@ -344,8 +334,24 @@ export async function seedData(db) {
         tenantId: tenant.tenantId,
         version: 1,
         status: 'ACTIVE',
-        historicalScopeApproved: false,
+        // FR-02: a former-director search is selectable only under an **approved** historical
+        // scope, and this is that approval. Granted to exactly one seeded tenant on purpose, so
+        // both paths are exercised against the bootstrapped stack — granting it to both would
+        // leave the refusal untested, and the refusal is the half that matters. A tenant who
+        // asks for history and is silently given current-only has been answered a narrower
+        // question than the one they asked, with nothing saying so.
+        historicalScopeApproved: tenant.tenantId === 'tenant-beta',
         queryPlanCap: 200,
+        // The FR-02 one-hop traversal bounds (Phase D step D4). Configuration, not constants:
+        // a customer screening shell-company networks can have these raised through the D1
+        // approval lifecycle without a deployment, and the run pins the version it used so an
+        // old report keeps explaining its own truncation. `resolveGraphBounds` validates them
+        // and falls back to documented defaults rather than failing a search over a typo.
+        associationBounds: {
+          maxOfficerCandidates: 25,
+          maxCompaniesPerOfficer: 50,
+          maxEdgesPerSnapshot: 500,
+        },
         outcomeUnknownAfterDays: 180,
         // D-012: configurable, revisable without a deployment. A legal hold overrides it.
         evidenceRetentionDays: SEED_EVIDENCE_RETENTION_DAYS,

@@ -625,3 +625,64 @@ The consequence, stated wherever it matters: with no distribution the FR-08 top-
 never fires for Costa Rican names, so a common name reaches a higher identity grade on the same
 evidence than it would with the distribution loaded. It is blocked on the SEC-05 aggregate-only
 approval for the TSE padrón (D-011), not on engineering.
+
+---
+
+## Traversal bounds and association coverage (Phase D step D4)
+
+### The bounds are policy, not constants
+
+FR-02's three bounds — `maxOfficerCandidates`, `maxCompaniesPerOfficer`, `maxEdgesPerSnapshot` —
+live on the tenant's **policy version**, are read through `PolicyService`, and are **pinned onto
+the snapshot at creation**. Decision D-028.
+
+Pinning is the load-bearing part. A bound raised in October must not change what a search from
+March is reported to have covered, or the truncation note on that report stops matching the graph
+printed beside it. `PolicyService.loadPinned` reads by version with no `status` filter for the
+same reason: a superseded version is still the one that run used.
+
+A bad bound never fails a search. `resolveGraphBounds` falls back to a documented default per
+field and returns a problem string that travels into the coverage statement — stated rather than
+silent, because a run that quietly fell back is a run whose truncation nobody can explain. Each
+bound also has a ceiling: a policy may narrow the traversal, never remove the limit.
+
+### A bound that binds is a record, not a sentence
+
+Every bound produces a `BoundApplication` — which bound, its limit, how many existed (null when
+the source does not say), and what it applied to. `describeBound` renders it for a reviewer.
+Storing only the rendered sentence, as D3 did, meant the only way to ask "did the edge cap bind?"
+was to match on a string.
+
+The `available: null` case is deliberate: "more than 25, we do not know how many" and "25 of 312"
+lead a reviewer to different next steps.
+
+### Three coverage outcomes that must not collapse
+
+| Outcome      | Meaning                                                            | Run outcome          |
+| :----------- | :----------------------------------------------------------------- | :------------------- |
+| `COMPLETE`   | The register answered and the answer was within bounds             | `COMPLETED`          |
+| `INCOMPLETE` | We asked, and something failed or a bound bound                    | `FAILED` / `PARTIAL` |
+| `UNKNOWN`    | **We never asked** — no approved register covers this jurisdiction | `SKIPPED`            |
+
+`summariseAssociationCoverage` is the pure mapping. Both `INCOMPLETE` and `UNKNOWN` make the run
+`INCOMPLETE` — correct, since in both cases the run covered less than a reader might assume — but
+they map to **different** source outcomes with **different** details, so "we never asked" and "we
+asked and it failed" never become the same fact. A bound that binds is `PARTIAL` with
+`TRUNCATED_BY_PLAN`, not `FAILED`: a bounded traversal still produced real associations.
+
+None of the three ever means "no associations exist". Where the phrase appears in a detail
+string, it appears as a denial of the inference.
+
+### What reporting in writes, and what it leaves alone
+
+`SearchesService.recordAssociationCoverage` stores the source outcome on the run, re-runs
+`aggregateRun`, and writes back **only `coverage`**. Decision D-030.
+
+`execution` and `findings` are statements about the whole run, and with a single failed source
+outcome `aggregateRun` correctly concludes `FAILED` — right for a run in which nothing else ran,
+wrong for a real one whose person search is still to come. Whoever finishes the run owns those.
+
+This is what makes FR-02's degraded execution real: a registry outage records a `FAILED` source
+outcome and an `INCOMPLETE` coverage, and no path in that method fails, deletes or rolls back the
+run. Outcomes are keyed by source and replaced rather than appended, so a redelivered message
+cannot make one outage look like three.

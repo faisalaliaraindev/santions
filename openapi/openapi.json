@@ -1317,11 +1317,47 @@
               "outcome": { "$ref": "#/components/schemas/AssociationCoverage" },
               "detail": { "type": "string", "nullable": true },
               "sourceId": { "type": "string", "nullable": true },
-              "boundsApplied": { "type": "array", "items": { "type": "string" } }
+              "boundsApplied": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "bound": {
+                      "type": "string",
+                      "enum": [
+                        "MAX_OFFICER_CANDIDATES",
+                        "MAX_COMPANIES_PER_OFFICER",
+                        "MAX_EDGES_PER_SNAPSHOT"
+                      ]
+                    },
+                    "limit": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+                    "available": { "type": "integer", "nullable": true },
+                    "appliedTo": { "type": "string" }
+                  },
+                  "required": ["bound", "limit", "available", "appliedTo"],
+                  "additionalProperties": false
+                }
+              },
+              "limitations": { "type": "array", "items": { "type": "string" } }
             },
-            "required": ["outcome", "detail", "sourceId", "boundsApplied"],
+            "required": ["outcome", "detail", "sourceId", "boundsApplied", "limitations"],
             "additionalProperties": false
           },
+          "bounds": {
+            "type": "object",
+            "properties": {
+              "maxOfficerCandidates": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+              "maxCompaniesPerOfficer": {
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0
+              },
+              "maxEdgesPerSnapshot": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 }
+            },
+            "required": ["maxOfficerCandidates", "maxCompaniesPerOfficer", "maxEdgesPerSnapshot"],
+            "additionalProperties": false
+          },
+          "policyVersion": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
           "edges": { "type": "array", "items": { "$ref": "#/components/schemas/AssociationEdge" } },
           "companies": {
             "type": "array",
@@ -1361,6 +1397,8 @@
           "status",
           "scope",
           "coverage",
+          "bounds",
+          "policyVersion",
           "edges",
           "companies",
           "unresolvedCandidates",

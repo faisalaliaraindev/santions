@@ -12,7 +12,12 @@ import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
 import type { CancelSearchInput, CreateSearchInput, SearchSummary } from '@erly/adverse-contracts';
-import type { AssociationScope, Principal } from '@erly/adverse-domain';
+import {
+  aggregateRun,
+  type AssociationScope,
+  type Principal,
+  type SourceCoverageOutcome,
+} from '@erly/adverse-domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
 import { ApiException } from '../common/api-exception.js';
@@ -46,6 +51,11 @@ interface SearchRecord {
   readonly createdAt: Date;
   readonly completedAt: Date | null;
   readonly refreshOfSearchId: string | null;
+  /**
+   * What each source contributed to coverage (D4). Keyed by source: re-recording replaces,
+   * so a redelivered message cannot make one outage look like three.
+   */
+  readonly sourceOutcomes?: readonly SourceCoverageOutcome[];
   readonly progress: SearchSummary['progress'];
   /** Optimistic concurrency for review actions and cancellation (FR-12). */
   readonly revision: number;
@@ -114,11 +124,12 @@ export class SearchesService {
 
     const pinnedVersions = await this.entitlements.pinVersions(tenantId, entitlement.version);
 
-    // FR-02: a former-director search needs an approved historical scope. Checked here, before
-    // anything is written, so an unentitled request is refused rather than silently narrowed to
-    // current-only and returned as though it had answered the question asked.
-    const associationScope = this.associations.resolveScope({
-      capabilities: entitlement.capabilities,
+    // FR-02: a former-director search needs an approved historical scope, and the approval
+    // lives on the tenant's policy version. Checked here, before anything is written, so an
+    // unapproved request is refused rather than silently narrowed to current-only and returned
+    // as though it had answered the question asked.
+    const associationScope = await this.associations.resolveScope({
+      tenantId,
       includeFormerDirectorships: data.requestedScope.includeFormerDirectorships,
     });
 
@@ -228,6 +239,9 @@ export class SearchesService {
           subjectVersion: record.subjectVersion,
           jurisdictions: data.requestedScope.jurisdictions,
           scope: input.associationScope,
+          // The same version the run pins. The graph's bounds are resolved from exactly this
+          // one, so a bound raised later cannot change what this search is reported to cover.
+          policyVersion: pinnedVersions.policyVersion,
           now,
           session,
         });
@@ -498,6 +512,78 @@ export class SearchesService {
       { projection: { tenantId: 1, revision: 1, _id: 0 } },
     );
     return record === null ? null : { tenantId: record.tenantId, revision: record.revision };
+  }
+
+  /**
+   * Record what the association graph contributed to this run's coverage (Phase D step D4).
+   *
+   * FR-02's degraded-execution rule lives here: a registry outage does not fail the search. It
+   * records a `FAILED` source outcome, the run's **coverage** becomes `INCOMPLETE`, and the run
+   * itself carries on — there is no path in this method that marks a run failed or deletes it.
+   *
+   * **Only the coverage dimension is written, deliberately.** `aggregateRun` also returns
+   * `execution` and `findings`, and applying those here would be wrong: they are statements
+   * about the whole run, and the only work that has happened at this point is the graph. With a
+   * single failed source outcome `aggregateRun` correctly concludes `FAILED` — correct for a run
+   * in which nothing else ran, and quite wrong for a real run whose person search is still to
+   * come. Whoever finishes the run owns those two (Phase E); coverage is knowable now, because
+   * it is a statement about *what was searched*, and this source's contribution is settled.
+   *
+   * The outcome is stored on the run as well as on the snapshot, keyed by source, so re-running
+   * this replaces rather than appends. A redelivered message must not make one outage look like
+   * three.
+   */
+  async recordAssociationCoverage(input: {
+    readonly tenantId: string;
+    readonly searchId: string;
+  }): Promise<SearchSummary> {
+    const graph = await this.associations.loadForSearch({
+      tenantId: input.tenantId,
+      searchId: input.searchId,
+    });
+
+    const outcome = graph.coverage.sourceOutcome;
+    if (outcome === null) {
+      // Still PENDING. Nothing has been attempted, so there is nothing to report — and
+      // writing a coverage figure now would describe work that has not happened.
+      return this.findById(input.tenantId, input.searchId);
+    }
+
+    const current = await this.searches.findOne({
+      tenantId: input.tenantId,
+      searchId: input.searchId,
+    });
+    if (current === null) {
+      throw ApiException.notFound('Search', `tenant=${input.tenantId} search=${input.searchId}`);
+    }
+
+    const sourceOutcomes = [
+      ...(current.sourceOutcomes ?? []).filter((o) => o.sourceId !== outcome.sourceId),
+      outcome,
+    ];
+
+    const aggregate = aggregateRun({
+      cancelled: current.execution === 'CANCELLED',
+      // Both zero until the evidence pipeline exists. Officer candidates are deliberately **not**
+      // counted as unresolved leads: a namesake in a company register is not an adverse finding,
+      // and counting one would make a run report `UNRESOLVED` findings because somebody shares
+      // the subject's name.
+      supportedFindingCount: 0,
+      unresolvedLeadCount: 0,
+      sourceOutcomes,
+      anyWorkDispatched: true,
+    });
+
+    const updated = await this.searches.findOneAndUpdate(
+      { tenantId: input.tenantId, searchId: input.searchId },
+      { $set: { sourceOutcomes, coverage: aggregate.coverage } },
+      { returnDocument: 'after' },
+    );
+    /* c8 ignore next 3 -- the document was read immediately above in the same request. */
+    if (updated === null) {
+      throw ApiException.notFound('Search', `tenant=${input.tenantId} search=${input.searchId}`);
+    }
+    return toWire(updated);
   }
 
   /** Tenant scoping is in the query, never a check afterwards (SEC-01). */

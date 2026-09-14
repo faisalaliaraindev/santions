@@ -66,6 +66,36 @@ export const identityFactorSchema = z
   })
   .strict();
 
+/** The three FR-02 traversal bounds, as the run resolved them from its pinned policy version. */
+export const graphBoundsSchema = z
+  .object({
+    maxOfficerCandidates: z.number().int().positive(),
+    maxCompaniesPerOfficer: z.number().int().positive(),
+    maxEdgesPerSnapshot: z.number().int().positive(),
+  })
+  .strict();
+
+export const graphBoundKindSchema = z.enum([
+  'MAX_OFFICER_CANDIDATES',
+  'MAX_COMPANIES_PER_OFFICER',
+  'MAX_EDGES_PER_SNAPSHOT',
+]);
+
+/** One bound, binding once, with what it applied to and how much was left behind. */
+export const boundApplicationSchema = z
+  .object({
+    bound: graphBoundKindSchema,
+    limit: z.number().int().positive(),
+    /**
+     * How many existed, when the source says. Null when it does not — which is a different
+     * fact, and leads a reviewer somewhere different: "more than 25, unknown how many" is a
+     * reason to narrow the search, "25 of 312" is a reason to raise the bound.
+     */
+    available: z.number().int().nullable(),
+    appliedTo: z.string(),
+  })
+  .strict();
+
 export const associationEdgeSchema = z
   .object({
     assertionId: z.string(),
@@ -133,10 +163,23 @@ export const associationGraphSchema = z
         outcome: associationCoverageSchema,
         detail: z.string().nullable(),
         sourceId: z.string().nullable(),
-        /** Every bound that bound, named. A silently truncated graph is a narrower search. */
-        boundsApplied: z.array(z.string()),
+        /**
+         * Every bound that bound, as structured rows. A consumer can count or filter these;
+         * `limitations` carries the same information rendered for a reviewer. A silently
+         * truncated graph is a narrower search reported as a complete one.
+         */
+        boundsApplied: z.array(boundApplicationSchema),
+        /** Bounds and per-officer failures, in the words a reviewer reads. */
+        limitations: z.array(z.string()),
       })
       .strict(),
+    /**
+     * The traversal bounds this search actually ran under, and the policy version they came
+     * from. Returned so an old report explains its own truncation: bounds raised since then
+     * must not change what this search is understood to have covered.
+     */
+    bounds: graphBoundsSchema,
+    policyVersion: z.number().int().positive(),
     edges: z.array(associationEdgeSchema),
     companies: z.array(associationCompanySchema),
     unresolvedCandidates: z.array(unresolvedCandidateSchema),

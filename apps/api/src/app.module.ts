@@ -63,6 +63,7 @@ import { SubjectsService } from './subjects/subjects.service.js';
 import { StartupService } from './startup.service.js';
 import { ApiKeyService } from './tenancy/api-key.service.js';
 import { EntitlementsService } from './tenancy/entitlements.service.js';
+import { PolicyService } from './tenancy/policy.service.js';
 
 // Re-exported for convenience; defined in ./tokens.js to avoid a circular import.
 export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
@@ -386,6 +387,14 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [OutboxService, QUEUE_PORT],
     },
     {
+      // The pinned policy version: the FR-02 traversal bounds and the historical-scope
+      // approval (Phase D step D4). Read by version, never "the current one" — a run must be
+      // explainable under the rules it actually ran with.
+      provide: PolicyService,
+      useFactory: (db: Db) => new PolicyService(db),
+      inject: [MONGO_DB],
+    },
+    {
       // FR-02 (Phase D step D3). Given the whole adapter set rather than one registry, because
       // which register answers depends on the jurisdiction the search asked for, and that is a
       // per-search question rather than a wiring one.
@@ -397,6 +406,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         capabilities: CapabilityCoverageService,
         transactions: TransactionRunner,
         audit: AuditService,
+        policies: PolicyService,
         config: AppConfig,
       ) =>
         new AssociationGraphService(
@@ -406,6 +416,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           capabilities,
           transactions,
           audit,
+          policies,
           config.mode,
         ),
       inject: [
@@ -415,6 +426,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         CapabilityCoverageService,
         TransactionRunner,
         AuditService,
+        PolicyService,
         APP_CONFIG,
       ],
     },

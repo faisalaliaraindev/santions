@@ -22,10 +22,7 @@ import type { CreateSearchInput } from '../../packages/contracts/src/index.js';
 import type { Principal } from '../../packages/domain/src/index.js';
 
 import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
-import {
-  AssociationGraphService,
-  HISTORICAL_DIRECTORSHIPS,
-} from '../../apps/api/src/associations/association-graph.service.js';
+import { AssociationGraphService } from '../../apps/api/src/associations/association-graph.service.js';
 import {
   AuditService,
   LocalAuditCheckpointWriter,
@@ -50,6 +47,7 @@ import { buildSourceAdapters } from '../../apps/api/src/sources/sources.registry
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
 import { EntitlementsService } from '../../apps/api/src/tenancy/entitlements.service.js';
+import { PolicyService } from '../../apps/api/src/tenancy/policy.service.js';
 
 const MONGODB_URI =
   process.env['MONGODB_URI'] ??
@@ -76,8 +74,41 @@ function graphOver(adapters: SourceAdapterSet): AssociationGraphService {
     new CapabilityCoverageService(db),
     runner,
     audit,
+    new PolicyService(db),
     'mock',
   );
+}
+
+/**
+ * Seed a policy version for this suite's own tenant.
+ *
+ * D4 reads the FR-02 traversal bounds and the historical-scope approval from the tenant's
+ * **pinned** policy version, so a suite that exercises either has to own one. Writing versions
+ * here rather than borrowing a bootstrapped tenant's also means a test can pin a *second*
+ * version with tight bounds and prove that the run uses the version it was created under.
+ */
+async function seedPolicy(input: {
+  readonly version: number;
+  readonly historicalScopeApproved?: boolean;
+  readonly associationBounds?: Record<string, unknown>;
+}): Promise<number> {
+  await db.collection('policyVersions').updateOne(
+    { tenantId: TENANT, version: input.version },
+    {
+      $set: {
+        tenantId: TENANT,
+        version: input.version,
+        status: input.version === 1 ? 'ACTIVE' : 'SUPERSEDED',
+        historicalScopeApproved: input.historicalScopeApproved ?? false,
+        ...(input.associationBounds === undefined
+          ? {}
+          : { associationBounds: input.associationBounds }),
+        mode: 'MOCK',
+      },
+    },
+    { upsert: true },
+  );
+  return input.version;
 }
 
 function mockAdapters(): SourceAdapterSet {
@@ -95,6 +126,8 @@ async function pendingSnapshotFor(input: {
   readonly knownCompanies?: readonly string[] | undefined;
   readonly jurisdictions?: readonly string[] | undefined;
   readonly scope?: 'CURRENT_ONLY' | 'INCLUDE_FORMER' | undefined;
+  /** Which policy version to pin. Defaults to 1, the one seeded in `beforeAll`. */
+  readonly policyVersion?: number | undefined;
   readonly graph: AssociationGraphService;
 }): Promise<{ searchId: string; snapshotId: string }> {
   const subject = await subjects.create({
@@ -123,6 +156,7 @@ async function pendingSnapshotFor(input: {
         subjectVersion: subject.version,
         jurisdictions: input.jurisdictions ?? ['CR'],
         scope: input.scope ?? 'CURRENT_ONLY',
+        policyVersion: input.policyVersion ?? 1,
         now: NOW,
         session,
       }),
@@ -150,6 +184,11 @@ beforeAll(async () => {
     subjects.ensureIndexes(),
     audit.ensureIndexes(),
   ]);
+
+  // Version 1: the default bounds, no historical scope. Version 2: a deliberately tight
+  // officer cap, used to prove that a run uses the bounds of the version it pinned.
+  await seedPolicy({ version: 1 });
+  await seedPolicy({ version: 2, associationBounds: { maxOfficerCandidates: 3 } });
 }, 30_000);
 
 afterAll(async () => {
@@ -162,6 +201,7 @@ afterAll(async () => {
     'unresolvedOfficerCandidates',
     'subjectVersions',
     'auditEvents',
+    'policyVersions',
   ]) {
     await db.collection(collection).deleteMany({ tenantId: TENANT });
   }
@@ -414,22 +454,223 @@ describe('T20 — degraded execution and honest coverage', () => {
   });
 
   it('names the bound when one binds, rather than truncating quietly', async () => {
-    const adapters = mockAdapters();
-    const graph = new AssociationGraphService(
-      db,
-      subjects,
-      adapters,
-      new CapabilityCoverageService(db),
-      runner,
-      audit,
-      'mock',
-      { maxOfficerCandidates: 3, maxCompaniesPerOfficer: 50 },
-    );
-    const { searchId } = await pendingSnapshotFor({ fullName: HIGH_FREQUENCY_NAME, graph });
+    // The bound comes from policy version 2, which caps officer candidates at 3.
+    const graph = graphOver(mockAdapters());
+    const { searchId } = await pendingSnapshotFor({
+      fullName: HIGH_FREQUENCY_NAME,
+      policyVersion: 2,
+      graph,
+    });
     const view = await graph.build({ tenantId: TENANT, searchId, now: NOW });
 
     expect(view.coverage.outcome).toBe('INCOMPLETE');
-    expect(view.coverage.boundsApplied.join(' ')).toMatch(/capped at 3/);
+    expect(view.coverage.boundsApplied).toHaveLength(1);
+    expect(view.coverage.boundsApplied[0]?.bound).toBe('MAX_OFFICER_CANDIDATES');
+    expect(view.coverage.boundsApplied[0]?.limit).toBe(3);
+    // The register said how many exist, so the reviewer is told the size of the gap rather
+    // than merely that there is one.
+    expect(view.coverage.boundsApplied[0]?.available).toBe(12);
+    expect(view.coverage.limitations.join(' ')).toMatch(/capped at 3/);
+  });
+
+  it('reports a bounded traversal as PARTIAL to the run, not as a failure', async () => {
+    const graph = graphOver(mockAdapters());
+    const { searchId } = await pendingSnapshotFor({
+      fullName: HIGH_FREQUENCY_NAME,
+      policyVersion: 2,
+      graph,
+    });
+    const view = await graph.build({ tenantId: TENANT, searchId, now: NOW });
+
+    // A bounded traversal still produced real associations; an outage produced none. Collapsing
+    // the two would make a capped graph read as a broken register.
+    expect(view.coverage.sourceOutcome?.outcome).toBe('PARTIAL');
+    expect(view.coverage.sourceOutcome?.truncation).toBe('TRUNCATED_BY_PLAN');
+  });
+
+  it('distinguishes "never asked" from "asked and failed" in the run outcome too', async () => {
+    const neverAsked = graphOver(mockAdapters());
+    const a = await pendingSnapshotFor({
+      fullName: SHARED_NAME,
+      jurisdictions: ['GB'],
+      graph: neverAsked,
+    });
+    const skipped = await neverAsked.build({ tenantId: TENANT, searchId: a.searchId, now: NOW });
+
+    const brokenAdapters = mockAdapters();
+    (brokenAdapters.companyRegistry as MockCompanyRegistryAdapter).failWith({ httpStatus: 503 });
+    const broken = graphOver(brokenAdapters);
+    const b = await pendingSnapshotFor({ fullName: SHARED_NAME, graph: broken });
+    const failed = await broken.build({ tenantId: TENANT, searchId: b.searchId, now: NOW });
+
+    // Both make the run's coverage incomplete, and they must not become the same fact on the
+    // way there: one was never asked, the other was asked and did not answer.
+    expect(skipped.coverage.sourceOutcome?.outcome).toBe('SKIPPED');
+    expect(failed.coverage.sourceOutcome?.outcome).toBe('FAILED');
+    expect(skipped.coverage.sourceOutcome?.detail).toMatch(/none was asked/i);
+    expect(failed.coverage.sourceOutcome?.detail).toMatch(/did not answer/i);
+  });
+
+  it('uses the bounds of the policy version the run pinned, not the current one', async () => {
+    // Version 1 is ACTIVE and generous; version 2 is tight. A run pinned to 1 must not pick up
+    // 2's cap, or an old report would stop matching the graph beside it.
+    const graph = graphOver(mockAdapters());
+    const { searchId } = await pendingSnapshotFor({
+      fullName: HIGH_FREQUENCY_NAME,
+      policyVersion: 1,
+      graph,
+    });
+    const view = await graph.build({ tenantId: TENANT, searchId, now: NOW });
+
+    expect(view.policyVersion).toBe(1);
+    expect(view.bounds.maxOfficerCandidates).toBe(25);
+    expect(view.coverage.boundsApplied).toEqual([]);
+  });
+
+  it('falls back to a documented default rather than failing a search over a bad bound', async () => {
+    await seedPolicy({ version: 3, associationBounds: { maxOfficerCandidates: -4 } });
+    const graph = graphOver(mockAdapters());
+    const { searchId } = await pendingSnapshotFor({
+      fullName: SHARED_NAME,
+      dateOfBirth: { value: '1972-03-15', precision: 'DAY' },
+      policyVersion: 3,
+      graph,
+    });
+    const view = await graph.build({ tenantId: TENANT, searchId, now: NOW });
+
+    // The search ran. The typo is reported rather than swallowed — a run that silently fell
+    // back to defaults is a run whose truncation nobody can explain afterwards.
+    expect(view.bounds.maxOfficerCandidates).toBe(25);
+    expect(view.coverage.limitations.join(' ')).toMatch(/not a positive whole number/i);
+    expect(view.coverage.outcome).toBe('INCOMPLETE');
+  });
+});
+
+describe('degraded execution — the run survives a registry outage (FR-02)', () => {
+  /**
+   * The full path, against the real replica set: accept a search, break the register, build the
+   * graph, and record what it contributed.
+   *
+   * What this proves today and what it does not: the run is **not** failed, deleted or rolled
+   * back by a registry outage, and its coverage reports the gap with the source named. What it
+   * cannot yet prove is that the *person search* completed alongside it, because there is no job
+   * handler until Phase E. That half of T20 stays open, and the brief's checklist says so.
+   */
+  async function runWithBrokenRegistry(): Promise<{
+    searchId: string;
+    searches: SearchesService;
+  }> {
+    const brokenAdapters = mockAdapters();
+    (brokenAdapters.companyRegistry as MockCompanyRegistryAdapter).failWith({ httpStatus: 503 });
+    const graph = graphOver(brokenAdapters);
+
+    const searches = new SearchesService(
+      db,
+      new EntitlementsService(db),
+      subjects,
+      runner,
+      audit,
+      new OutboxService(db),
+      new IndexerService(db, new InMemorySearchIndex(), new SourceDocumentService(db)),
+      new StageExecutionService(db),
+      graph,
+    );
+
+    const created = await searches.create({
+      principal: {
+        subject: 'reviewer-d4',
+        kind: 'HUMAN',
+        tenantId: 'tenant-alpha',
+        roles: [],
+        scopes: [],
+        environment: 'sandbox',
+        breakGlass: null,
+      },
+      data: {
+        environment: 'sandbox',
+        subjectSnapshot: {
+          fullName: SHARED_NAME,
+          aliases: [],
+          countryContext: ['CR'],
+          knownCompanies: [],
+          purpose: 'CUSTOMER_ONBOARDING',
+        },
+        requestedScope: {
+          jurisdictions: ['CR'],
+          languages: ['es'],
+          includeFormerDirectorships: false,
+          fromDate: null,
+        },
+      },
+      now: NOW,
+    });
+
+    await graph.build({ tenantId: 'tenant-alpha', searchId: created.searchId, now: NOW });
+    return { searchId: created.searchId, searches };
+  }
+
+  async function cleanUp(searchId: string): Promise<void> {
+    await db.collection('graphSnapshots').deleteMany({ tenantId: 'tenant-alpha', searchId });
+    await db.collection('searchRuns').deleteMany({ searchId });
+    await db.collection('auditEvents').deleteMany({ 'target.id': searchId });
+  }
+
+  it('leaves the run alive, with coverage naming the gap', async () => {
+    const { searchId, searches } = await runWithBrokenRegistry();
+    try {
+      const run = await searches.recordAssociationCoverage({
+        tenantId: 'tenant-alpha',
+        searchId,
+      });
+      // Alive, and honest about what it covered.
+      expect(run.searchId).toBe(searchId);
+      expect(run.coverage).toBe('INCOMPLETE');
+    } finally {
+      await cleanUp(searchId);
+    }
+  });
+
+  it('does not decide the run’s execution or findings from one source', async () => {
+    const { searchId, searches } = await runWithBrokenRegistry();
+    try {
+      const run = await searches.recordAssociationCoverage({
+        tenantId: 'tenant-alpha',
+        searchId,
+      });
+      // `aggregateRun` would conclude FAILED from a single failed source — correct for a run in
+      // which nothing else ran, and wrong for a real one whose person search is still to come.
+      // Only coverage is written here; whoever finishes the run owns the other two.
+      expect(run.execution).toBe('QUEUED');
+      expect(run.findings).toBe('NOT_EVALUATED');
+    } finally {
+      await cleanUp(searchId);
+    }
+  });
+
+  it('records the outage once, however many times it is reported', async () => {
+    const { searchId, searches } = await runWithBrokenRegistry();
+    try {
+      await searches.recordAssociationCoverage({ tenantId: 'tenant-alpha', searchId });
+      await searches.recordAssociationCoverage({ tenantId: 'tenant-alpha', searchId });
+
+      const stored = await db
+        .collection<{ sourceOutcomes?: { sourceId: string }[] }>('searchRuns')
+        .findOne({ searchId });
+      // A redelivered message must not make one outage look like three.
+      expect(stored?.sourceOutcomes).toHaveLength(1);
+    } finally {
+      await cleanUp(searchId);
+    }
+  });
+
+  it('writes nothing while the graph is still pending', async () => {
+    // Reporting a coverage figure before anything has been attempted would describe work that
+    // has not happened.
+    const graph = graphOver(mockAdapters());
+    const { searchId } = await pendingSnapshotFor({ fullName: SHARED_NAME, graph });
+    const view = await graph.loadForSearch({ tenantId: TENANT, searchId });
+    expect(view.status).toBe('PENDING');
+    expect(view.coverage.sourceOutcome).toBeNull();
   });
 });
 
@@ -478,9 +719,10 @@ describe('the historical scope needs an approval (FR-02)', () => {
     );
   }
 
-  it('refuses a tenant that does not hold it, rather than narrowing the search silently', async () => {
-    // `tenant-alpha` holds `adverse_media` only. A silent downgrade to current-only would
-    // answer a narrower question than the one asked and label it as though it had not.
+  it('refuses a tenant whose policy does not approve it, rather than narrowing silently', async () => {
+    // `tenant-alpha`'s active policy version sets `historicalScopeApproved: false`. A silent
+    // downgrade to current-only would answer a narrower question than the one asked and label
+    // it as though it had not.
     await expect(
       searchesFor().create({
         principal: principalFor('tenant-alpha'),
@@ -518,12 +760,28 @@ describe('the historical scope needs an approval (FR-02)', () => {
     await db.collection('auditEvents').deleteMany({ 'target.id': created.searchId });
   });
 
-  it('names the entitlement it needs, so the message is actionable', () => {
-    expect(HISTORICAL_DIRECTORSHIPS).toBe('historical_directorships');
+  it('names the policy field, so the refusal is actionable', async () => {
+    // The message must tell an administrator what to change. "Not entitled" would send them to
+    // the commercial plan, which is the wrong record entirely.
+    await expect(
+      searchesFor().create({
+        principal: principalFor('tenant-alpha'),
+        data: request('tenant-alpha'),
+        now: NOW,
+      }),
+    ).rejects.toThrow(/policy version/i);
+  });
+
+  it('reads the approval from the policy, so approving it is an audited, versioned change', async () => {
+    // The approval lives on the policy version rather than the entitlement, so granting it goes
+    // through the D1 four-eyes lifecycle and leaves a version a historical search can cite.
+    const policy = await new PolicyService(db).loadActive('tenant-beta');
+    expect(policy.historicalScopeApproved).toBe(true);
+    expect(policy.version).toBeGreaterThan(0);
   });
 
   it('cannot be reached by a mock-mode witness trick or any other back door', () => {
-    // The scope decision is entitlement state, not process mode. Asserted here so that a later
+    // The scope decision is policy state, not process mode. Asserted here so that a later
     // refactor cannot quietly make mock mode permissive.
     expect(MockModeWitness.forMode('LIVE')).toBeNull();
   });

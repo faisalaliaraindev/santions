@@ -9,8 +9,21 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 through D3
-> are done; D4 is next.**
+> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 through D4
+> are done; D5 is next.**
+>
+> **D4 made the graph's limits visible and configurable.** The three FR-02 traversal bounds live
+> on the tenant's **policy version**, go through the D1 four-eyes lifecycle, and are **pinned to
+> the run** — so an old report explains its own truncation under the bounds it actually used. A
+> bad bound falls back to a documented default and says so rather than failing the search. The
+> association source now contributes a `SourceCoverageOutcome` to the run, keeping "we never
+> asked" (`SKIPPED`) apart from "we asked and it failed" (`FAILED`) and from "a bound bound"
+> (`PARTIAL`). See `docs/decisions.md` D-028 through D-030.
+>
+> **D4 also corrected D3:** the historical-scope approval reads from the policy version's
+> `historicalScopeApproved`, not from a commercial entitlement capability. FR-02 calls it an
+> _approved_ scope, and the policy version is the record that carries approvals — and that a
+> historical search can cite.
 >
 > **D3 built the association graph:** officer resolution through the same FR-08 Axis A grading a
 > document match uses, so there is no register-specific notion of "matched enough";
@@ -116,12 +129,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **442 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **460 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**170 integration** tests and `pnpm test:security` **106 security** tests.
+**179 integration** tests and `pnpm test:security` **106 security** tests.
 
-Coverage is gated at 85/80 and currently reports 94.75% / 90.52% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 94.92% / 90.72% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by

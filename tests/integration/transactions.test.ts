@@ -29,6 +29,7 @@ import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-inde
 import { AssociationGraphService } from '../../apps/api/src/associations/association-graph.service.js';
 import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
 import { buildSourceAdapters } from '../../apps/api/src/sources/sources.registry.js';
+import { PolicyService } from '../../apps/api/src/tenancy/policy.service.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
@@ -676,6 +677,7 @@ function associationGraphFor(
     new CapabilityCoverageService(db),
     transactions,
     audit,
+    new PolicyService(db),
     'mock',
   );
 }

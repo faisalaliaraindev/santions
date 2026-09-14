@@ -747,3 +747,79 @@ silent narrowing is neither.
 `tenant-beta` is seeded with the entitlement and `tenant-alpha` without it, so both paths are
 exercised against the bootstrapped stack. Granting it to both would leave the refusal untested,
 and the refusal is the half that matters.
+
+---
+
+## D-028 — The traversal bounds are policy-version configuration, pinned to the run
+
+**Status:** Accepted · **Decided at:** Phase D step D4, 2026-09-14 · **Supersedes part of D-026**
+
+FR-02's three one-hop bounds — officer candidates, companies per officer, edges per snapshot —
+live on the tenant's **policy version** rather than in a constant or an environment variable.
+
+Three consequences, and all three are the reason:
+
+- a customer who screens shell-company networks can have them raised **without a deployment**;
+- raising them goes through the D1 four-eyes lifecycle, so it is an approved change with an
+  audit entry and a version number rather than a configuration edit nobody reviewed;
+- the run **pins** the version, so an old report explains its own truncation under the bounds it
+  actually used. A bound raised in October must not change what a search from March is reported
+  to have covered, or the truncation note stops matching the graph printed beside it.
+
+The resolved bounds are therefore copied onto the snapshot at creation, exactly as companies are
+copied per snapshot (D-026), and read from there at build time.
+
+**A bad bound does not fail the search.** `resolveGraphBounds` falls back to a documented default
+per field and returns a problem string that travels into the coverage statement. Throwing would
+take a screening run down over a configuration typo, which is the worse failure — but silently
+falling back would leave a run whose truncation nobody could explain, so the fallback is stated
+rather than quiet. There is also a ceiling per bound: a policy may narrow the traversal, never
+remove the limit.
+
+---
+
+## D-029 — The historical-scope approval lives on the policy version, not the entitlement
+
+**Status:** Accepted · **Decided at:** Phase D step D4, 2026-09-14 · **Corrects D-027**
+
+D3 gated a former-director search on a `historical_directorships` **entitlement capability**.
+That was the wrong record, and it duplicated a `historicalScopeApproved` field the seeded policy
+version already carried.
+
+FR-02 calls it an _approved_ historical scope. An entitlement describes **what a customer
+bought**; a policy version describes **what has been approved for them to do**, and the two are
+different questions with different owners. The policy version is also the one that goes through
+four eyes, writes an audit entry, and is pinned onto the run — so a historical search can cite
+the policy version that permitted it, which an entitlement check cannot provide.
+
+The refusal itself is unchanged and still the point: a tenant without the approval is **refused**
+with `INVALID_SCOPE`, never silently narrowed to current-only. The error names the policy field,
+so an administrator is sent to the record they actually have to change rather than to the
+commercial plan.
+
+`tenant-beta` is seeded with the approval and `tenant-alpha` without it, so both paths run
+against the bootstrapped stack. The entitlement capability added in D3 has been removed.
+
+---
+
+## D-030 — Only the coverage dimension is written when a source reports in
+
+**Status:** Accepted · **Decided at:** Phase D step D4, 2026-09-14
+
+`recordAssociationCoverage` stores the association source's `SourceCoverageOutcome` on the run,
+re-runs `aggregateRun`, and writes **only** `coverage` back. `execution` and `findings` are left
+alone.
+
+`aggregateRun` returns all three, and applying all three here would be wrong. Coverage is a
+statement about _what was searched_, and this source's contribution to it is settled the moment
+the graph is built. Execution and findings are statements about the **whole run** — and with a
+single failed source outcome `aggregateRun` correctly concludes `FAILED`, which is right for a
+run in which nothing else ran and quite wrong for a real one whose person search is still to
+come. Whoever finishes the run owns those two (Phase E).
+
+This is what makes FR-02's degraded execution true in practice: a registry outage records a
+`FAILED` source outcome and an `INCOMPLETE` coverage, and there is no path in the method that
+fails, deletes or rolls back the run.
+
+Outcomes are keyed by source and replaced rather than appended, so a redelivered message cannot
+make one outage look like three.

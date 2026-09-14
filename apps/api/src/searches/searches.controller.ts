@@ -244,7 +244,20 @@ function toAssociationWire(view: AssociationGraphView): AssociationGraph {
     snapshotId: view.snapshotId,
     status: view.status,
     scope: view.scope,
-    coverage: { ...view.coverage, boundsApplied: [...view.coverage.boundsApplied] },
+    coverage: {
+      outcome: view.coverage.outcome,
+      detail: view.coverage.detail,
+      sourceId: view.coverage.sourceId,
+      boundsApplied: view.coverage.boundsApplied.map((bound) => ({
+        bound: bound.bound,
+        limit: bound.limit,
+        available: bound.available,
+        appliedTo: bound.appliedTo,
+      })),
+      limitations: [...view.coverage.limitations],
+    },
+    bounds: view.bounds,
+    policyVersion: view.policyVersion,
     edges: view.edges.map((edge) => ({
       assertionId: edge.assertionId,
       officerRef: edge.officerRef,

@@ -1,6 +1,6 @@
 # Phase D — Sources, association graph and taxonomy administration
 
-**Gate:** G5 · **Status:** IN PROGRESS — D0 through D3 done, D4 next · **Prerequisite:** Phase C complete (it is)
+**Gate:** G5 · **Status:** IN PROGRESS — D0 through D4 done, D5 next · **Prerequisite:** Phase C complete (it is)
 
 ---
 
@@ -408,14 +408,14 @@ configured.
 - [x] D2 — all six ports defined; deterministic mocks for all six; one real `CompanyRegistryPort` adapter (UK Companies House, **GB only, not CR coverage**); every record carries `mode: "MOCK"` where applicable, and a mock cannot be constructed in live mode at all (decision D-022)
 - [x] D3 — `Company`, `AssociationAssertion`, `GraphSnapshot`; resolution is an identity grade through Axis A (decision D-025); the snapshot is created in the search-creation transaction and never rewritten (D-026); `GET /v1/searches/{searchId}/associations` serves it
 - [~] D3 — **absence recorded, which is the branch the brief allows.** No distribution is loaded: the TSE padrón needs the SEC-05 aggregate-only approval (D-011), which does not exist. `scripts/bootstrap/name-frequency.mjs` is the loader, refuses to invent data, and prints the gap and its cost on every bootstrap; the decile derivation is pure and tested
-- [ ] D4 — configurable one-hop bounds, visible when they bind; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` kept distinct; person-only degraded execution
+- [x] D4 — all three bounds configurable on the tenant policy version and pinned to the run (D-028), each producing a structured `BoundApplication` when it binds; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` kept distinct and mapped into the run without collapsing (D-030); a registry outage records a failed source outcome and leaves the run alive
 - [ ] D5 — `SourceHealth` separate from the immutable version; breaker over the FR-06 classes; budgets enforced; kill switch effective **mid-run**; licence expiry equivalent
 - [ ] D5 — two new rows appended to `docs/failure-injection-matrix.md`
 - [ ] D6 — lexicon audit blocks activation; a language cannot be enabled without a measured recall figure; effective-scope resolution exposed for Phase E
 - [ ] D6 — Spanish lexicon reviewed by a Spanish reader, **or** its unreviewed state recorded in the coverage statement and the handoff
 - [x] **T14** — two officers share a byte-identical name; the contradicted one is excluded, the near match is a `CANDIDATE_FOR_REVIEW` that attaches nothing, and only a second independent signal resolves either. Asserted in the pure resolver and against the real replica set
 - [x] **T15** — all five tenure labels; `YEAR`-precision appointment and missing resignation stored with their precision and never backfilled; approved historical scope enforced and refused without the entitlement (D-027)
-- [~] **T20** — outage, empty answer and bound overrun are three distinct statuses, tested separately, and each produces its own honest coverage on the snapshot without throwing. **That the person search itself completes in all three is D4**, when there is a run to complete
+- [~] **T20** — outage, empty answer and bound overrun are three distinct statuses, tested separately; each produces its own honest coverage on the snapshot and on the run, and a registry outage provably leaves the run alive with `INCOMPLETE` coverage. **Still open: that the person search itself completes**, which needs the Phase E job handler — there is no person search to complete yet
 - [ ] **T36** — a source suspended mid-run stops being used within that run; blocked actions and coverage gaps reported; a result produced before suspension is unchanged but reads as sourced from a since-suspended source
 - [x] **T45** — the proposer of a source, taxonomy or policy version cannot approve it; the denial is audited (and the audit survives the aborted transaction)
 - [ ] **T79** — a protected-characteristic term fails the build **and** is refused at activation
