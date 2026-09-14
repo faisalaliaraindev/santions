@@ -557,3 +557,71 @@ against the FR-05 field list at **submit** and again at **activation**, never at
 decision D-023 for why a draft is allowed to be incomplete. `mode` is not a content field: it is
 stamped on the envelope from the running configuration, and content that declares it is rejected
 (T55).
+
+---
+
+## The association graph (Phase D step D3)
+
+FR-02, in `apps/api/src/associations` with the decisions in `packages/domain/src/association`.
+
+### Resolution is an identity grade
+
+`resolveOfficer` builds an Axis A `IdentityFactor` list out of what a register published and
+hands it to the **same `gradeIdentity`** a document match uses. There is no register-specific
+notion of "matched enough"; a second one would drift from the document one and the two would
+disagree about the same person in the same run.
+
+| Grade          | Status                 | The graph may…                                   |
+| :------------- | :--------------------- | :----------------------------------------------- |
+| `CORROBORATED` | `RESOLVED`             | attach the companies and anchor queries on them  |
+| `PARTIAL`      | `CANDIDATE_FOR_REVIEW` | show the companies, anchor nothing               |
+| `WEAK`         | `UNRESOLVED`           | show the officer, attach nothing                 |
+| `CONTRADICTED` | `CONTRADICTED`         | nothing — the register says this is someone else |
+
+`attachesCompany` is stored on each edge rather than recomputed at display time: an edge can be
+resolved and still out of scope, and a boolean each consumer derives separately is a boolean
+they eventually derive differently.
+
+**Resolution runs twice per officer.** The officer search does not say which companies a
+register attributes to an officer, so the strongest signal — the client supplied company X and
+the register puts a person of that name in company X — is unknowable until after the one-hop.
+The first pass decides only whether asking is worth a call; the second, with the appointments
+known, is stored. Decision D-025.
+
+### Dates, currency and scope
+
+Currency is four values, not a boolean (decision D-024). A register's silence about a
+resignation is `CURRENT_PER_REGISTER_SILENCE` — in the default scope, because excluding it would
+make a current-only search return nothing against most registers, and **never** labelled
+confirmed. Attaching an _event_ to a tenure still goes through `labelTenure`, which answers
+`UNKNOWN` rather than `DURING_TENURE` whenever the dates cannot show the person still held the
+role. That is where FR-02's "an unknown end date never proves current status" actually bites.
+
+A former-director search without the `historical_directorships` entitlement is **refused**, not
+silently narrowed (decision D-027).
+
+### The snapshot
+
+`graphSnapshots` gets a `PENDING` row inside the search-creation transaction, so the run is
+pinned to one snapshot id from the moment it exists; `build()` populates it later, off the
+request path, because a registry outage must not fail search creation. Companies are copied per
+snapshot rather than shared, so a registry correction next month cannot rewrite what a
+historical search explained. A refresh links; nothing mutates. Decision D-026.
+
+Association coverage keeps three values apart: `COMPLETE`, `INCOMPLETE` (we asked and something
+failed or a bound bound) and `UNKNOWN` (**we never asked** — no approved register covers this
+jurisdiction). Costa Rica is the `UNKNOWN` case today, and reporting it as `INCOMPLETE` would
+imply an attempt that never happened.
+
+### The name-frequency prior is missing, and that is recorded rather than filled in
+
+No distribution is loaded for Costa Rica. `scripts/bootstrap/name-frequency.mjs` is the loader,
+requires a real counts file, and prints the gap and its cost on every bootstrap. The derivation
+(`assignDeciles`) is pure and tested, and draws its deciles on **population mass** rather than
+on the surname ranking — a rank-based split puts a moderately common name in the same band as a
+unique one, and the T71 penalty then fires for the wrong names.
+
+The consequence, stated wherever it matters: with no distribution the FR-08 top-decile penalty
+never fires for Costa Rican names, so a common name reaches a higher identity grade on the same
+evidence than it would with the distribution loaded. It is blocked on the SEC-05 aggregate-only
+approval for the TSE padrón (D-011), not on engineering.

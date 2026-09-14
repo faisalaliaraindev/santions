@@ -1,6 +1,6 @@
 # Phase D — Sources, association graph and taxonomy administration
 
-**Gate:** G5 · **Status:** IN PROGRESS — D0, D1 and D2 done, D3 next · **Prerequisite:** Phase C complete (it is)
+**Gate:** G5 · **Status:** IN PROGRESS — D0 through D3 done, D4 next · **Prerequisite:** Phase C complete (it is)
 
 ---
 
@@ -406,16 +406,16 @@ configured.
 - [x] D1 — the full FR-05 field list exists as `sourceContentSchema` and alpha-2 validation rejects "EU" / "MENA" / "SEA"; **conformance is enforced as of D2** at submit and at activation (decision D-023)
 - [x] D1 — the rights engine is `decideRights` / `clearForActivation` in `packages/domain/src/rights/`, default-deny, with model disclosure as its own operation, and prohibited collection methods non-approvable (named `decideFieldUse` in the outline)
 - [x] D2 — all six ports defined; deterministic mocks for all six; one real `CompanyRegistryPort` adapter (UK Companies House, **GB only, not CR coverage**); every record carries `mode: "MOCK"` where applicable, and a mock cannot be constructed in live mode at all (decision D-022)
-- [ ] D3 — `Company`, `AssociationAssertion`, `GraphSnapshot`; resolution is an identity grade; snapshot frozen and pinned to the run; `GET /v1/searches/{searchId}/associations` serves it
-- [ ] D3 — Costa Rican name-frequency distribution loaded into the shared `nameFrequencyProfiles`, or its absence recorded with what it costs
+- [x] D3 — `Company`, `AssociationAssertion`, `GraphSnapshot`; resolution is an identity grade through Axis A (decision D-025); the snapshot is created in the search-creation transaction and never rewritten (D-026); `GET /v1/searches/{searchId}/associations` serves it
+- [~] D3 — **absence recorded, which is the branch the brief allows.** No distribution is loaded: the TSE padrón needs the SEC-05 aggregate-only approval (D-011), which does not exist. `scripts/bootstrap/name-frequency.mjs` is the loader, refuses to invent data, and prints the gap and its cost on every bootstrap; the decile derivation is pure and tested
 - [ ] D4 — configurable one-hop bounds, visible when they bind; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` kept distinct; person-only degraded execution
 - [ ] D5 — `SourceHealth` separate from the immutable version; breaker over the FR-06 classes; budgets enforced; kill switch effective **mid-run**; licence expiry equivalent
 - [ ] D5 — two new rows appended to `docs/failure-injection-matrix.md`
 - [ ] D6 — lexicon audit blocks activation; a language cannot be enabled without a measured recall figure; effective-scope resolution exposed for Phase E
 - [ ] D6 — Spanish lexicon reviewed by a Spanish reader, **or** its unreviewed state recorded in the coverage statement and the handoff
-- [~] **T14** — the fixture holds two officers under one byte-identical name with disjoint companies, and `OfficerCandidate` carries no field an adapter could use to attach one; **the resolver that must not attach them is D3**
-- [~] **T15** — all five tenure labels produced from the fixture directorships, including the `YEAR`-precision appointment and the missing resignation; **approved-scope enforcement is D3**
-- [~] **T20** — outage, zero response and bound overrun are three distinct `SourceOutcome` statuses and are tested separately; **that the person search completes in all three is D4**
+- [x] **T14** — two officers share a byte-identical name; the contradicted one is excluded, the near match is a `CANDIDATE_FOR_REVIEW` that attaches nothing, and only a second independent signal resolves either. Asserted in the pure resolver and against the real replica set
+- [x] **T15** — all five tenure labels; `YEAR`-precision appointment and missing resignation stored with their precision and never backfilled; approved historical scope enforced and refused without the entitlement (D-027)
+- [~] **T20** — outage, empty answer and bound overrun are three distinct statuses, tested separately, and each produces its own honest coverage on the snapshot without throwing. **That the person search itself completes in all three is D4**, when there is a run to complete
 - [ ] **T36** — a source suspended mid-run stops being used within that run; blocked actions and coverage gaps reported; a result produced before suspension is unchanged but reads as sourced from a since-suspended source
 - [x] **T45** — the proposer of a source, taxonomy or policy version cannot approve it; the denial is audited (and the audit survives the aborted transaction)
 - [ ] **T79** — a protected-characteristic term fails the build **and** is refused at activation

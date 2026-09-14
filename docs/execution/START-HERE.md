@@ -9,8 +9,21 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0, D1 and D2
-> are done; D3 is next.**
+> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 through D3
+> are done; D4 is next.**
+>
+> **D3 built the association graph:** officer resolution through the same FR-08 Axis A grading a
+> document match uses, so there is no register-specific notion of "matched enough";
+> `Company`/`AssociationAssertion`/`GraphSnapshot` with the snapshot created inside the
+> search-creation transaction and never rewritten; and `GET /v1/searches/{searchId}/associations`
+> serving the frozen graph. **A `PARTIAL` grade does not attach a company** — it is a candidate a
+> reviewer may act on, and nothing anchors a query to it (T14). See `docs/decisions.md` D-024
+> through D-027.
+>
+> **No Costa Rican name-frequency distribution is loaded**, and nothing invents one. It is
+> blocked on the SEC-05 aggregate-only approval for the TSE padrón (D-011). The cost is real and
+> is printed on every bootstrap: the FR-08 top-decile penalty never fires for CR names, so a
+> common name reaches a higher identity grade than it should.
 >
 > **D2 built the source seams:** all six FR-05 ports in `apps/api/src/sources`, deterministic
 > mocks for all six, and one real adapter — **UK Companies House, GB only, which is the proving
@@ -103,12 +116,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **395 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **442 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**147 integration** tests and `pnpm test:security` **106 security** tests.
+**170 integration** tests and `pnpm test:security` **106 security** tests.
 
-Coverage is gated at 85/80 and currently reports 94.69% / 90.47% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 94.75% / 90.52% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by
@@ -194,6 +207,7 @@ Inside `apps/api/src`, the four directories Phase C added:
 | `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler                                                                              |
 | `storage/`      | `ObjectStorePort` + S3 adapter, `EvidenceStagingService` (stage → verify → commit, plus the orphan sweep), `RetentionSweeper`                                     |
 | `sources/`      | The six FR-05 ports (D2), their deterministic mocks in `mock/`, and the GB-only Companies House adapter                                                           |
+| `associations/` | The FR-02 graph (D3): officer resolution, the `DIRECTOR_OF` edges, and the snapshot frozen to the run                                                             |
 
 The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint

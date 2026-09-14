@@ -26,6 +26,9 @@ import { SourceDocumentService } from '../../apps/api/src/persistence/source-doc
 import { StageExecutionService } from '../../apps/api/src/persistence/stage-execution.service.js';
 import { IndexerService } from '../../apps/api/src/search-index/indexer.service.js';
 import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-index.port.js';
+import { AssociationGraphService } from '../../apps/api/src/associations/association-graph.service.js';
+import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
+import { buildSourceAdapters } from '../../apps/api/src/sources/sources.registry.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
@@ -84,6 +87,7 @@ beforeAll(async () => {
     outbox,
     indexer,
     new StageExecutionService(db),
+    associationGraphFor(db, subjects, runner, audit),
   );
 
   await Promise.all([outbox.ensureIndexes(), audit.ensureIndexes(), searches.ensureIndexes()]);
@@ -590,7 +594,10 @@ describe('search creation commits run, audit and outbox together', () => {
     requestedScope: {
       jurisdictions: ['CR'],
       languages: ['es'],
-      includeFormerDirectorships: true,
+      // Current-only. `tenant-alpha` does not hold `historical_directorships`, and as of D3 a
+      // former-director search without it is refused rather than silently narrowed (FR-02).
+      // The refusal has its own test in `associations.test.ts`; this suite is about the commit.
+      includeFormerDirectorships: false,
       fromDate: null,
     },
   };
@@ -647,3 +654,28 @@ describe('search creation commits run, audit and outbox together', () => {
     expect(await audit.list({ tenantId: 'tenant-alpha', limit: 1 })).toEqual(before);
   });
 });
+
+/**
+ * The association graph service, as the composition root builds it.
+ *
+ * D3 added it as a dependency of `SearchesService`, because the FR-02 snapshot is created in
+ * the same transaction as the run that pins it. Built with mock source adapters: this suite is
+ * about transactions and jobs, not about registers, and a real adapter would put a network call
+ * inside a test that has nothing to say about one.
+ */
+function associationGraphFor(
+  db: Db,
+  subjects: SubjectsService,
+  transactions: TransactionRunner,
+  audit: AuditService,
+): AssociationGraphService {
+  return new AssociationGraphService(
+    db,
+    subjects,
+    buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null }),
+    new CapabilityCoverageService(db),
+    transactions,
+    audit,
+    'mock',
+  );
+}

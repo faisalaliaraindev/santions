@@ -41,3 +41,8 @@ export * from './rights/rights.js';
 export * from './capability/capability.js';
 
 export * from './reliability/failure-classification.js';
+
+export * from './identity/name-frequency-distribution.js';
+
+export * from './association/officer-resolution.js';
+export * from './association/scope.js';

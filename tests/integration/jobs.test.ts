@@ -52,6 +52,9 @@ import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-inde
 import { EvidenceStagingService } from '../../apps/api/src/storage/evidence-staging.service.js';
 import { InMemoryObjectStore } from '../../apps/api/src/storage/object-store.port.js';
 import { OutboxPublisher } from '../../apps/api/src/jobs/outbox-publisher.js';
+import { AssociationGraphService } from '../../apps/api/src/associations/association-graph.service.js';
+import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
+import { buildSourceAdapters } from '../../apps/api/src/sources/sources.registry.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
@@ -231,7 +234,11 @@ async function createRun(tenantId: string): Promise<{ searchId: string; revision
       requestedScope: {
         jurisdictions: ['CR'],
         languages: ['es'],
-        includeFormerDirectorships: true,
+        // Current-only. As of D3 a former-director search needs the `historical_directorships`
+        // entitlement, which the seeded tenant here does not hold, and an unentitled request is
+        // refused rather than silently narrowed (FR-02). The refusal is tested in
+        // `associations.test.ts`; this suite is about job delivery.
+        includeFormerDirectorships: false,
         fromDate: null,
       },
     },
@@ -256,15 +263,17 @@ beforeAll(async () => {
 
   const audit = new AuditService(db, new LocalAuditCheckpointWriter(db));
   const outbox = new OutboxService(db);
+  const subjects = new SubjectsService(db, new NameFrequencyService(db));
   searches = new SearchesService(
     db,
     entitlements,
-    new SubjectsService(db, new NameFrequencyService(db)),
+    subjects,
     runner,
     audit,
     outbox,
     new IndexerService(db, new InMemorySearchIndex(), new SourceDocumentService(db)),
     stages,
+    associationGraphFor(db, subjects, runner, audit),
   );
 
   await Promise.all([
@@ -880,3 +889,28 @@ describe('The runtime carries out dispositions, and refuses to run blind', () =>
     }).toThrow(/no job handlers are registered/);
   });
 });
+
+/**
+ * The association graph service, as the composition root builds it.
+ *
+ * D3 added it as a dependency of `SearchesService`, because the FR-02 snapshot is created in
+ * the same transaction as the run that pins it. Built with mock source adapters: this suite is
+ * about transactions and jobs, not about registers, and a real adapter would put a network call
+ * inside a test that has nothing to say about one.
+ */
+function associationGraphFor(
+  db: Db,
+  subjects: SubjectsService,
+  transactions: TransactionRunner,
+  audit: AuditService,
+): AssociationGraphService {
+  return new AssociationGraphService(
+    db,
+    subjects,
+    buildSourceAdapters({ mode: 'MOCK', companiesHouseApiKey: null }),
+    new CapabilityCoverageService(db),
+    transactions,
+    audit,
+    'mock',
+  );
+}

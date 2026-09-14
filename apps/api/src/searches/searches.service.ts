@@ -12,8 +12,9 @@ import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
 import type { CancelSearchInput, CreateSearchInput, SearchSummary } from '@erly/adverse-contracts';
-import type { Principal } from '@erly/adverse-domain';
+import type { AssociationScope, Principal } from '@erly/adverse-domain';
 
+import { AssociationGraphService } from '../associations/association-graph.service.js';
 import { ApiException } from '../common/api-exception.js';
 import {
   ADVERSE_MEDIA,
@@ -63,6 +64,7 @@ export class SearchesService {
     private readonly outbox: OutboxService,
     private readonly indexer: IndexerService,
     private readonly stages: StageExecutionService,
+    private readonly associations: AssociationGraphService,
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
   }
@@ -112,12 +114,21 @@ export class SearchesService {
 
     const pinnedVersions = await this.entitlements.pinVersions(tenantId, entitlement.version);
 
+    // FR-02: a former-director search needs an approved historical scope. Checked here, before
+    // anything is written, so an unentitled request is refused rather than silently narrowed to
+    // current-only and returned as though it had answered the question asked.
+    const associationScope = this.associations.resolveScope({
+      capabilities: entitlement.capabilities,
+      includeFormerDirectorships: data.requestedScope.includeFormerDirectorships,
+    });
+
     const committed = await this.commitRun({
       principal,
       data,
       now,
       tenantId,
       pinnedVersions,
+      associationScope,
       subject,
     });
 
@@ -156,6 +167,7 @@ export class SearchesService {
     readonly now: Date;
     readonly tenantId: string;
     readonly pinnedVersions: PinnedVersions;
+    readonly associationScope: AssociationScope;
     readonly subject: {
       readonly ref: SubjectRef | null;
       readonly snapshot: CreateSearchInput['subjectSnapshot'];
@@ -200,6 +212,25 @@ export class SearchesService {
         };
 
         await this.searches.insertOne(record, { session });
+
+        // FR-02 — the association snapshot is created here, empty, and pinned to the run from
+        // its first moment (Phase D step D3). In the same transaction for the same reason the
+        // audit entry is: a crash between the two would leave a run pointing at a snapshot
+        // that does not exist.
+        //
+        // It is **not** populated here. Building it means calling a company register, and
+        // FR-02 is explicit that a registry failure must not stop person searching — so
+        // registry latency stays out of search acceptance and the worker fills it in.
+        await this.associations.createPendingSnapshot({
+          tenantId,
+          searchId: record.searchId,
+          subjectId: record.subjectId,
+          subjectVersion: record.subjectVersion,
+          jurisdictions: data.requestedScope.jurisdictions,
+          scope: input.associationScope,
+          now,
+          session,
+        });
 
         // SEC-06 — the audit entry commits with the action, so an accepted search cannot exist
         // without a record of who asked for it and under which entitlement.

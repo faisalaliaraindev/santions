@@ -3,6 +3,7 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { MongoClient, type Db } from 'mongodb';
 
 import { AdminController } from './admin/admin.controller.js';
+import { AssociationGraphService } from './associations/association-graph.service.js';
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { AuthController } from './auth/auth.controller.js';
@@ -385,6 +386,39 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [OutboxService, QUEUE_PORT],
     },
     {
+      // FR-02 (Phase D step D3). Given the whole adapter set rather than one registry, because
+      // which register answers depends on the jurisdiction the search asked for, and that is a
+      // per-search question rather than a wiring one.
+      provide: AssociationGraphService,
+      useFactory: (
+        db: Db,
+        subjects: SubjectsService,
+        adapters: SourceAdapterSet,
+        capabilities: CapabilityCoverageService,
+        transactions: TransactionRunner,
+        audit: AuditService,
+        config: AppConfig,
+      ) =>
+        new AssociationGraphService(
+          db,
+          subjects,
+          adapters,
+          capabilities,
+          transactions,
+          audit,
+          config.mode,
+        ),
+      inject: [
+        MONGO_DB,
+        SubjectsService,
+        SOURCE_ADAPTERS,
+        CapabilityCoverageService,
+        TransactionRunner,
+        AuditService,
+        APP_CONFIG,
+      ],
+    },
+    {
       provide: SearchesService,
       useFactory: (
         db: Db,
@@ -395,7 +429,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         o: OutboxService,
         i: IndexerService,
         st: StageExecutionService,
-      ) => new SearchesService(db, e, s, t, a, o, i, st),
+        ag: AssociationGraphService,
+      ) => new SearchesService(db, e, s, t, a, o, i, st, ag),
       inject: [
         MONGO_DB,
         EntitlementsService,
@@ -405,6 +440,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         OutboxService,
         IndexerService,
         StageExecutionService,
+        AssociationGraphService,
       ],
     },
 

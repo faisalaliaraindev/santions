@@ -48,6 +48,16 @@ import {
   searchAcceptedSchema,
   searchSummarySchema,
 } from '../searches/search.js';
+import {
+  associationCoverageSchema,
+  associationEdgeSchema,
+  associationGraphSchema,
+  currencyStateSchema,
+  identityFactorSchema,
+  resolutionStatusSchema,
+  tenureLabelSchema,
+  unresolvedCandidateSchema,
+} from '../searches/associations.js';
 
 /** A JSON Schema fragment. Structural on purpose — this is document data, not domain data. */
 export type SchemaObject = Record<string, unknown>;
@@ -80,6 +90,15 @@ export const COMPONENT_SCHEMAS = {
   SearchAccepted: searchAcceptedSchema,
   SearchSummary: searchSummarySchema,
   SearchPage: pageSchema(searchSummarySchema),
+
+  ResolutionStatus: resolutionStatusSchema,
+  CurrencyState: currencyStateSchema,
+  TenureLabel: tenureLabelSchema,
+  AssociationCoverage: associationCoverageSchema,
+  IdentityFactor: identityFactorSchema,
+  AssociationEdge: associationEdgeSchema,
+  UnresolvedOfficerCandidate: unresolvedCandidateSchema,
+  AssociationGraph: associationGraphSchema,
 
   ProposeVersionRequest: proposeVersionSchema,
   UpdateDraftRequest: updateDraftSchema,

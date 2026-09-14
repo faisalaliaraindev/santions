@@ -27,6 +27,134 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (later) — Phase D step **D3 done**: sourced identity resolution, the `DIRECTOR_OF` edges, and the frozen snapshot
+
+**Did — five things.**
+
+**1. Resolution is an identity grade, in `packages/domain/src/association/`.** `resolveOfficer`
+builds an Axis A `IdentityFactor` list out of what a register published and hands it to the
+**same `gradeIdentity`** a document match uses. No register-specific notion of "matched enough"
+exists, deliberately: a second one drifts from the document one, and the two then disagree about
+the same person inside one run. The grade decides what the graph may do:
+
+| Grade          | Status                 | The graph may…                                   |
+| :------------- | :--------------------- | :----------------------------------------------- |
+| `CORROBORATED` | `RESOLVED`             | attach the companies and anchor queries on them  |
+| `PARTIAL`      | `CANDIDATE_FOR_REVIEW` | show the companies, anchor nothing               |
+| `WEAK`         | `UNRESOLVED`           | show the officer, attach nothing                 |
+| `CONTRADICTED` | `CONTRADICTED`         | nothing — the register says this is someone else |
+
+**`PARTIAL` not attaching is the contested decision and it is deliberate.** One moderate
+identifier — a birth month and year that agrees — feels sufficient when you are looking at one
+candidate. It is not: a register publishing a month and year for a common name in a country of
+five million returns several people who agree on it. Decision **D-025**.
+
+**2. Currency is four values, not a boolean** (`scope.ts`, decision **D-024**). This is the one
+place I read the brief carefully rather than literally, so it is worth the paragraph. FR-02 says
+both "current confirmed directorships only" and "unknown end dates do not prove current status".
+Taken literally together those exclude nearly every directorship a real register publishes,
+because a register almost never records an end date for a serving officer — **absence is how it
+says "still serving"**. A current-only search would then return nothing against most registers,
+and the honest coverage line would be that we looked at no companies: a clean-looking result
+produced by not looking. So `CURRENT_PER_REGISTER_SILENCE` is **in** the default scope and is
+**never** labelled confirmed; the two current values travel separately to the reviewer and
+nothing merges them. The proof half of the rule is enforced where it actually bites — attaching
+an _event_ to a tenure goes through `labelTenure`, which answers `UNKNOWN` rather than
+`DURING_TENURE` when the dates cannot show the person still held the role. That case has its own
+test, as the brief asked.
+
+**3. The three records, in `apps/api/src/associations/association-graph.service.ts`.**
+`graphSnapshots` gets a `PENDING` row **inside the search-creation transaction**, so the run is
+pinned to one snapshot id from the moment it exists; `build()` populates it later, off the
+request path, because FR-02 forbids a registry outage failing the search. Companies are **copied
+per snapshot** rather than shared — the day a register renames a company or moves it to
+`dissolved`, a shared collection would silently rewrite every past search. A refresh links via
+`refreshOfSnapshotId`; nothing mutates. Decision **D-026**.
+
+**4. `GET /v1/searches/{searchId}/associations`** serves the frozen graph: edges with their
+tenure, currency, scope decision and the full identity-factor list, the companies as observed,
+and the unresolved candidates. OpenAPI regenerated and committed.
+
+**5. The name-frequency prior — absence recorded, not filled in.** `assignDeciles` is pure and
+tested; `scripts/bootstrap/name-frequency.mjs` is the loader and **refuses to run without a real
+counts file**. Nothing is loaded, and the bootstrap prints why and what it costs on every run.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         442 passed  (was 395: +47 domain tests for resolution, scope and deciles)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  170 passed  (was 147: +23 in tests/integration/associations.test.ts)
+test:security     106 passed  (unchanged)
+coverage          94.75% statements / 90.52% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+```
+
+Run against the real stack: `pnpm local:up` (7/7 healthy) and `pnpm local:bootstrap`.
+
+**Found — four things, one of them a flaw in my own first design.**
+
+1. **The known-company signal cannot be applied before the hop that reveals the companies.** My
+   first cut resolved each officer once, from the officer search alone — and the officer search
+   does not say which companies a register attributes to an officer. So the strongest signal
+   available (the client supplied company X; the register puts a person of that name in company
+   X) could never fire, and nothing ever reached `RESOLVED`. Caught by the one integration test
+   that asserted a resolution _should_ succeed; every other test passed, because they all assert
+   that something does **not** attach. **Resolution now runs twice**: the first pass decides
+   whether asking is worth a call, the second — with the appointments known — is the one stored.
+   Worth remembering: a suite full of "must not attach" assertions passes perfectly on a
+   resolver that can never attach anything.
+2. **Which officers are worth a second registry call is a real bound, not a detail.** Hopping for
+   every weak name match spends a call per namesake. Hopping only for already-actionable
+   statuses means a subject with a supplied company and a register that publishes no date of
+   birth is never resolved at all — the common case in a register that publishes little. The rule
+   is now: never a contradicted officer; always a resolved or reviewable one; **and** any
+   non-contradicted one when the client supplied known companies. With nothing supplied, twelve
+   namesakes still cost zero hops.
+3. **Deciles must be drawn on population mass, not on the surname ranking.** My first
+   implementation placed each name by the midpoint of its own mass, which puts a surname carried
+   by 45% of a population into decile 8 — so the single most common name in the country would
+   not be flagged top-decile. Now placed by where its mass starts, which is also monotonic: a
+   rarer name can never receive a higher decile than a more common one. Both properties have
+   tests.
+4. **Two existing integration suites requested a historical scope they were not entitled to.**
+   `transactions.test.ts` and `jobs.test.ts` both set `includeFormerDirectorships: true` against
+   `tenant-alpha`, which was harmless while nothing checked it. As of D3 that is refused, so both
+   were changed to current-only with a pointer to the suite that tests the refusal. `tenant-beta`
+   is now seeded **with** `historical_directorships` and `tenant-alpha` without it, so both paths
+   are exercised; granting it to both would have left the refusal untested, and the refusal is
+   the half that matters (decision **D-027**).
+
+**Left half-done:** nothing in D3, but two things are scoped to D4 and should not be mistaken for
+gaps here. The **bounds** are implemented and reported (`coverage.boundsApplied` names every
+bound that bound) but are not yet configurable per tenant — that is D4. And **person-only
+degraded execution** is only half-demonstrable today: the graph already survives a registry
+outage and reports `INCOMPLETE` without throwing, but there is no job handler yet (Phase E), so
+"the run completes anyway" has no run to complete. T20 is therefore still `[~]` in the brief.
+
+`build()` is called directly by tests rather than by a worker, for the same reason: the handler
+seam exists and nothing is registered against it until Phase E.
+
+**Next session should:** start **D4** — make the one-hop bounds configurable (maximum companies
+per subject, maximum officers per company, maximum edges per snapshot), surface them in the same
+spirit as `TRUNCATED_BY_PLAN`, and wire association coverage into the run's own
+`SourceCoverageOutcome` so a bounded or failed graph shows up in the search's coverage statement
+rather than only on the snapshot. `DEFAULT_GRAPH_BOUNDS` in `association-graph.service.ts` is
+where the hard-coded values live today. See [`phase-d.md`](./phase-d.md) step D4.
+
+**Decisions touched:** **D-024, D-025, D-026, D-027 recorded** (four currency states with
+silence never confirmed; Axis A resolution with `PARTIAL` not attaching; the snapshot created
+with the run and companies copied per snapshot; a historical scope refused rather than narrowed).
+**D-011 is unchanged and still open**, and is now the single most consequential open item for
+identity quality in Costa Rica: until the SEC-05 aggregate-only approval for the TSE padrón
+exists, no distribution is loaded, the top-decile penalty never fires for CR names, and a common
+name reaches a higher identity grade than it should. That is stated in the bootstrap output, in
+the architecture document and here, rather than being quietly absent.
+
+---
+
 ## 2026-09-14 — Phase D step **D2 done**: the six FR-05 seams, six deterministic mocks, one real registry adapter, and the conformance gate D1 left open
 
 **Did — four things.**

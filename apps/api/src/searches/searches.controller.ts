@@ -5,12 +5,17 @@ import {
   cancelSearchSchema,
   createSearchSchema,
   paginationQuerySchema,
+  type AssociationGraph,
   type CancelSearchInput,
   type CreateSearchInput,
   type SearchSummary,
 } from '@erly/adverse-contracts';
 import type { Principal } from '@erly/adverse-domain';
 
+import {
+  AssociationGraphService,
+  type AssociationGraphView,
+} from '../associations/association-graph.service.js';
 import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { ApiException } from '../common/api-exception.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';
@@ -26,6 +31,7 @@ export class SearchesController {
   constructor(
     @Inject(SearchesService) private readonly searches: SearchesService,
     @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
+    @Inject(AssociationGraphService) private readonly graph: AssociationGraphService,
   ) {}
 
   /**
@@ -131,6 +137,25 @@ export class SearchesController {
   }
 
   /**
+   * GET /v1/searches/:searchId/associations — the frozen FR-02 graph (Phase D step D3).
+   *
+   * Served from the snapshot the run was pinned to at creation, never from a fresh registry
+   * read. `search:read` rather than a permission of its own: the graph is part of explaining
+   * the run, and a caller who may read the search may read what it was built on.
+   */
+  @Get(':searchId/associations')
+  @RequirePermission('search:read')
+  @RequireScope('search:read')
+  async associations(
+    @CurrentPrincipal() principal: Principal,
+    @Param('searchId') searchId: string,
+  ): Promise<AssociationGraph> {
+    return toAssociationWire(
+      await this.graph.loadForSearch({ tenantId: requireTenant(principal), searchId }),
+    );
+  }
+
+  /**
    * POST /v1/searches/:searchId/cancel — stop a run, against the revision last read.
    *
    * `If-Match` is **required**, not optional. Making it optional would mean the common path is
@@ -202,5 +227,73 @@ function accepted(search: SearchSummary): {
     searchId: search.searchId,
     statusUrl: `/v1/searches/${search.searchId}`,
     execution: search.execution,
+  };
+}
+
+/**
+ * The stored graph, as the contract serves it.
+ *
+ * An explicit mapping rather than returning the record, and not for tidiness: the stored edge
+ * carries `adapterId` and internal ids that are operational detail, and the stored tenure is a
+ * nested object where the wire wants two named dates. A response built by spreading a database
+ * record is a response that grows a field the day somebody adds one to the collection.
+ */
+function toAssociationWire(view: AssociationGraphView): AssociationGraph {
+  return {
+    searchId: view.searchId,
+    snapshotId: view.snapshotId,
+    status: view.status,
+    scope: view.scope,
+    coverage: { ...view.coverage, boundsApplied: [...view.coverage.boundsApplied] },
+    edges: view.edges.map((edge) => ({
+      assertionId: edge.assertionId,
+      officerRef: edge.officerRef,
+      officerName: edge.officerName,
+      companyRef: edge.companyRef,
+      companyName: edge.companyName,
+      jurisdiction: edge.jurisdiction,
+      role: edge.role,
+      appointedOn: edge.tenure.appointedOn,
+      resignedOn: edge.tenure.resignedOn,
+      observedAt: edge.observedAt,
+      resolution: edge.resolution,
+      identityGrade: edge.identityGrade as AssociationGraph['edges'][number]['identityGrade'],
+      nameMatch: edge.nameMatch,
+      identityFactors: edge.identityFactors.map((factor) => ({
+        kind: factor.kind,
+        strength: factor.strength,
+        direction: factor.direction,
+        detail: factor.detail,
+      })),
+      resolutionRationale: [...edge.resolutionRationale],
+      currency: edge.currency,
+      inScope: edge.inScope,
+      scopeReason: edge.scopeReason,
+      attachesCompany: edge.attachesCompany,
+      sourceId: edge.sourceId,
+      parserVersion: edge.parserVersion,
+      mode: edge.mode,
+    })),
+    companies: view.companies.map((company) => ({
+      companyRef: company.companyRef,
+      jurisdiction: company.jurisdiction,
+      name: company.name,
+      status: company.status,
+      incorporatedOn: company.incorporatedOn,
+      observedAt: company.observedAt,
+      sourceId: company.sourceId,
+    })),
+    unresolvedCandidates: view.unresolvedCandidates.map((candidate) => ({
+      officerRef: candidate.officerRef,
+      officerName: candidate.officerName,
+      jurisdiction: candidate.jurisdiction,
+      resolution: candidate.resolution,
+      identityGrade:
+        candidate.identityGrade as AssociationGraph['unresolvedCandidates'][number]['identityGrade'],
+      nameMatch: candidate.nameMatch,
+      resolutionRationale: [...candidate.resolutionRationale],
+    })),
+    refreshOfSnapshotId: view.refreshOfSnapshotId,
+    builtAt: view.builtAt,
   };
 }

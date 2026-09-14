@@ -636,3 +636,114 @@ Taxonomy and policy content are **not** checked, and the `switch` in `assertCont
 exhaustive so that a fourth record kind is a compile error rather than a silent pass. Taxonomy's
 field schema lands in D6 with the lexicon audit; policy's with the retention decision (D-012).
 Enforcing an invented schema on either now would be enforcing a guess.
+
+---
+
+## D-024 — A register's silence about a resignation is not a confirmed current directorship, and is still in scope
+
+**Status:** Accepted · **Decided at:** Phase D step D3, 2026-09-14
+
+FR-02 says "current confirmed directorships only" and "unknown end dates do not prove current
+status". Taken literally together, those two sentences would exclude nearly every directorship
+a real register publishes, because a register almost never records an end date for a serving
+officer — **absence is how it says "still serving"**.
+
+So currency is four values, not a boolean: `CURRENT_CONFIRMED` (an end date is recorded and has
+not arrived), `CURRENT_PER_REGISTER_SILENCE` (an appointment, no resignation), `FORMER`, and
+`UNKNOWN` (the dates establish nothing, usually a missing or too-coarse appointment).
+
+Silence-based edges **are** in the default scope. Excluding them would make a current-only
+search return nothing at all against most registers, and the honest coverage statement for that
+search would have to say we looked at no companies — a clean-looking result produced by not
+looking, which is the failure mode this whole service is built against.
+
+They are **never labelled confirmed**. The two current values travel separately all the way to
+the reviewer and no code merges them, in the same way `UNKNOWN` and `UNSUPPORTED` are never
+merged in D-020.
+
+The proof half of FR-02's sentence is enforced where it actually bites: attaching an _event_ to
+a person's tenure goes through `labelTenure`, which answers `UNKNOWN` rather than
+`DURING_TENURE` whenever the dates cannot show the person still held the role. That is the case
+that attaches a company event to someone who had already left, and it has its own test.
+
+---
+
+## D-025 — An officer resolves through Axis A, and `PARTIAL` does not attach a company
+
+**Status:** Accepted · **Decided at:** Phase D step D3, 2026-09-14
+
+Resolving a subject to an officer record uses `gradeIdentity` — the same FR-08 Axis A grading a
+document match uses — over factors built from what the register published. There is no
+register-specific notion of "matched enough". A second one would drift from the document one,
+and the two would then disagree about the same person in the same run.
+
+The grade maps to what the graph may do:
+
+| Grade          | Status                 | The graph may…                                   |
+| :------------- | :--------------------- | :----------------------------------------------- |
+| `CORROBORATED` | `RESOLVED`             | attach the companies and anchor queries on them  |
+| `PARTIAL`      | `CANDIDATE_FOR_REVIEW` | show the companies, anchor nothing               |
+| `WEAK`         | `UNRESOLVED`           | show the officer, attach nothing                 |
+| `CONTRADICTED` | `CONTRADICTED`         | nothing — the register says this is someone else |
+
+**`PARTIAL` not attaching is the contested half.** One moderate identifier — a birth month and
+year that agrees — feels sufficient when looking at a single candidate. It is not: a register
+publishing a birth month and year for a common name in a country of five million will return
+several people who agree on it. FR-02 forbids unresolved officers attaching companies
+_automatically_, and "automatically" is the operative word — the candidate is surfaced, and a
+reviewer may still decide.
+
+**Resolution happens twice per officer, and the ordering is forced by the data.** The officer
+search does not say which companies a register attributes to an officer, so the strongest
+available signal — the client supplied company X, and the register puts a person of that name in
+company X — is not knowable until after the one-hop. The first pass decides only whether asking
+is worth a call; the second, with the appointments known, is the one stored on the edges.
+
+A non-contradicted officer is also worth asking about whenever the client supplied known
+companies, even at a weak name match, because that is precisely the case the second pass exists
+to catch. Where nothing was supplied, a weak name match costs no call at all — so a name shared
+by twelve people produces twelve candidates and zero hops.
+
+---
+
+## D-026 — The association snapshot is created empty with the run, and filled in by the worker
+
+**Status:** Accepted · **Decided at:** Phase D step D3, 2026-09-14
+
+`graphSnapshots` gets a `PENDING` row inside the **search-creation transaction**, so the run is
+pinned to exactly one snapshot id from the moment it exists. It is populated later by `build()`.
+
+Building it inline in `POST /v1/searches` would put registry latency into search acceptance and,
+worse, would make a registry outage a search-creation failure — which FR-02 forbids outright:
+"If registry access fails, continue valid person searching and show association coverage as
+incomplete."
+
+A `PENDING` snapshot reports coverage `UNKNOWN`, never `COMPLETE` with zero edges. Before
+anything has been attempted, "we have not asked" is the only honest answer; `COMPLETE` with an
+empty array would read as "this person directs nothing".
+
+**Companies are copied per snapshot rather than shared.** A shared `companies` collection keyed
+on the company number is the obvious design and is wrong here: the day a register renames a
+company or moves it to `dissolved`, every past search silently starts describing it the new way,
+and a report produced in March stops saying what it said in March. Duplication is the price of a
+record that stays true. A refresh produces a new snapshot carrying `refreshOfSnapshotId`;
+nothing mutates the old one.
+
+---
+
+## D-027 — A former-director search is refused without the entitlement, never silently narrowed
+
+**Status:** Accepted · **Decided at:** Phase D step D3, 2026-09-14
+
+FR-02: "former-director search is selectable only under an approved historical scope." A tenant
+without the `historical_directorships` entitlement that sets `includeFormerDirectorships` is
+**refused** with `INVALID_SCOPE`, before anything is written.
+
+The alternative — quietly running current-only — produces a result that answers a narrower
+question than the one asked while carrying no indication that it did. The caller has no way to
+tell, and a reviewer reading the output has less way still. A refusal is visible and fixable; a
+silent narrowing is neither.
+
+`tenant-beta` is seeded with the entitlement and `tenant-alpha` without it, so both paths are
+exercised against the bootstrapped stack. Granting it to both would leave the refusal untested,
+and the refusal is the half that matters.

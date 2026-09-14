@@ -479,6 +479,44 @@ function buildPaths(): Record<string, SchemaObject> {
       },
     },
 
+    '/v1/searches/{searchId}/associations': {
+      get: {
+        operationId: 'getSearchAssociations',
+        tags: ['searches'],
+        summary: 'Read the frozen FR-02 association graph for a search',
+        description: [
+          'The graph **as it was when the search ran**, not a fresh look at the register.',
+          'A registry correction next month must not rewrite what a historical search',
+          'explained, so a refresh produces a new snapshot linked to this one rather than',
+          'mutating it.',
+          '',
+          'Three things here are routinely misread and are therefore separate fields.',
+          '',
+          'A `coverage.outcome` of `UNKNOWN` means **no approved register covers the',
+          'jurisdiction, so none was asked**. It is not a worse `INCOMPLETE`, and neither',
+          'value ever means no associations exist.',
+          '',
+          '`unresolvedCandidates` are people of the same name the graph could **not**',
+          'attribute to the subject. They are returned rather than hidden, so a reviewer can',
+          'see that the register held more than one such person. They are not findings.',
+          '',
+          '`edges[].attachesCompany` is the only field that says whether an edge may anchor',
+          'a company query. An edge can be resolved and still out of scope, so it is stated',
+          'rather than left to each consumer to recompute differently.',
+        ].join('\n'),
+        parameters: [{ name: 'searchId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'The frozen association snapshot.',
+            content: json(ref('AssociationGraph')),
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+        },
+      },
+    },
+
     '/v1/searches/{searchId}/cancel': {
       post: {
         operationId: 'cancelSearch',

@@ -331,6 +331,28 @@
         }
       }
     },
+    "/v1/searches/{searchId}/associations": {
+      "get": {
+        "operationId": "getSearchAssociations",
+        "tags": ["searches"],
+        "summary": "Read the frozen FR-02 association graph for a search",
+        "description": "The graph **as it was when the search ran**, not a fresh look at the register.\nA registry correction next month must not rewrite what a historical search\nexplained, so a refresh produces a new snapshot linked to this one rather than\nmutating it.\n\nThree things here are routinely misread and are therefore separate fields.\n\nA `coverage.outcome` of `UNKNOWN` means **no approved register covers the\njurisdiction, so none was asked**. It is not a worse `INCOMPLETE`, and neither\nvalue ever means no associations exist.\n\n`unresolvedCandidates` are people of the same name the graph could **not**\nattribute to the subject. They are returned rather than hidden, so a reviewer can\nsee that the register held more than one such person. They are not findings.\n\n`edges[].attachesCompany` is the only field that says whether an edge may anchor\na company query. An edge can be resolved and still out of scope, so it is stated\nrather than left to each consumer to recompute differently.",
+        "parameters": [
+          { "name": "searchId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The frozen association snapshot.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/AssociationGraph" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" }
+        }
+      }
+    },
     "/v1/searches/{searchId}/cancel": {
       "post": {
         "operationId": "cancelSearch",
@@ -1173,6 +1195,178 @@
           "nextCursor": { "type": "string", "nullable": true }
         },
         "required": ["items", "nextCursor"],
+        "additionalProperties": false
+      },
+      "ResolutionStatus": {
+        "type": "string",
+        "enum": ["RESOLVED", "CANDIDATE_FOR_REVIEW", "UNRESOLVED", "CONTRADICTED"]
+      },
+      "CurrencyState": {
+        "type": "string",
+        "enum": ["CURRENT_CONFIRMED", "CURRENT_PER_REGISTER_SILENCE", "FORMER", "UNKNOWN"]
+      },
+      "TenureLabel": {
+        "type": "string",
+        "enum": ["DURING_TENURE", "BEFORE_TENURE", "AFTER_TENURE", "SPANNING", "UNKNOWN"]
+      },
+      "AssociationCoverage": { "type": "string", "enum": ["COMPLETE", "INCOMPLETE", "UNKNOWN"] },
+      "IdentityFactor": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "strength": { "type": "string", "enum": ["STRONG", "MODERATE", "WEAK"] },
+          "direction": { "type": "string", "enum": ["CORROBORATING", "ABSENT", "CONTRADICTING"] },
+          "detail": { "type": "string" }
+        },
+        "required": ["kind", "strength", "direction", "detail"],
+        "additionalProperties": false
+      },
+      "AssociationEdge": {
+        "type": "object",
+        "properties": {
+          "assertionId": { "type": "string" },
+          "officerRef": { "type": "string" },
+          "officerName": { "type": "string" },
+          "companyRef": { "type": "string" },
+          "companyName": { "type": "string" },
+          "jurisdiction": { "type": "string" },
+          "role": { "type": "string" },
+          "appointedOn": { "$ref": "#/components/schemas/PreciseDate" },
+          "resignedOn": { "$ref": "#/components/schemas/PreciseDate" },
+          "observedAt": { "type": "string" },
+          "resolution": { "$ref": "#/components/schemas/ResolutionStatus" },
+          "identityGrade": {
+            "type": "string",
+            "enum": ["CORROBORATED", "PARTIAL", "WEAK", "CONTRADICTED"]
+          },
+          "nameMatch": { "type": "string" },
+          "identityFactors": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/IdentityFactor" }
+          },
+          "resolutionRationale": { "type": "array", "items": { "type": "string" } },
+          "currency": { "$ref": "#/components/schemas/CurrencyState" },
+          "inScope": { "type": "boolean" },
+          "scopeReason": { "type": "string" },
+          "attachesCompany": { "type": "boolean" },
+          "sourceId": { "type": "string" },
+          "parserVersion": { "type": "string" },
+          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] }
+        },
+        "required": [
+          "assertionId",
+          "officerRef",
+          "officerName",
+          "companyRef",
+          "companyName",
+          "jurisdiction",
+          "role",
+          "appointedOn",
+          "resignedOn",
+          "observedAt",
+          "resolution",
+          "identityGrade",
+          "nameMatch",
+          "identityFactors",
+          "resolutionRationale",
+          "currency",
+          "inScope",
+          "scopeReason",
+          "attachesCompany",
+          "sourceId",
+          "parserVersion",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "UnresolvedOfficerCandidate": {
+        "type": "object",
+        "properties": {
+          "officerRef": { "type": "string" },
+          "officerName": { "type": "string" },
+          "jurisdiction": { "type": "string" },
+          "resolution": { "$ref": "#/components/schemas/ResolutionStatus" },
+          "identityGrade": {
+            "type": "string",
+            "enum": ["CORROBORATED", "PARTIAL", "WEAK", "CONTRADICTED"]
+          },
+          "nameMatch": { "type": "string" },
+          "resolutionRationale": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": [
+          "officerRef",
+          "officerName",
+          "jurisdiction",
+          "resolution",
+          "identityGrade",
+          "nameMatch",
+          "resolutionRationale"
+        ],
+        "additionalProperties": false
+      },
+      "AssociationGraph": {
+        "type": "object",
+        "properties": {
+          "searchId": { "type": "string" },
+          "snapshotId": { "type": "string" },
+          "status": { "type": "string", "enum": ["PENDING", "BUILT"] },
+          "scope": { "type": "string", "enum": ["CURRENT_ONLY", "INCLUDE_FORMER"] },
+          "coverage": {
+            "type": "object",
+            "properties": {
+              "outcome": { "$ref": "#/components/schemas/AssociationCoverage" },
+              "detail": { "type": "string", "nullable": true },
+              "sourceId": { "type": "string", "nullable": true },
+              "boundsApplied": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["outcome", "detail", "sourceId", "boundsApplied"],
+            "additionalProperties": false
+          },
+          "edges": { "type": "array", "items": { "$ref": "#/components/schemas/AssociationEdge" } },
+          "companies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "companyRef": { "type": "string" },
+                "jurisdiction": { "type": "string" },
+                "name": { "type": "string" },
+                "status": { "type": "string" },
+                "incorporatedOn": { "$ref": "#/components/schemas/PreciseDate" },
+                "observedAt": { "type": "string" },
+                "sourceId": { "type": "string" }
+              },
+              "required": [
+                "companyRef",
+                "jurisdiction",
+                "name",
+                "status",
+                "incorporatedOn",
+                "observedAt",
+                "sourceId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unresolvedCandidates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/UnresolvedOfficerCandidate" }
+          },
+          "refreshOfSnapshotId": { "type": "string", "nullable": true },
+          "builtAt": { "type": "string", "nullable": true }
+        },
+        "required": [
+          "searchId",
+          "snapshotId",
+          "status",
+          "scope",
+          "coverage",
+          "edges",
+          "companies",
+          "unresolvedCandidates",
+          "refreshOfSnapshotId",
+          "builtAt"
+        ],
         "additionalProperties": false
       },
       "ProposeVersionRequest": {

@@ -9,6 +9,7 @@
 export * from './errors/errors.js';
 export * from './subjects/subject.js';
 export * from './searches/search.js';
+export * from './searches/associations.js';
 export * from './admin/admin.js';
 export * from './auth/session.js';
 export * from './common/pagination.js';

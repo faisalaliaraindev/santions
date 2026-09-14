@@ -10,6 +10,7 @@
  */
 
 import { log, waitFor } from '../lib/local-guard.mjs';
+import { loadNameFrequency } from './name-frequency.mjs';
 
 /**
  * Two tenants, matching the `tenant_id` attributes in the Keycloak realm. Two, not one,
@@ -290,7 +291,17 @@ export async function seedData(db) {
       {
         tenantId: tenant.tenantId,
         version: 1,
-        capabilities: ['adverse_media'],
+        // `historical_directorships` (FR-02, Phase D step D3) is granted to **one** tenant on
+        // purpose. A former-director search is selectable only under an approved historical
+        // scope, so the two seeded tenants differ in exactly that: `tenant-beta` holds it and
+        // `tenant-alpha` does not. Granting it to both would make the refusal path untestable
+        // against the seeded stack, and the refusal is the half that matters — a tenant who
+        // asks for history and is silently given current-only has been answered a narrower
+        // question than the one they asked.
+        capabilities:
+          tenant.tenantId === 'tenant-beta'
+            ? ['adverse_media', 'historical_directorships']
+            : ['adverse_media'],
         environments: ['sandbox'],
         status: 'ACTIVE',
         activatedAt: now,
@@ -377,6 +388,13 @@ export async function seedData(db) {
       { ...coverage, assessedAt: new Date(now), declaredBy: 'bootstrap' },
     );
   }
+
+  // FR-01 — the name-frequency prior. Loads nothing today and says so, loudly, every run:
+  // the Costa Rican distribution is blocked on the SEC-05 approval for aggregate-only use of
+  // the TSE padrón (D0, D-011). A silent no-op here would let the absence be forgotten, and the
+  // absence is the reason a common Costa Rican name currently reaches a higher identity grade
+  // than it should (FR-08, T71).
+  await loadNameFrequency(db);
 
   log.info(`${String(TENANTS.length)} tenants, ${String(SEED_SOURCES.length)} mock sources`);
   log.info(
