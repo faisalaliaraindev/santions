@@ -79,9 +79,39 @@ pnpm verify:local  every suite ok except end-to-end, still [n/i]
 **Left half-done:** nothing. Both modules are complete and tested; no adapter was started, so
 there is no partial I/O code to untangle.
 
-**Next session should:** build `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort`,
-replacing the mock. It is the next item on the critical path and everything else in the live
-work depends on it. Concretely:
+**Next session should: finish Phase D — D5 then D6.** This was decided by the project owner on
+2026-09-14, after the demo, in preference to continuing straight down the live-source path. The
+reasoning is sound and worth restating so nobody re-opens it: **D5 is source health — rate
+limits, circuit breakers, per-source budgets and a mid-run kill switch — and the moment a real
+source is dialled it stops being a later phase.** Building the live fetch adapter first would
+mean pointing an unthrottled fetcher at Google News and getting blocked. D6 is the lexicon and
+its activation-path audit, which is the largest quality gap in the whole system: the term list
+is empty, so today a search only looks for the bare name.
+
+So the order is now:
+
+1. **D5** — `SourceHealth` as a **separate mutable document** keyed by source. The phase brief's
+   "trap to avoid first" is explicit: it must not live inside the immutable `SourceVersion`, or
+   you are choosing between breaking immutability and losing the data. Breaker over the existing
+   `failure-classification.ts` classes — it invents no new ones. Per-source hourly and daily
+   budgets the planner spends against. A kill switch effective **mid-run**, not at the next run
+   (T36). Two new rows appended to `docs/failure-injection-matrix.md` — read the format there
+   before appending.
+2. **D6** — the lexicon audit wired into the activation path (`assertLexiconClean` already exists
+   and already gates CI; D6 adds the call at activation), plus the Spanish and English term
+   lists. **The Spanish list must be reviewed by a Spanish reader before it goes live, or its
+   unreviewed state must be recorded in the coverage statement and the handoff** — the brief
+   allows either, but not silence.
+3. Then G5 closes and Phase D is complete.
+
+**After Phase D**, resume the live-source work below. It is still the right plan and nothing
+about it has changed.
+
+---
+
+**The live-source plan, parked until Phase D closes.** Build `HttpEvidenceFetchAdapter` — the
+real `EvidenceFetchPort`, replacing the mock. Everything else in the live work depends on it.
+Concretely:
 
 1. Resolve the host with `node:dns` and call `screenResolvedAddress` on **every** returned
    address before connecting. Do not cache the resolution.

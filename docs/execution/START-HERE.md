@@ -9,10 +9,16 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> 🔧 **Current work: connecting real sources, so a realistic test can be run.** The pipeline
-> works end to end on fixture data; the customer conversation asked for real adverse media. The
-> SEC-02 URL gate and the robots parser are done (pure, tested). **Next is the real fetch
-> adapter** — see the top handoff entry for the exact six steps and the ordered plan behind them.
+> 🔧 **Current work: finish Phase D — D5, then D6.** Decided by the project owner on 2026-09-14
+> after the demo, in preference to continuing straight into live sources.
+>
+> **D5 is source health** — rate limits, circuit breakers, per-source budgets, mid-run kill
+> switch. It has to land before any real source is dialled, or an unthrottled fetcher gets us
+> blocked. **D6 is the lexicon and its activation audit** — the largest quality gap in the
+> system, because the term list is empty and a search currently looks only for the bare name.
+>
+> The live-source work is **parked, not cancelled**: the SEC-02 URL gate and robots parser are
+> already done and tested, and the full ordered plan is in the top handoff entry.
 >
 > ⚠️ **The phase order was broken deliberately on 2026-09-14.** A customer call needed something
 > demonstrable, so a compressed slice of **Phase E** was built ahead of D5 and D6: the search
