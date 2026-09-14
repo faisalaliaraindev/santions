@@ -231,7 +231,11 @@ isolated worker with request interception and no shared profile. **No default re
 - [x] Step 1 — `HttpEvidenceFetchAdapter` implements `EvidenceFetchPort`; `node:https` with a screening `lookup` (D-034); both byte budgets, the redirect cap and the timeout enforced; every redirect hop re-screened; robots fetched, cached and honoured with `UNKNOWN` refusing; conditional GET on the first hop only; honest user agent with a contact URL, and the adapter refuses to be constructed without one; `checkAccess` before every external call and `recordSuccess` / `recordFailure` after; returns `FailureSignal` values, never classes. Gate refusals are never recorded against source health, and the pipeline's pre-fetch check no longer spends the budget (D-035)
 - [x] Step 1 — the live adapter is wired into `buildSourceAdapters` and is **null unless it can be honest**: no contact URL or no source-health service means no adapter. `FETCH_CONTACT_URL` added to configuration with no default
 - [ ] Step 1 remainder — **a live request has still never been made.** The real transport is constructed only by the live composition root; every test runs against an injected one. The first deliberate live request is its own decision (see Decisions below)
-- [ ] Step 2 — `FetchGateService` derives every `FetchAuthorisation` field; the pipeline no longer fabricates one; one honest egress identity exists and `mock-egress-1` is gone from live attribution
+- [x] Step 2 — `FetchGateService` derives every `FetchAuthorisation` field from the active approved source version, its unexpired licence terms, the run's pinned scope and taxonomy, `screenUrl` on the URL itself, and the registry's recorded robots position (**D-036**); the pipeline no longer fabricates one, and a scan test keeps the gate the only issuer. A refusal is a rejected lead with a reason, and a source-level refusal is also a `SKIPPED` coverage outcome. One honest egress identity exists (`egress-primary`, user agent built from `FETCH_CONTACT_URL`), `mock-egress-1` is gone, and a live process with no contact URL refuses every fetch rather than making an anonymous one
+- [x] Step 2 — an `EXCEPTION_APPROVED` source is **refused** while **D6** is open, and a `FIXTURE_MOCK` source is authorised as `FIXTURE_NOT_A_PUBLISHER` in mock mode and refused in live mode; the live transport refuses a fixture authorisation outright (T55)
+- [x] Step 2 — `SourceOutcome.FAILED` carries a required human `detail` (**D-038**), so a robots refusal reads as what it was rather than as "could not be retrieved (HARD_BLOCK)"
+- [x] Step 2 — the relevance score is derived and labelled `PRELIMINARY_NAME_PRESENCE_v1`, and **does not gate** (**D-037**); the FR-06 signal set and its threshold are step 4
+- [ ] Step 2 remainder — the per-lead relevance **threshold**, the nine FR-06 signals, and the egress **pool** (identities, sticky rotation, `ProxyPort`) are steps 4 and 7, unchanged
 - [ ] Step 3 — rungs 0–7 with per-rung logging; Google News RSS, Bing News RSS, GDELT and SearXNG connectors; the XML parser dependency decided and recorded
 - [ ] Step 4 — relevance scored on FR-06's signals before the gate; rejected candidates stored as leads with reasons and visible in coverage
 - [ ] Step 5 — the eight families generated from the real taxonomy, graph and subject; F1 and F4 provably survive truncation; a disabled category provably produces no query
@@ -245,7 +249,7 @@ isolated worker with request interception and no shared profile. **No default re
 - [ ] **T59** — query, company, page, byte and time limits recorded as truncation with valid evidence retained
 - [ ] **T84** — a shape change on an undocumented source alerts before recall degrades
 - [ ] **T85** — 429 then 403 across two identities cools down, retries once, then degrades the domain and descends
-- [ ] **T86** — robots disallow: not fetched, recorded as a lead with a coverage gap, and **no exception applied without a recorded approver**
+- [~] **T86** — the exception half is done and tested at the gate: an `EXCEPTION_APPROVED` source is refused while D6 is open, and no authorisation can carry an unnamed exception. The robots-disallow half is asserted against the adapter (step 1); the end-to-end "recorded as a lead with a coverage gap" path needs a discovery connector pointed at a disallowing host, which is step 3
 - [~] **T87** — a recognised challenge or interstitial is abandoned after one attempt and reported as a `SOFT_BLOCK`; no solve, no bypass, no retry from another identity. Asserted against the adapter; the paywall and login-wall halves need the extraction step that recognises them
 - [x] **T88** — a blocked source renders as a coverage gap, never a clean result (`result-state.test.ts`, done in G0)
 - [ ] **T89** — a breaker opening mid-run removes the rung for its cooldown and reports a gap
@@ -285,8 +289,15 @@ isolated worker with request interception and no shared profile. **No default re
 provisional behaviour is recorded in `docs/open-decisions.md`: no exception can be applied today,
 and a source needing one is blocked and says so.
 
-**Expect to open:** the XML parser dependency (step 3), and a decision about when the first
-deliberate live request is made, to which source, and under whose approval.
+**Opened in step 2: D17 — the first deliberate live request.** Which source is contacted first,
+under whose named approval, at what rate, and on what stop condition. Written up in
+`docs/open-decisions.md` with a recommendation (a single manual robots.txt request, approved by
+name, stopped there). **It must close before any live call**, and it gates the desk research both
+D6 and D15 need, because reading a publisher's robots.txt is itself an outbound request to them.
+**D15 was re-raised on 2026-09-14**: untouched since it was raised, and step 3's rung tiers encode
+its answer.
+
+**Still expected to open:** the XML parser dependency (step 3).
 
 ## Known risks
 
@@ -298,7 +309,7 @@ deliberate live request is made, to which source, and under whose approval.
 | The first live request happens by accident, in a test                                 | Tests run against an injected transport. The real transport is constructed only by the live composition root                               |
 | Google News RSS changes shape and recall silently drops to zero                       | E6, keyed off `parserVersion`, scheduled rather than in CI. This is the detection mechanism, not a nice-to-have                            |
 | The budget is double-spent, or not spent at all, once two components both check       | One rule, written down: whoever opens the socket spends. The pipeline checks without spending; the adapter spends once per request         |
-| `SourceOutcome.FAILED` carries a class but no human detail, so coverage reads thin    | Known gap. Step 2 adds the detail to the coverage record; until then the adapter logs the detail and the class is what a reviewer sees     |
+| `SourceOutcome.FAILED` carries a class but no human detail, so coverage reads thin    | **Closed in step 2 (D-038).** `detail` is a required field and a required argument, so a failure with no explanation does not compile      |
 
 ## Expanding this brief further
 

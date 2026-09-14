@@ -36,7 +36,9 @@ import { RetentionService } from '../../apps/api/src/persistence/retention.servi
 import { SourceDocumentService } from '../../apps/api/src/persistence/source-document.service.js';
 import { StageExecutionService } from '../../apps/api/src/persistence/stage-execution.service.js';
 import { TransactionRunner } from '../../apps/api/src/persistence/transaction.runner.js';
+import { FetchGateService } from '../../apps/api/src/sources/fetch-gate.service.js';
 import { SourceHealthService } from '../../apps/api/src/sources/source-health.service.js';
+import { SourceVersionService } from '../../apps/api/src/sources/source-version.service.js';
 import { FindingsService } from '../../apps/api/src/pipeline/findings.service.js';
 import { SearchJobHandler } from '../../apps/api/src/pipeline/search-job.handler.js';
 import { SearchPipeline } from '../../apps/api/src/pipeline/search-pipeline.service.js';
@@ -241,6 +243,13 @@ beforeAll(async () => {
     ),
     findings,
     sourceHealth,
+    // The Phase E step 2 fetch gate. It reads the shared `sourceVersions` collection the
+    // bootstrap seeds, which is where the fixture sources' approvals live — so this suite
+    // exercises the same derivation a live process would, against fixture approvals.
+    new FetchGateService(new SourceVersionService(db), 'MOCK', {
+      mode: 'MOCK',
+      contactUrl: null,
+    }),
     'mock',
   );
 

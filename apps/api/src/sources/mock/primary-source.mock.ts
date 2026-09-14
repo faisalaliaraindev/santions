@@ -141,7 +141,15 @@ export class MockPrimarySourceAdapter implements PrimarySourcePort {
     assertJurisdictionCovered(this.descriptor, query.jurisdiction);
     const now = this.clock();
     if (this.fault !== null) {
-      return Promise.resolve(failed(this.descriptor, now, this.fault));
+      return Promise.resolve(
+        failed(
+          this.descriptor,
+          now,
+          this.fault,
+          `The injected fault for the primary-source fixture answered a search in ` +
+            `${query.jurisdiction} with ${JSON.stringify(this.fault)}.`,
+        ),
+      );
     }
 
     const matches = FIXTURE_PRIMARY_RECORDS.filter((r) => {
@@ -166,7 +174,15 @@ export class MockPrimarySourceAdapter implements PrimarySourcePort {
   async fetchRecord(recordId: string): Promise<SourceOutcome<PrimaryRecord>> {
     const now = this.clock();
     if (this.fault !== null) {
-      return Promise.resolve(failed(this.descriptor, now, this.fault));
+      return Promise.resolve(
+        failed(
+          this.descriptor,
+          now,
+          this.fault,
+          `The injected fault for the primary-source fixture answered a fetch of ${recordId} ` +
+            `with ${JSON.stringify(this.fault)}.`,
+        ),
+      );
     }
     const found = FIXTURE_PRIMARY_RECORDS.find((r) => r.recordId === recordId);
     return Promise.resolve(

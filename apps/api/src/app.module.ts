@@ -8,6 +8,8 @@ import { TaxonomyService } from './admin/taxonomy.service.js';
 import { FindingsService } from './pipeline/findings.service.js';
 import { SearchJobHandler } from './pipeline/search-job.handler.js';
 import { SearchPipeline } from './pipeline/search-pipeline.service.js';
+import { FetchGateService } from './sources/fetch-gate.service.js';
+import { SourceVersionService } from './sources/source-version.service.js';
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { AuthController } from './auth/auth.controller.js';
@@ -370,6 +372,25 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [MONGO_DB],
     },
     {
+      provide: SourceVersionService,
+      useFactory: (db: Db) => new SourceVersionService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      // The FR-06 fetch gate (Phase E step 2): the only issuer of a `FetchAuthorisation`, and
+      // the holder of this process's one egress identity. In live mode with no contact URL it
+      // has no identity and refuses every fetch, which is the same rule `buildSourceAdapters`
+      // applies to the adapter itself — an unattributable request is a defect, not a fallback.
+      provide: FetchGateService,
+      useFactory: (versions: SourceVersionService, config: AppConfig) =>
+        new FetchGateService(versions, config.mode === 'mock' ? 'MOCK' : 'LIVE', {
+          mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
+          contactUrl: config.sources.fetchContactUrl,
+          region: config.jobs.region,
+        }),
+      inject: [SourceVersionService, APP_CONFIG],
+    },
+    {
       // The FR-04 → FR-11 pipeline (Phase E). Every judgement it makes is a pure function from
       // `@erly/adverse-domain`; this provider only supplies it the I/O it sequences.
       provide: SearchPipeline,
@@ -382,6 +403,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         evidence: EvidenceStagingService,
         findings: FindingsService,
         sourceHealth: SourceHealthService,
+        fetchGate: FetchGateService,
         config: AppConfig,
       ) =>
         new SearchPipeline(
@@ -393,6 +415,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           evidence,
           findings,
           sourceHealth,
+          fetchGate,
           config.mode,
         ),
       inject: [
@@ -404,6 +427,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         EvidenceStagingService,
         FindingsService,
         SourceHealthService,
+        FetchGateService,
         APP_CONFIG,
       ],
     },

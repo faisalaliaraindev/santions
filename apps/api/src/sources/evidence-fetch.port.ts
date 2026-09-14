@@ -60,18 +60,60 @@ export interface FetchAttribution {
  * decision from the action is what lets the decision be audited independently — and what stops
  * a second, subtly different copy of the gate growing inside the HTTP client.
  */
+/**
+ * Where a source stands on robots.txt, as the authorisation records it.
+ *
+ * The first three are the registry's own vocabulary (`sourceContentSchema.robotsPosition`) and
+ * mean what an approver recorded. `FIXTURE_NOT_A_PUBLISHER` is **not** a registry value and can
+ * never be approved: it is issued only by `FetchGateService`, only in a `MOCK`-mode process, and
+ * only for a source whose connector type is `FIXTURE_MOCK`. It says the honest thing about a
+ * fixture — there is no publisher here, so there is no robots.txt position to honour — instead
+ * of the pipeline claiming `HONOURED` for a local fixture, which is what it used to do.
+ * `HttpEvidenceFetchAdapter` refuses it outright, so the value cannot reach a real publisher.
+ */
+export type RobotsPosition =
+  'HONOURED' | 'EXCEPTION_APPROVED' | 'NOT_ESTABLISHED' | 'FIXTURE_NOT_A_PUBLISHER';
+
 export interface FetchAuthorisation {
   /** The active source version that approved this domain. */
   readonly sourceVersionId: string;
-  readonly robotsPosition: 'HONOURED' | 'EXCEPTION_APPROVED' | 'NOT_ESTABLISHED';
+  /**
+   * The licence terms version that was recorded, and unexpired, when this was issued (FR-06).
+   *
+   * On the authorisation rather than looked up later because "the terms had not expired" is a
+   * statement about the instant the request was made, and the registry is mutable afterwards.
+   */
+  readonly licenceTermsVersion: string;
+  readonly robotsPosition: RobotsPosition;
   /** Set only when `robotsPosition` is `EXCEPTION_APPROVED`: who approved it (FR-06, D6). */
   readonly robotsExceptionApprovedBy: string | null;
   readonly jurisdictionEnabled: boolean;
   readonly languageEnabled: boolean;
+  /** `screenUrl` passed on this exact URL. */
   readonly urlPolicyPassed: boolean;
+  /**
+   * The SEC-02 address policy is in force for this request.
+   *
+   * Precisely what it asserts, because the field used to be set to `true` by a pipeline that
+   * screened nothing: the gate ran the **literal** half — a URL whose host is an IP address in a
+   * forbidden range is rejected by `screenUrl` before this is set — and the **resolved** half is
+   * structural, performed inside the connection's own `lookup` by the transport (D-034), on
+   * every hop, at the moment the socket is opened. No caller can satisfy this field by asserting
+   * it; the gate sets it, and the transport enforces the half the gate cannot.
+   */
   readonly ssrfValidated: boolean;
-  /** FR-06 relevance threshold. The score that cleared it, for the coverage view. */
+  /** FR-06 relevance. The score this candidate carried at the gate, for the coverage view. */
   readonly relevanceScore: number;
+  /**
+   * How that score was produced, so a reviewer can tell a measured score from a preliminary one.
+   *
+   * A bare number is uninterpretable — 0.4 from the FR-06 signal set and 0.4 from a name-presence
+   * heuristic mean different things — and the record exists to be audited.
+   */
+  readonly relevanceMethod: string;
+  /** The component that issued this authorisation, and when. Only the fetch gate issues one. */
+  readonly issuedBy: string;
+  readonly issuedAt: string;
 }
 
 /** The byte, time and redirect budget for one fetch. Exceeding any of it is `OVERSIZE`. */

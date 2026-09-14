@@ -27,6 +27,145 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (late) — **Phase E step 2**: the fetch gate, one honest egress identity, and D17 opened
+
+**Context.** Step 1 built the real fetch adapter. This session built the thing that is allowed to
+authorise it, and deleted the record that was authorising it falsely.
+
+---
+
+### The fabricated authorisation is gone
+
+`search-pipeline.service.ts` used to build its `FetchAuthorisation` inline:
+`sourceVersionId: 'fixture-source-v1'`, `robotsPosition: 'HONOURED'`, `jurisdictionEnabled: true`,
+`languageEnabled: true`, `urlPolicyPassed: true`, `ssrfValidated: true`, `relevanceScore: 0.9`, and
+`egressIdentityId: 'mock-egress-1'` in attribution. None of it derived. `urlPolicyPassed: true`
+claimed SEC-02 screening on a URL nothing had screened.
+
+**`FetchGateService`** (`apps/api/src/sources/fetch-gate.service.ts`) is now the only issuer, and
+derives every field — decision **D-036**:
+
+| Field                                    | Derived from                                                                                       |
+| :--------------------------------------- | :------------------------------------------------------------------------------------------------- |
+| `sourceVersionId`, `licenceTermsVersion` | the **active approved version**, read per lead, terms checked unexpired against `now`              |
+| `jurisdictionEnabled`                    | the run's pinned scope ∩ the source's approved countries ∩ `resolveEffectiveScope` on the taxonomy |
+| `languageEnabled`                        | the lead's **declared** language ∩ the taxonomy's ∩ the source's — never inferred from the text    |
+| `urlPolicyPassed`                        | `screenUrl`, run here, on this URL                                                                 |
+| `ssrfValidated`                          | the literal half here; the resolved half structural inside the transport's `lookup` (D-034)        |
+| `robotsPosition`                         | what an approver recorded in the registry                                                          |
+| `relevanceScore`                         | computed from the lead's own title and snippet against the subject's name forms                    |
+
+**Enforcement is a scan test**, following the control panel's precedent for D-001: no file in
+`apps/api/src` outside the gate and the port may contain the `urlPolicyPassed` field. A rule nobody
+can check is a rule that lasts until the next hurry.
+
+**A refusal is recorded, never skipped.** Every refusal becomes a rejected lead carrying the gate's
+own sentence. `isSourceLevelRefusal` splits refusals that cost the **whole source** (no active
+version, expired or unrecorded licence terms, no established robots position, an unapprovable
+exception, a fixture in live mode, no egress identity) from those that cost **one URL** (outside the
+run's scope, a rejected URL). The first also produce a `SKIPPED` coverage outcome — `SKIPPED`, not
+`FAILED`, because the source answered nothing on account of our decision not to ask it.
+
+### Two things that were true and are now said
+
+**A fixture is not a publisher.** The six mock sources are seeded with `robotsPosition:
+'NOT_ESTABLISHED'` — correct, because there is no publisher behind a local fixture. The inline
+record said `HONOURED` to get past the gate. The gate now issues a new value,
+**`FIXTURE_NOT_A_PUBLISHER`**, only in a mock-mode process and only for a `FIXTURE_MOCK` connector;
+`HttpEvidenceFetchAdapter` refuses that value outright (`assertNotFixtureAuthorisation`), so a
+fixture authorisation cannot justify a request to a real host. That is T55 from the opposite end to
+`MockModeWitness`.
+
+**`EXCEPTION_APPROVED` is refused while D6 is open**, at the gate, with a sentence naming D6 and
+saying a source admin owns it — rather than being refused three layers down by `assertAuthorised`
+with no explanation a reviewer can read.
+
+### One honest egress identity (the E3 minimum)
+
+`apps/api/src/sources/egress-identity.ts`. In live mode: `egress-primary`, whose user agent is
+**built from `FETCH_CONTACT_URL`** and is byte-identical to the one `HttpEvidenceFetchAdapter`
+sends, so the record and the wire cannot disagree about who called. **A live process with no contact
+URL gets no identity and the gate refuses every fetch** — the same rule `buildSourceAdapters`
+already applies to the adapter. In mock mode: `egress-mock-fixture`, named so it cannot be mistaken
+for a live identity in a stored record. `mock-egress-1` no longer exists.
+
+The pool, the sticky per-(domain, job) binding and `ProxyPort` are **step 7**, untouched.
+
+### The relevance score: derived, labelled, and not a gate
+
+Decision **D-037**. `relevanceScore` was the constant `0.9`. It is now a name-presence score over the
+lead's own title and snippet — 1 for a whole name form present, otherwise the best fraction of a name
+form's tokens, 0 for a lead naming nobody — carried with a new `relevanceMethod` field set to
+`PRELIMINARY_NAME_PRESENCE_v1`. **It does not gate**: FR-06's nine signals and the threshold are
+step 4, and their weights belong against the FR-16 corpus rather than guessed now. A bare number in
+an audited record cannot be told apart from a measured one; the method field is what makes it
+honest, and step 4 replaces the method.
+
+### The gap step 1 left open, closed
+
+Decision **D-038**. `SourceOutcome.FAILED` now carries a **required** `detail`, and `failed()` takes
+it as a required argument — so a failure with no explanation does not compile, at all fifteen call
+sites. A robots refusal used to reach a reviewer as "could not be retrieved (HARD_BLOCK)"; it now
+says robots.txt at that host disallows that path.
+
+### D17 opened, and D15 re-raised
+
+**D17 — the first deliberate live request** is written up in `docs/open-decisions.md` with an owner
+(source admin as the approver, with engineering), a closing gate (**G10, and before any live call**),
+and four things to decide: which source, under whose **named** approval, at what rate, and on what
+stop condition. Recommendation: a **single manual request to one source's robots.txt**, approved by
+name, logged, stopped there — before any connector is switched on. **No call was made. No live
+source has been contacted by this project.** What stops one now is a configuration value and a
+decision, not a technical block, which is exactly why it is written down.
+
+**D15 was re-raised** with a status check: untouched since 2026-09-11, and step 3's rung tiers encode
+its answer. Its desk research is itself an outbound request, so it waits behind D17.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         644 passed  (was 614: +30 fetch gate)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  206 passed  (stack up and bootstrapped)
+test:security     106 passed
+pnpm demo:api      runs end to end through the real gate; findings unchanged
+```
+
+**Left half-done:** nothing in step 2. Steps 3 through 8 are untouched.
+
+**Found — one thing worth knowing before step 3.** The gate reads the **shared** `sourceVersions`
+collection, which means the six fixture sources' registry rows are now load-bearing for mock mode: a
+mock run whose source rows are missing is refused at the gate rather than silently fetching. That was
+already true of source health (D5) and is now true of the gate as well, so `pnpm local:bootstrap` is
+a prerequisite for the integration suite in a stronger sense than before. The integration suite
+constructs the gate explicitly, and the seeded rows are what it authorises against.
+
+**Also worth knowing:** `robotsPosition` is per source, and for a discovery lead the source is the
+**feed** while the fetched host is the **publisher**. The gate therefore records the feed's position,
+and the adapter separately reads the actual host's robots.txt at fetch time — both must pass. FR-06
+wants the exception process per source _and_ per jurisdiction, which is one of the three gaps D6 has
+to close.
+
+**Next session should: build step 3 — the discovery connectors and the seven-rung cascade.** The
+first concrete action is deciding the **XML parser dependency explicitly** rather than by
+`pnpm add`: the two RSS rungs need one, and a parser that resolves entities or follows external DTDs
+is an XXE hole pointed at a third party's feed. Then rungs 0–7 with per-rung logging, the Google
+News / Bing News / GDELT / SearXNG connectors, and the per-domain breaker half FR-06 asks for that D5
+did not build. Do not make a live call: **D17 is open**, and that is the decision it exists to
+protect.
+
+**Decisions touched:** **D-036**, **D-037**, **D-038** recorded. **D17 opened** — the first
+deliberate live request, owner source admin, due before any live call. **D15 re-raised**, still open,
+still untouched by its owner. **D6 still open** and still refusing every exception. Nothing closed.
+
+**Still true:** **no live source has been contacted by this project.** No language is enabled. The
+Spanish lexicon is still unreviewed (D-033). FR-10 clustering is still not wired. No CR
+name-frequency distribution is loaded.
+
+---
+
 ## 2026-09-14 (night, later) — **Phase E begins**: D6 raised, the brief expanded, and the real fetch adapter built
 
 **Context.** Phase D closed and G5 passed earlier the same day. This session started Phase E in the

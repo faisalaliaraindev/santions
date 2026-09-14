@@ -65,7 +65,11 @@ import {
   type SourceCoverageOutcome,
 } from '@erly/adverse-domain';
 
-import { assertAttributable, assertAuthorised } from './fetch-authorisation.js';
+import {
+  assertAttributable,
+  assertAuthorised,
+  assertNotFixtureAuthorisation,
+} from './fetch-authorisation.js';
 import type { EvidenceFetchPort, FetchRequest, FetchResult } from './evidence-fetch.port.js';
 import { NodeHttpsTransport, type HttpTransport, type TransportResult } from './http-transport.js';
 import {
@@ -212,6 +216,9 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     // unreachable when it was never reached for.
     assertAuthorised(request);
     assertAttributable(request);
+    // A fixture authorisation says there is no publisher behind this source. Honouring one here
+    // would open a socket to a real host under a record saying no real host was involved (T55).
+    assertNotFixtureAuthorisation(request);
 
     const sourceId = request.attribution.sourceId;
     const startedAt = this.clock().getTime();
@@ -493,7 +500,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     detail: string,
   ): SourceOutcome<FetchResult> {
     this.logger.warn(`Refusing ${request.url}: ${detail}`);
-    return failed(this.provenanceFor(request), this.clock(), signal);
+    return failed(this.provenanceFor(request), this.clock(), signal, detail);
   }
 
   /**
@@ -515,7 +522,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
       signal,
       now: this.clock(),
     });
-    return failed(this.provenanceFor(request), this.clock(), signal);
+    return failed(this.provenanceFor(request), this.clock(), signal, detail);
   }
 
   /**

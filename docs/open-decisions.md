@@ -6,24 +6,25 @@ implementation has surfaced. Each carries an owner and the gate by which it must
 **Nothing here may harden into an accidental default.** Where a working assumption is in
 force, it is stated as such and the code reflects that it is provisional.
 
-| ID      | Decision                                                                                                       | Owner                  | Close by | Status                                                            |
-| :------ | :------------------------------------------------------------------------------------------------------------- | :--------------------- | :------- | :---------------------------------------------------------------- |
-| D1      | Which jurisdictions and languages are enabled first                                                            | Source/policy admin    | G5       | **CLOSED 2026-09-11** — Costa Rica; es + en requested (see D-010) |
-| D2      | The declared archive horizon, per source, published on every result                                            | Source/policy admin    | G10      | Open                                                              |
-| D3      | Which categories are on by default                                                                             | Taxonomy admin         | G5       | **CLOSED 2026-09-11** — all seventeen (see D-009)                 |
-| D4      | The exact boundary between adverse media and list matching for designations                                    | Product + compliance   | G7       | Open                                                              |
-| D5      | The reviewer capacity assumption that thresholds are set against                                               | Product + compliance   | G7       | Open                                                              |
-| D6      | How robots exceptions for official sources are approved and recorded                                           | Source admin           | G6       | Open — **raised with specifics 2026-09-14**, in the direct path   |
-| D7      | Which open-weight extraction model, benchmarked on the labelled set                                            | Engineering            | G7       | Open                                                              |
-| D8      | Retention per source and jurisdiction for evidence text                                                        | Compliance             | G5       | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)  |
-| D9      | Whether numeric confidence figures are ever shown (default: no)                                                | Product                | G7       | Open — default no, enforced                                       |
-| D10     | The minimum identity data the integrating application must supply                                              | Product + Zquence      | G3       | **CLOSED 2026-09-11** — a name (see D-011)                        |
-| **D11** | Whether the results list must render procedural stage and outcome status at the same visual weight as the band | Product + design       | G8       | Open                                                              |
-| **D12** | Search index: OpenSearch or Meilisearch                                                                        | Engineering            | G4       | **CLOSED 2026-09-11** — Meilisearch, on C4's figures (see D-002)  |
-| **D13** | Whether search acceptance waits for the index write (~94ms of its latency)                                     | Engineering + product  | G8       | Open — measured in C4, see D-014                                  |
-| **D14** | What feeds the FR-02 association graph in Costa Rica, given no free automatable officer register               | Product + compliance   | G5       | Open — raised by D0, 2026-09-11                                   |
-| **D15** | What the Costa Rican primary-source evidence base is, given depersonalised judgments                           | Product + source admin | G6       | Open — raised by D0, 2026-09-11                                   |
-| **D16** | Whether shared source-registry administration should need a platform role rather than any `source_admin`       | Product + security     | G8       | Open — raised by D1, 2026-09-11                                   |
+| ID      | Decision                                                                                                                               | Owner                                 | Close by                          | Status                                                            |
+| :------ | :------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------ | :-------------------------------- | :---------------------------------------------------------------- |
+| D1      | Which jurisdictions and languages are enabled first                                                                                    | Source/policy admin                   | G5                                | **CLOSED 2026-09-11** — Costa Rica; es + en requested (see D-010) |
+| D2      | The declared archive horizon, per source, published on every result                                                                    | Source/policy admin                   | G10                               | Open                                                              |
+| D3      | Which categories are on by default                                                                                                     | Taxonomy admin                        | G5                                | **CLOSED 2026-09-11** — all seventeen (see D-009)                 |
+| D4      | The exact boundary between adverse media and list matching for designations                                                            | Product + compliance                  | G7                                | Open                                                              |
+| D5      | The reviewer capacity assumption that thresholds are set against                                                                       | Product + compliance                  | G7                                | Open                                                              |
+| D6      | How robots exceptions for official sources are approved and recorded                                                                   | Source admin                          | G6                                | Open — **raised with specifics 2026-09-14**, in the direct path   |
+| D7      | Which open-weight extraction model, benchmarked on the labelled set                                                                    | Engineering                           | G7                                | Open                                                              |
+| D8      | Retention per source and jurisdiction for evidence text                                                                                | Compliance                            | G5                                | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)  |
+| D9      | Whether numeric confidence figures are ever shown (default: no)                                                                        | Product                               | G7                                | Open — default no, enforced                                       |
+| D10     | The minimum identity data the integrating application must supply                                                                      | Product + Zquence                     | G3                                | **CLOSED 2026-09-11** — a name (see D-011)                        |
+| **D11** | Whether the results list must render procedural stage and outcome status at the same visual weight as the band                         | Product + design                      | G8                                | Open                                                              |
+| **D12** | Search index: OpenSearch or Meilisearch                                                                                                | Engineering                           | G4                                | **CLOSED 2026-09-11** — Meilisearch, on C4's figures (see D-002)  |
+| **D13** | Whether search acceptance waits for the index write (~94ms of its latency)                                                             | Engineering + product                 | G8                                | Open — measured in C4, see D-014                                  |
+| **D14** | What feeds the FR-02 association graph in Costa Rica, given no free automatable officer register                                       | Product + compliance                  | G5                                | Open — raised by D0, 2026-09-11                                   |
+| **D15** | What the Costa Rican primary-source evidence base is, given depersonalised judgments                                                   | Product + source admin                | G6                                | Open — raised 2026-09-11, **untouched; re-raised 2026-09-14**     |
+| **D16** | Whether shared source-registry administration should need a platform role rather than any `source_admin`                               | Product + security                    | G8                                | Open — raised by D1, 2026-09-11                                   |
+| **D17** | Which source receives this project's **first deliberate live request**, under whose approval, at what rate, and on what stop condition | Source admin (approver) + engineering | G10, **and before any live call** | Open — raised by Phase E step 2, 2026-09-14                       |
 
 ---
 
@@ -230,6 +231,16 @@ engineering one.
 
 **Must close by G6**, because Phase E's cascade rungs and per-source tiers encode the answer.
 
+**Status check, 2026-09-14 (Phase E step 2): untouched, and now the nearer of the two blockers.**
+Nothing has moved on D15 since it was raised three days ago — no desk research has been done and no
+product position has been taken — while the phase that depends on it is underway. The cascade's
+rung tiers are step 3, which is the next step after this one, so this is the point at which an open
+D15 starts costing work rather than sitting behind it. Two things the owner should know: the
+research question ("is any class of CR judgment published with parties named?") is answered by
+reading CR judicial publications, which is **an outbound request to them** and therefore waits on
+**D17**; and until it closes, step 3 will encode a provisional tier ordering that a later answer
+may invalidate, which is a rework cost, not a correctness one.
+
 ### D16 — Who may administer the shared source registry
 
 **Raised at:** Phase D step D1, 2026-09-11, while wiring the approval lifecycle.
@@ -259,3 +270,74 @@ blast radius a deliberate grant rather than a side effect of a tenant-scoped rol
 
 **Must close by G8**, because the control panel will render whatever this decides, and shipping
 the panel against option 1 makes option 2 a migration rather than a configuration change.
+
+### D17 — The first deliberate live request
+
+**Raised at:** Phase E step 2, 2026-09-14, the moment it became a decision somebody could take
+rather than a hypothetical.
+
+**Why it is a decision at all.** No live source has ever been contacted by this project. That
+sentence appears in `START-HERE.md`, in `CLAUDE.md`, in every phase brief and at the end of every
+demo run, and it has been true through four phases. It is much easier to keep than to recover: the
+day it stops being true, it stops being true permanently, and the only question left is whether
+anybody decided it.
+
+Phase E step 1 built `HttpEvidenceFetchAdapter`, which can open a socket to a publisher. Step 2
+built the gate that authorises one. Neither has made a request — the real transport is constructed
+only by the live composition root, every test injects one, and mock mode reaches nothing — but the
+distance between here and a live request is now a configuration value and a source version. That
+is precisely when the decision has to be written down, because from here the first live request
+could otherwise happen as a side effect of somebody running something.
+
+**What has to be decided, and it is four things, not one:**
+
+1. **Which source is contacted first.** It should be a source whose terms permit automated access
+   in plain words and whose robots.txt allows the path, so that the first request this project
+   ever makes is one nobody has to argue about afterwards. A discovery endpoint (Google News RSS)
+   and a Costa Rican official publisher are different propositions: the first is a large service
+   with published expectations; the second is an institution whose complaint would be about us
+   specifically.
+2. **Under whose approval.** A named person, recorded, in the same way the four-eyes lifecycle
+   records an approver — not "engineering decided the code was ready". The natural home is the
+   source approval itself: the person who activates the source version for live use is the person
+   who approved the first request to it.
+3. **At what rate.** A first request is one request. The rate that follows it is a budget on the
+   source version (`freeTierHourlyBudget` / `freeTierDailyBudget`), which D5's breaker already
+   enforces — so this decision is a number in the registry, not new code. It should be set low
+   enough that a mistake is a nuisance rather than an incident, and it should be set **before**
+   the first call rather than after the first week.
+4. **On what stop condition.** Who stops it, on what signal, and how. The mechanism exists — the
+   kill switch is one person, effective immediately, and a reason is mandatory — so this is about
+   naming the person and the signal: a publisher's email, a 429 pattern, a robots change, an
+   unexpected volume.
+
+**What the engineering side already guarantees, so that the decision is about policy and not about
+whether the code behaves:**
+
+- every URL is screened, and every resolved address is screened inside the connection's own
+  `lookup` (D-034), so a redirect cannot reach a private address;
+- robots.txt is fetched, cached and honoured, and **`UNKNOWN` refuses** — an outage at the
+  publisher is not consent;
+- no exception can be applied at all while **D6** is open;
+- the user agent names the service and carries a contact URL, with no default, so an anonymous
+  crawler cannot be configured by omission (`FETCH_CONTACT_URL`);
+- source health is checked immediately before every external call, the budget is spent per request
+  actually issued, and the kill switch takes effect mid-run;
+- a challenge or interstitial is abandoned after one attempt, never solved, never retried from
+  another identity.
+
+**Recommendation to the decision owner:** make the first live request a **single manual request to
+one source's robots.txt**, approved by name, logged, and stopped there — before any discovery
+connector is switched on. It answers the D6 research question ("does this source's robots.txt
+actually block what we need?"), it is the smallest possible first contact, and it makes the
+transition from "never contacted" to "contacted, deliberately, on this date, by this person"
+an event with a record rather than a discovery made afterwards.
+
+**Provisional behaviour while this is open, and it is in force now:** no live request is made. Live
+mode has no discovery or extraction adapter, the fetch adapter is not constructed without a contact
+URL, and nothing in the test suites can reach a real host. **This is not a technical block** — it
+is a configuration one, which is exactly why the decision matters.
+
+**Must close by G10** (live source verification), **and before any live call is made**, whichever
+comes first. It also gates the desk research **D6** and **D15** both need, because reading a
+publisher's robots.txt or judicial portal is itself an outbound request to them.

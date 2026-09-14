@@ -86,6 +86,11 @@ import {
   type FindingRecord,
   type RejectedLeadRecord,
 } from './findings.service.js';
+import {
+  FetchGateService,
+  isSourceLevelRefusal,
+  type FetchGateDecision,
+} from '../sources/fetch-gate.service.js';
 import type { Lead } from '../sources/lead.js';
 import { hasData } from '../sources/source-adapter.js';
 import { SourceHealthService } from '../sources/source-health.service.js';
@@ -125,6 +130,14 @@ export class SearchPipeline {
     private readonly evidence: EvidenceStagingService,
     private readonly findings: FindingsService,
     private readonly sourceHealth: SourceHealthService,
+    /**
+     * The only thing that may construct a `FetchAuthorisation` (Phase E step 2).
+     *
+     * This pipeline used to build one inline, asserting that five FR-06 gates had passed without
+     * running any of them. Every field is now derived, and a refusal is a recorded reason rather
+     * than a fetch that proceeds on a false record.
+     */
+    private readonly fetchGate: FetchGateService,
     private readonly mode: 'mock' | 'live',
   ) {}
 
@@ -262,6 +275,8 @@ export class SearchPipeline {
       graph,
       taxonomy,
       policy,
+      jurisdictions: input.jurisdictions,
+      languages: input.languages,
       searchId: input.searchId,
       tenantId: input.tenantId,
       now: input.now,
@@ -440,6 +455,9 @@ export class SearchPipeline {
     readonly graph: Awaited<ReturnType<AssociationGraphService['loadForSearch']>>;
     readonly taxonomy: Awaited<ReturnType<TaxonomyService['loadPinned']>>;
     readonly policy: Awaited<ReturnType<PolicyService['loadPinned']>>;
+    /** The run's pinned scope. The fetch gate refuses a lead outside what the run asked for. */
+    readonly jurisdictions: readonly string[];
+    readonly languages: readonly string[];
     readonly searchId: string;
     readonly tenantId: string;
     readonly now: Date;
@@ -455,6 +473,8 @@ export class SearchPipeline {
     const accessOutcomes: SourceCoverageOutcome[] = [];
     /** One coverage outcome per refused source, not one per lead it cost. */
     const refusedSources = new Set<string>();
+    /** The same rule for gate refusals, keyed by source *and* refusal: two gaps, two lines. */
+    const gateRefusedSources = new Set<string>();
 
     if (fetcher === null || extractor === null) {
       for (const { lead, query } of input.sourced) {
@@ -502,6 +522,37 @@ export class SearchPipeline {
         continue;
       }
 
+      // The FR-06 gate (Phase E step 2). Every field of the authorisation is derived here, by
+      // the one component permitted to issue one. A refusal is recorded with its reason and,
+      // when it is a property of the source rather than of this URL, as a coverage gap too —
+      // because a source excluded in full is something a reviewer reading a narrow result has
+      // to be told.
+      const gate = await this.fetchGate.authorise({
+        sourceId: leadSourceId,
+        url: lead.url,
+        jurisdiction: query.jurisdiction,
+        language: lead.language,
+        runJurisdictions: input.jurisdictions,
+        runLanguages: input.languages,
+        taxonomy: input.taxonomy,
+        subjectNameForms: nameForms,
+        leadTitle: lead.title,
+        leadSnippet: lead.snippet,
+        now: input.now,
+      });
+      if (!gate.authorised) {
+        this.recordGateRefusal({
+          gate,
+          lead,
+          query,
+          input,
+          rejected,
+          accessOutcomes,
+          refusedSources: gateRefusedSources,
+        });
+        continue;
+      }
+
       const fetched = await fetcher.fetch({
         url: lead.url,
         attribution: {
@@ -510,20 +561,9 @@ export class SearchPipeline {
           subjectId: input.subject.subjectId,
           queryId: query.queryId,
           sourceId: lead.provenance.sourceId,
-          egressIdentityId: 'mock-egress-1',
+          egressIdentityId: gate.egressIdentity.identityId,
         },
-        authorisation: {
-          sourceVersionId: 'fixture-source-v1',
-          // The fixture server has no robots.txt to honour, and saying otherwise would put a
-          // false statement into the record the fetch gate reads.
-          robotsPosition: 'HONOURED',
-          robotsExceptionApprovedBy: null,
-          jurisdictionEnabled: true,
-          languageEnabled: true,
-          urlPolicyPassed: true,
-          ssrfValidated: true,
-          relevanceScore: 0.9,
-        },
+        authorisation: gate.authorisation,
         budget: {
           maxBytes: 2_000_000,
           maxDecompressedBytes: 10_000_000,
@@ -551,7 +591,11 @@ export class SearchPipeline {
           stage: 'FETCH',
           reason:
             fetched.status === 'FAILED'
-              ? `The document could not be retrieved (${fetched.policy.failureClass}).`
+              ? // The class alone read as "could not be retrieved (HARD_BLOCK)", which tells a
+                // reviewer that something went wrong and nothing about what. The adapter knows
+                // the sentence; `SourceOutcome.FAILED` now carries it here.
+                `The document could not be retrieved (${fetched.policy.failureClass}): ` +
+                fetched.detail
               : 'The document was not modified or returned no body.',
         });
         continue;
@@ -640,6 +684,55 @@ export class SearchPipeline {
     }
 
     return { findings, rejected, accessOutcomes };
+  }
+
+  /**
+   * Record a fetch-gate refusal: always against the lead, and against coverage when it is the
+   * source that was refused.
+   *
+   * The distinction is `isSourceLevelRefusal`, and it matters to a reviewer. "This URL was not
+   * in the run's scope" is one lead going no further. "This source has no approved robots
+   * position" means every lead from that source was excluded, which is a gap in what the run
+   * covered and belongs in the coverage statement beside the sources that failed. Neither is
+   * ever a silent skip (FR-06).
+   */
+  private recordGateRefusal(args: {
+    readonly gate: Extract<FetchGateDecision, { authorised: false }>;
+    readonly lead: Lead;
+    readonly query: PlannedQuery;
+    readonly input: { readonly tenantId: string; readonly searchId: string };
+    readonly rejected: RejectedLeadRecord[];
+    readonly accessOutcomes: SourceCoverageOutcome[];
+    readonly refusedSources: Set<string>;
+  }): void {
+    const { gate, lead, query, input } = args;
+    const sourceId = lead.provenance.sourceId;
+
+    args.rejected.push({
+      ...this.leadRecord(lead, query, input),
+      stage: 'FETCH',
+      reason: `The document was not requested. ${gate.detail}`,
+    });
+
+    if (!isSourceLevelRefusal(gate.refusal)) {
+      return;
+    }
+    const key = `${sourceId}:${gate.refusal}`;
+    if (args.refusedSources.has(key)) {
+      return;
+    }
+    args.refusedSources.add(key);
+    args.accessOutcomes.push({
+      sourceId,
+      sourceName: gate.sourceVersion?.sourceName ?? sourceId,
+      cascadeRung: gate.sourceVersion?.cascadeRung ?? lead.rung,
+      // SKIPPED, not FAILED: the source answered nothing because we chose not to ask it. Calling
+      // it a failure would report an outage at a publisher that is working perfectly well.
+      outcome: 'SKIPPED',
+      detail: gate.detail,
+      queriesAffected: 1,
+      truncation: null,
+    });
   }
 
   private leadRecord(

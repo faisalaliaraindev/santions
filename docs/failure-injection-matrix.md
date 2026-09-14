@@ -57,26 +57,27 @@ that mentions a receipt also names the identity that holds when the receipt is g
 
 ## The matrix
 
-| ID        | Boundary                                                    | Orphan                                       | Reconciler                                                        | Window     | Phase |
-| :-------- | :---------------------------------------------------------- | :------------------------------------------- | :---------------------------------------------------------------- | :--------- | :---- |
-| **FI-01** | Idempotency claim written → run inserted                    | `IN_FLIGHT` receipt with no run              | Explicit `release()`; TTL expiry as the backstop                  | 24 h TTL   | B ✅  |
-| **FI-02** | Subject version committed → run inserted                    | _Not an orphan_ — see below                  | None, deliberately; closed on the search path by C2               | —          | C2 ✅ |
-| **FI-03** | S3 object staged + checksum verified → reference committed  | S3 object nothing references                 | Orphan-object sweep over the tenant prefix                        | 6 h        | C5    |
-| **FI-04** | Reference + outbox event committed → event published        | Unpublished `OutboxEvent`                    | Outbox publisher polls unpublished, due events                    | next poll  | C2    |
-| **FI-05** | Event published to queue → marked published in Mongo        | Event published twice                        | None needed — consumer dedupes (FI-07/FI-09)                      | —          | C2    |
-| **FI-06** | Queue message read → handling begins                        | Nothing durable                              | Visibility timeout returns the message                            | visibility | C6    |
-| **FI-07** | Stage state committed → message acknowledged                | Message redelivered after committed work     | `InboxReceipt` on message identity + stage identity               | visibility | C6    |
-| **FI-08** | External request made → message acknowledged                | **The external call may repeat**             | Not prevented. Stage identity stops duplicate results             | visibility | C6    |
-| **FI-09** | Effect applied → receipt written                            | Effect committed, receipt absent             | Same transaction; identity is the guard if it is not              | —          | C2    |
-| **FI-10** | Document committed → written to the search index            | Committed-but-unindexed document             | Re-indexer sweeps `indexState: PENDING`                           | 5 min      | C3    |
-| **FI-11** | Lease acquired → stage state written                        | Lease held by a dead worker                  | Lease-expiry sweeper; fencing rejects the stale write             | lease TTL  | C6    |
-| **FI-12** | Cancellation committed → late completion arrives            | A result for a run that is no longer running | Fence rejects it; the attempt is recorded, not applied            | —          | C6    |
-| **FI-13** | Review action read revision → review action written         | Two actions on one revision                  | Revision check; the stale one gets 409 + a recovery path          | —          | C6    |
-| **FI-14** | Business state + audit entry committed → checkpoint written | Audit entries past the last checkpoint       | Checkpointer detects and closes the sequence gap                  | checkpoint | C1    |
-| **FI-15** | Reference marked expired → S3 object deleted                | Object still present, reference says expired | Retention sweeper retries the delete                              | 24 h       | C1/C5 |
-| **FI-16** | Notification delivered → delivery recorded                  | Delivery repeated, or arriving out of order  | Receiver dedupes on event ID; lower revisions discarded           | —          | C6/G  |
-| **FI-17** | Source registry read → snapshot committed                   | A snapshot citing a version that has changed | Snapshot pins what the run planned; health is re-read at each use | —          | D5    |
-| **FI-18** | Source suspended → in-flight run already dispatched work    | Work in flight against a source we stopped   | Access rechecked at every point of use; the gap is recorded       | one call   | D5    |
+| ID        | Boundary                                                    | Orphan                                                       | Reconciler                                                                                | Window      | Phase |
+| :-------- | :---------------------------------------------------------- | :----------------------------------------------------------- | :---------------------------------------------------------------------------------------- | :---------- | :---- |
+| **FI-01** | Idempotency claim written → run inserted                    | `IN_FLIGHT` receipt with no run                              | Explicit `release()`; TTL expiry as the backstop                                          | 24 h TTL    | B ✅  |
+| **FI-02** | Subject version committed → run inserted                    | _Not an orphan_ — see below                                  | None, deliberately; closed on the search path by C2                                       | —           | C2 ✅ |
+| **FI-03** | S3 object staged + checksum verified → reference committed  | S3 object nothing references                                 | Orphan-object sweep over the tenant prefix                                                | 6 h         | C5    |
+| **FI-04** | Reference + outbox event committed → event published        | Unpublished `OutboxEvent`                                    | Outbox publisher polls unpublished, due events                                            | next poll   | C2    |
+| **FI-05** | Event published to queue → marked published in Mongo        | Event published twice                                        | None needed — consumer dedupes (FI-07/FI-09)                                              | —           | C2    |
+| **FI-06** | Queue message read → handling begins                        | Nothing durable                                              | Visibility timeout returns the message                                                    | visibility  | C6    |
+| **FI-07** | Stage state committed → message acknowledged                | Message redelivered after committed work                     | `InboxReceipt` on message identity + stage identity                                       | visibility  | C6    |
+| **FI-08** | External request made → message acknowledged                | **The external call may repeat**                             | Not prevented. Stage identity stops duplicate results                                     | visibility  | C6    |
+| **FI-09** | Effect applied → receipt written                            | Effect committed, receipt absent                             | Same transaction; identity is the guard if it is not                                      | —           | C2    |
+| **FI-10** | Document committed → written to the search index            | Committed-but-unindexed document                             | Re-indexer sweeps `indexState: PENDING`                                                   | 5 min       | C3    |
+| **FI-11** | Lease acquired → stage state written                        | Lease held by a dead worker                                  | Lease-expiry sweeper; fencing rejects the stale write                                     | lease TTL   | C6    |
+| **FI-12** | Cancellation committed → late completion arrives            | A result for a run that is no longer running                 | Fence rejects it; the attempt is recorded, not applied                                    | —           | C6    |
+| **FI-13** | Review action read revision → review action written         | Two actions on one revision                                  | Revision check; the stale one gets 409 + a recovery path                                  | —           | C6    |
+| **FI-14** | Business state + audit entry committed → checkpoint written | Audit entries past the last checkpoint                       | Checkpointer detects and closes the sequence gap                                          | checkpoint  | C1    |
+| **FI-15** | Reference marked expired → S3 object deleted                | Object still present, reference says expired                 | Retention sweeper retries the delete                                                      | 24 h        | C1/C5 |
+| **FI-16** | Notification delivered → delivery recorded                  | Delivery repeated, or arriving out of order                  | Receiver dedupes on event ID; lower revisions discarded                                   | —           | C6/G  |
+| **FI-17** | Source registry read → snapshot committed                   | A snapshot citing a version that has changed                 | Snapshot pins what the run planned; health is re-read at each use                         | —           | D5    |
+| **FI-18** | Source suspended → in-flight run already dispatched work    | Work in flight against a source we stopped                   | Access rechecked at every point of use; the gap is recorded                               | one call    | D5    |
+| **FI-19** | Fetch authorised → the socket opens                         | A request made under an approval that has since been retired | The authorisation is issued per lead and names the version; health is re-read at the call | one request | E2    |
 
 "✅" means it exists and holds today. The rest are specified here and built in the step named.
 
@@ -389,6 +390,31 @@ places, for the reason in decision **D-031**.
 
 **Licence expiry is the same row.** T36 names it explicitly and `decideSourceAccess` puts it on the
 same path: past the recorded expiry the source is refused exactly as a suspended one is.
+
+### FI-19 — Fetch authorised → the socket opens
+
+The boundary Phase E step 2 adds. `FetchGateService` reads the **active approved source version**,
+derives a `FetchAuthorisation` from it, and hands it to the fetch adapter, which then screens,
+consults robots.txt, checks health and opens a socket. Between the read and the socket, an
+administrator can retire the version, activate a narrower one, or let the licence terms expire.
+
+**Orphan:** none, in the storage sense — nothing is written between the two. What can exist is a
+**request made under an approval that is no longer current**, which is the same shape of problem as
+FI-17 and is recorded here so it is not mistaken for a new one.
+
+**Reconciler: the authorisation is issued per lead, not per run.** It is derived immediately before
+the fetch rather than at plan time, so the window is one request rather than the length of a run.
+`SourceHealthService.checkAccess` closes the other half at the call itself, and the authorisation
+names the exact `sourceVersionId` and `licenceTermsVersion` it was issued under — so a request made
+in the window is attributable to the approval that was current when it was made, rather than being
+indistinguishable from one made under the new version.
+
+**Window: one request.** It cannot be zero without holding a lock across an external call.
+
+**What the user sees:** where the gate refuses, a rejected lead carrying the reason, and — when the
+refusal is a property of the source rather than of one URL — a `SKIPPED` coverage outcome naming
+it (D-036). `SKIPPED`, not `FAILED`: the source answered nothing because we chose not to ask it,
+and reporting an outage at a publisher that is working is its own kind of false statement.
 
 ### FI-16 — Notification delivered → delivery recorded
 

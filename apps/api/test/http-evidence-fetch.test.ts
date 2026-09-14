@@ -93,6 +93,7 @@ function request(overrides: Partial<FetchRequest> = {}): FetchRequest {
     },
     authorisation: {
       sourceVersionId: 'src-example-news:v3',
+      licenceTermsVersion: 'terms-2026-01',
       robotsPosition: 'HONOURED',
       robotsExceptionApprovedBy: null,
       jurisdictionEnabled: true,
@@ -100,6 +101,9 @@ function request(overrides: Partial<FetchRequest> = {}): FetchRequest {
       urlPolicyPassed: true,
       ssrfValidated: true,
       relevanceScore: 0.8,
+      relevanceMethod: 'TEST_FIXTURE',
+      issuedBy: 'FetchGateService',
+      issuedAt: '2026-09-14T00:00:00.000Z',
     },
     budget: {
       maxBytes: 2_000_000,

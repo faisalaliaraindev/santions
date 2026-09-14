@@ -1066,3 +1066,104 @@ comment and a flag rather than in the type system. A third caller that forgets t
 over-count. The mitigation is that the flag is named for what it means and that the default is the
 safe direction — a caller that forgets it spends, and over-counting slows fetching down rather
 than exceeding a publisher's free tier.
+
+---
+
+## D-036 — Only `FetchGateService` issues a `FetchAuthorisation`, and every field is derived
+
+**Status:** Accepted · **Decided at:** Phase E step 2, 2026-09-14
+
+`SearchPipeline` used to build its `FetchAuthorisation` inline: `sourceVersionId:
+'fixture-source-v1'`, `robotsPosition: 'HONOURED'`, `jurisdictionEnabled: true`, `languageEnabled:
+true`, `urlPolicyPassed: true`, `ssrfValidated: true`, `relevanceScore: 0.9`. Not one of those was
+derived from anything. Against `MockEvidenceFetchAdapter` it was harmless — the mock reads the
+record and returns a fixture. Against the real adapter built in step 1 it is a signed statement
+that five FR-06 gates were passed which were never run, in the one record whose purpose is to be
+audited afterwards. `urlPolicyPassed: true` claimed SEC-02 screening on a URL nothing had screened.
+
+So there is one issuer, and it derives every field: the **active approved source version** and its
+recorded, unexpired licence terms; jurisdiction enablement from the run's pinned scope, the
+source's approved countries and the pinned taxonomy; language enablement from the lead's declared
+language, the taxonomy and the source; `urlPolicyPassed` from `screenUrl` run here on this URL; and
+the robots position from what an approver actually recorded.
+
+Three consequences worth stating.
+
+**`ssrfValidated` now means something specific, and the field says what.** The gate runs the
+literal half — a URL whose host is an address in a forbidden range is rejected before the field is
+set — and the resolved half is structural, performed inside the connection's own `lookup` on every
+hop (D-034). No caller can satisfy the field by asserting it.
+
+**A fixture is not a publisher.** The six mock sources are registered with `robotsPosition:
+'NOT_ESTABLISHED'`, which is true of them: there is no publisher behind a local fixture with whom a
+position could be established. The old inline record said `HONOURED` to get past the gate. The gate
+now issues `FIXTURE_NOT_A_PUBLISHER` — **only** in a mock-mode process, **only** for a
+`FIXTURE_MOCK` connector — and `HttpEvidenceFetchAdapter` refuses that value outright, so a fixture
+authorisation cannot justify a request to a real host (T55, from the other end than
+`MockModeWitness`).
+
+**A refusal is recorded twice when it costs a source.** `isSourceLevelRefusal` splits refusals that
+are properties of the source (no active version, expired licence, no established robots position,
+an unapprovable exception) from those that are properties of one URL (outside the run's scope, a
+rejected URL). The first become a `SKIPPED` coverage outcome as well as a rejected lead, because a
+source excluded in full is something a reviewer reading a narrow result has to be told. `SKIPPED`
+rather than `FAILED`: the source answered nothing because we chose not to ask it.
+
+**Enforcement.** The "only issuer" rule is checked by a test that scans `apps/api/src` for the
+`urlPolicyPassed` field outside the gate and the port — the same way decision D-001's boundary is
+enforced in the control panel. A rule nobody can check is a rule that lasts until the next hurry.
+
+**Cost.** The gate is another point of failure between a lead and its evidence, and a
+misconfigured registry now refuses fetches that previously proceeded on a false record. That is the
+intended direction: a refusal is visible, and the coverage statement says what was excluded and
+why. It also means the fixture sources' registry rows are load-bearing for mock mode, which was
+already true of source health and is now true of the gate.
+
+---
+
+## D-037 — The relevance score is preliminary, is labelled, and does not gate
+
+**Status:** Accepted, provisional · **Decided at:** Phase E step 2, 2026-09-14
+
+`FetchAuthorisation.relevanceScore` was the constant `0.9`. FR-06's nine-signal relevance filter is
+step 4 of this phase, and its weights are to be set against the FR-16 labelled corpus rather than
+guessed in advance, so step 2 had a choice between three bad options and one adequate one: keep the
+constant, invent weights early, refuse every fetch until step 4, or compute something real and say
+what it is.
+
+The gate computes a **name-presence score** over the lead's own title and snippet against the
+subject's name forms — 1 for a whole name form present, otherwise the best fraction of a name
+form's tokens present, 0 for a lead that names nobody — and records it alongside
+`relevanceMethod: 'PRELIMINARY_NAME_PRESENCE_v1'`. The method field is the point: 0.4 from FR-06's
+nine signals and 0.4 from a name-presence heuristic mean different things, and a bare number in an
+audited record cannot be told apart from a measured one.
+
+**It does not gate.** No threshold is applied, because a threshold chosen before the corpus has
+been consulted would silently drop real leads on a number nobody validated — and FR-06 is explicit
+that relevance filtering decides whether a document is worth the request, never whether it is
+adverse. Step 4 replaces the method, adds the threshold, and stores what it rejected as a lead with
+its reason.
+
+**Cost.** A score of 0 is recorded against leads that will be fetched anyway, which reads oddly
+until step 4 lands. The alternative was a number that reads plausibly and means nothing, which is
+worse in the only situation that matters — somebody auditing the record afterwards.
+
+---
+
+## D-038 — A `FAILED` source outcome carries a human detail, not only a class
+
+**Status:** Accepted · **Decided at:** Phase E step 2, 2026-09-14
+
+`SourceOutcome.FAILED` carried a `FailureSignal` and the FR-06 classification, and nothing a person
+could read. A lead refused because robots.txt disallowed its path reached a reviewer as "The
+document could not be retrieved (HARD_BLOCK)" — which says something went wrong and nothing about
+what. The adapter knew the sentence; it logged it, where no reviewer will ever see it.
+
+`detail` is now a **required** field on the `FAILED` variant and a required argument to `failed()`,
+so no adapter can produce a failure with no explanation — a compile error at fifteen call sites is
+the mechanism, and it is cheaper than a convention. It describes the event, never the subject: a
+host, a status code, a robots path, a byte count.
+
+**Cost.** Fifteen call sites had to write a sentence, and the sentences are as good as whoever
+wrote them. An optional field would have avoided that and would have been absent everywhere it
+mattered.

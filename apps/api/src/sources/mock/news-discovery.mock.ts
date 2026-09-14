@@ -74,7 +74,15 @@ export class MockNewsDiscoveryAdapter implements NewsDiscoveryPort {
   async discover(query: DiscoveryQuery): Promise<SourceOutcome<readonly Lead[]>> {
     const now = this.clock();
     if (this.fault !== null) {
-      return Promise.resolve(failed(this.descriptor, now, this.fault));
+      return Promise.resolve(
+        failed(
+          this.descriptor,
+          now,
+          this.fault,
+          `The injected fault for the news discovery fixture answered the query for ` +
+            `"${query.text}" with ${JSON.stringify(this.fault)}.`,
+        ),
+      );
     }
 
     // The shape-change failure mode, exactly as it presents in production: HTTP 200, a body

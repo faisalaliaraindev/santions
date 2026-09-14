@@ -9,13 +9,21 @@ of previous sessions. It is deliberately short.
 
 > **Phase E — Query planning, discovery cascade and fetch (gate G6)**
 >
-> 🔧 **Current work: the live-source path. Step 1 of eight is done.**
-> `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and tested.
-> **The next concrete action is step 2: `FetchGateService`**, and specifically deleting the
-> fabricated `FetchAuthorisation` in `search-pipeline.service.ts`, which today asserts
-> `urlPolicyPassed: true` and `ssrfValidated: true` without either having been run. Against the
-> mock that was harmless; against the adapter that now exists it is a signed statement about
-> gates that were never checked, in the one record whose purpose is to be audited.
+> 🔧 **Current work: the live-source path. Steps 1 and 2 of eight are done.**
+> `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and tested, and
+> `FetchGateService` now **derives** every `FetchAuthorisation` field. The fabricated record in
+> `search-pipeline.service.ts` is gone: it used to assert `urlPolicyPassed: true` and
+> `ssrfValidated: true` without either having been run, and `egressIdentityId: 'mock-egress-1'`
+> into attribution. The gate is the only issuer, enforced by a scan test (**D-036**).
+> **The next concrete action is step 3: the discovery connectors and the seven-rung cascade** —
+> and the first thing it decides is the XML parser dependency, explicitly, because a parser that
+> resolves entities is an XXE hole pointed at a third party's feed.
+>
+> **A new decision is open and it blocks a live call: D17 — the first deliberate live request.**
+> Which source, under whose named approval, at what rate, on what stop condition. Nothing is
+> technically blocking a live request any more; what is blocking it is that nobody has decided
+> it. See `../open-decisions.md`. **D15 was re-raised on 2026-09-14** — untouched since it was
+> raised, and step 3's rung tiers encode its answer.
 >
 > Brief: [`phase-e.md`](./phase-e.md) — **expanded into a full brief on 2026-09-14**. It carries
 > an execution order that deliberately differs from the `E1`–`E6` step numbering, and says why.
@@ -127,7 +135,7 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **614 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **644 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
 **206 integration** tests and `pnpm test:security` **106 security** tests.
@@ -210,16 +218,16 @@ docs/                  architecture, decisions, open-decisions, traceability, st
 
 Inside `apps/api/src`, the four directories Phase C added:
 
-| Directory       | What is in it                                                                                                                                                     |
-| :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin/`        | The D1 approval lifecycle, the SEC-05 gate at activation, and capability coverage                                                                                 |
-| `persistence/`  | The section 6.3 records, and `TransactionRunner` — the one place a transaction opens                                                                              |
-| `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01), and C6's `JobConsumer`, `WorkerRuntime`, `DeadLetterPort` and `JobHandler` interface |
-| `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler                                                                              |
-| `storage/`      | `ObjectStorePort` + S3 adapter, `EvidenceStagingService` (stage → verify → commit, plus the orphan sweep), `RetentionSweeper`                                     |
-| `sources/`      | The six FR-05 ports (D2), their deterministic mocks in `mock/`, and the GB-only Companies House adapter                                                           |
-| `associations/` | The FR-02 graph (D3): officer resolution, the `DIRECTOR_OF` edges, and the snapshot frozen to the run                                                             |
-| `pipeline/`     | The search pipeline, the job handler that runs it, and the findings store (Phase E slice)                                                                         |
+| Directory       | What is in it                                                                                                                                                                                                                                                                       |
+| :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin/`        | The D1 approval lifecycle, the SEC-05 gate at activation, and capability coverage                                                                                                                                                                                                   |
+| `persistence/`  | The section 6.3 records, and `TransactionRunner` — the one place a transaction opens                                                                                                                                                                                                |
+| `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01), and C6's `JobConsumer`, `WorkerRuntime`, `DeadLetterPort` and `JobHandler` interface                                                                                                                   |
+| `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler                                                                                                                                                                                                |
+| `storage/`      | `ObjectStorePort` + S3 adapter, `EvidenceStagingService` (stage → verify → commit, plus the orphan sweep), `RetentionSweeper`                                                                                                                                                       |
+| `sources/`      | The six FR-05 ports (D2), their deterministic mocks in `mock/`, the GB-only Companies House adapter, the live `HttpEvidenceFetchAdapter` (E1), and `FetchGateService` — the only issuer of a `FetchAuthorisation` — with its source-version reader and the one egress identity (E2) |
+| `associations/` | The FR-02 graph (D3): officer resolution, the `DIRECTOR_OF` edges, and the snapshot frozen to the run                                                                                                                                                                               |
+| `pipeline/`     | The search pipeline, the job handler that runs it, and the findings store (Phase E slice)                                                                                                                                                                                           |
 
 The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint

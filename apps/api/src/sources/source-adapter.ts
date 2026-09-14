@@ -142,6 +142,17 @@ export type SourceOutcome<T> =
       readonly signal: FailureSignal;
       /** Classified by the FR-06 table, here, so no caller invents a second taxonomy. */
       readonly policy: FailurePolicy;
+      /**
+       * What happened, in a sentence a reviewer can act on. Required, never null.
+       *
+       * The class alone is not enough and the gap was visible in the product: a lead refused
+       * because robots.txt disallowed it read as "could not be retrieved (HARD_BLOCK)", which
+       * tells a reviewer that something went wrong and nothing about what. The adapter knows the
+       * sentence — it logged it — and the coverage record is where a reviewer reads it, so the
+       * outcome carries it rather than the log. It describes the *event*, never the subject, and
+       * is safe to show: a host, a status code, a robots path.
+       */
+      readonly detail: string;
       readonly provenance: AdapterProvenance;
     };
 
@@ -214,11 +225,13 @@ export function failed<T>(
   descriptor: AdapterDescriptor,
   retrievedAt: Date,
   signal: FailureSignal,
+  detail: string,
 ): SourceOutcome<T> {
   return {
     status: 'FAILED',
     signal,
     policy: classifyFailure(signal),
+    detail,
     provenance: stampProvenance(descriptor, retrievedAt),
   };
 }

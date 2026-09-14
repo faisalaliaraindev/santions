@@ -48,6 +48,11 @@ export function assertAuthorised(request: FetchRequest): void {
   if (a.robotsPosition === 'NOT_ESTABLISHED') {
     failures.push('robots position not established');
   }
+  if (a.issuedBy.trim() === '' || a.issuedAt.trim() === '') {
+    // An authorisation that cannot say who issued it and when is not auditable, which is the
+    // one job this record has. `FetchGateService` is the only issuer; see `fetch-gate.service.ts`.
+    failures.push('authorisation names no issuer');
+  }
   if (a.robotsPosition === 'EXCEPTION_APPROVED' && a.robotsExceptionApprovedBy === null) {
     // FR-06: the exception process is "approved by a named person — never a global setting".
     // An unattributed exception is a global setting wearing a record's clothes. Open decision
@@ -80,6 +85,28 @@ export function assertAttributable(request: FetchRequest): void {
     throw new Error(
       `Unattributable outbound request (missing: ${missing.join(', ')}). FR-06: an ` +
         `unattributable outbound request is a defect.`,
+    );
+  }
+}
+
+/**
+ * Refuse a fixture authorisation handed to a live transport.
+ *
+ * `FIXTURE_NOT_A_PUBLISHER` is the honest robots position for a `FIXTURE_MOCK` source in a
+ * mock-mode process: there is no publisher, so there is no position to honour. It is therefore
+ * the one robots value that must never justify a request to a real host. `MockModeWitness`
+ * already stops a mock *adapter* existing in a live process; this stops a mock *authorisation*
+ * reaching the real one, which is the same rule from the other end (T55).
+ *
+ * @throws if the authorisation is a fixture authorisation.
+ */
+export function assertNotFixtureAuthorisation(request: FetchRequest): void {
+  if (request.authorisation.robotsPosition === 'FIXTURE_NOT_A_PUBLISHER') {
+    throw new Error(
+      `Refusing to fetch ${request.url} on a fixture authorisation. ` +
+        `FIXTURE_NOT_A_PUBLISHER says there is no publisher behind this source, and it is issued ` +
+        `only in mock mode for a FIXTURE_MOCK connector. A live transport that honoured it would ` +
+        `be fetching a real host under a record saying no real host was involved (T55).`,
     );
   }
 }

@@ -88,13 +88,23 @@ export class MockCompanyRegistryAdapter implements CompanyRegistryPort {
     this.fault = null;
   }
 
+  /** The sentence a reviewer reads when an injected fault is what stopped the call. */
+  private faultDetail(operation: string): string {
+    return (
+      `The injected fault for the company-registry fixture answered the ${operation} with ` +
+      `${JSON.stringify(this.fault?.signal ?? {})}.`
+    );
+  }
+
   async findOfficers(
     query: OfficerSearchQuery,
   ): Promise<SourceOutcome<readonly OfficerCandidate[]>> {
     assertJurisdictionCovered(this.descriptor, query.jurisdiction);
     const now = this.clock();
     if (this.fault !== null) {
-      return Promise.resolve(failed(this.descriptor, now, this.fault.signal));
+      return Promise.resolve(
+        failed(this.descriptor, now, this.fault.signal, this.faultDetail('officer search')),
+      );
     }
 
     const matches = FIXTURE_OFFICERS.filter(
@@ -129,7 +139,9 @@ export class MockCompanyRegistryAdapter implements CompanyRegistryPort {
     assertJurisdictionCovered(this.descriptor, query.jurisdiction);
     const now = this.clock();
     if (this.fault !== null) {
-      return Promise.resolve(failed(this.descriptor, now, this.fault.signal));
+      return Promise.resolve(
+        failed(this.descriptor, now, this.fault.signal, this.faultDetail('appointment listing')),
+      );
     }
 
     const matches = FIXTURE_DIRECTORSHIPS.filter(
@@ -158,7 +170,9 @@ export class MockCompanyRegistryAdapter implements CompanyRegistryPort {
     assertJurisdictionCovered(this.descriptor, jurisdiction);
     const now = this.clock();
     if (this.fault !== null) {
-      return Promise.resolve(failed(this.descriptor, now, this.fault.signal));
+      return Promise.resolve(
+        failed(this.descriptor, now, this.fault.signal, this.faultDetail('company lookup')),
+      );
     }
     const found = FIXTURE_COMPANIES.find(
       (c) => c.companyRef === companyRef && c.jurisdiction === jurisdiction,

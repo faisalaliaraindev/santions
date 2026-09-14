@@ -154,12 +154,27 @@ export class MockEvidenceFetchAdapter implements EvidenceFetchPort {
     if (request.url === OVERSIZE_URL) {
       // FR-06: abort immediately, record a bounded rejection, free the worker. Classified by
       // the table as OVERSIZE — non-retryable — rather than by anything this adapter decides.
-      return Promise.resolve(failed(this.descriptor, now, { limitExceeded: true }));
+      return Promise.resolve(
+        failed(
+          this.descriptor,
+          now,
+          { limitExceeded: true },
+          `The fixture at ${request.url} is deliberately larger than any sane byte budget, and ` +
+            `the fetch was abandoned rather than buffered.`,
+        ),
+      );
     }
 
     const fixture = FIXTURE_DOCUMENTS.find((d) => d.url === request.url);
     if (fixture === undefined) {
-      return Promise.resolve(failed(this.descriptor, now, { httpStatus: 404 }));
+      return Promise.resolve(
+        failed(
+          this.descriptor,
+          now,
+          { httpStatus: 404 },
+          `The fixture corpus holds no document at ${request.url}.`,
+        ),
+      );
     }
 
     if (this.notModifiedUrls.has(request.url)) {
@@ -184,7 +199,15 @@ export class MockEvidenceFetchAdapter implements EvidenceFetchPort {
 
     const body = new TextEncoder().encode(fixture.body);
     if (body.byteLength > request.budget.maxBytes) {
-      return Promise.resolve(failed(this.descriptor, now, { limitExceeded: true }));
+      return Promise.resolve(
+        failed(
+          this.descriptor,
+          now,
+          { limitExceeded: true },
+          `The document at ${request.url} is ${String(body.byteLength)} bytes, over the ` +
+            `${String(request.budget.maxBytes)}-byte budget for this fetch.`,
+        ),
+      );
     }
 
     return Promise.resolve(

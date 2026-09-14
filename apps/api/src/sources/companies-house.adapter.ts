@@ -146,7 +146,7 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
 
     const response = await this.get(url);
     if (response.kind === 'FAILURE') {
-      return failed(this.descriptor, this.clock(), response.signal);
+      return failed(this.descriptor, this.clock(), response.signal, response.detail);
     }
 
     const body = response.body as OfficerSearchResponse;
@@ -186,7 +186,7 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
 
     const response = await this.get(url);
     if (response.kind === 'FAILURE') {
-      return failed(this.descriptor, this.clock(), response.signal);
+      return failed(this.descriptor, this.clock(), response.signal, response.detail);
     }
 
     const body = response.body as AppointmentsResponse;
@@ -250,7 +250,7 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
       if (response.signal.httpStatus === 404) {
         return noResults(this.descriptor, this.clock());
       }
-      return failed(this.descriptor, this.clock(), response.signal);
+      return failed(this.descriptor, this.clock(), response.signal, response.detail);
     }
 
     const body = response.body as CompanyProfileResponse;
@@ -306,9 +306,13 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
    * `classifyFailure` decides what they mean. Deciding here would be the second failure
    * taxonomy that `failure-classification.ts` exists to prevent.
    */
-  private async get(
-    url: URL,
-  ): Promise<{ kind: 'OK'; body: unknown } | { kind: 'FAILURE'; signal: FailureSignal }> {
+  private async get(url: URL): Promise<
+    | { kind: 'OK'; body: unknown }
+    // `detail` rides with the signal because the sentence a reviewer reads is written where the
+    // facts are, and reconstructing it from a classified failure two layers up loses the host,
+    // the status and the path.
+    | { kind: 'FAILURE'; signal: FailureSignal; detail: string }
+  > {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
@@ -334,6 +338,7 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
               ? {}
               : { retryAfterSeconds: Number(retryAfter) }),
           },
+          detail: `Companies House answered ${String(response.status)} for ${url.pathname}.`,
         };
       }
 
@@ -342,7 +347,14 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
         // A non-JSON 200 from a JSON API is the signature of an interstitial or an error page
         // served with the wrong status. Reported as an unexpected content type, which the
         // table treats as a content error — that is, not retried.
-        return { kind: 'FAILURE', signal: { unexpectedContentType: true, httpStatus: 200 } };
+        return {
+          kind: 'FAILURE',
+          signal: { unexpectedContentType: true, httpStatus: 200 },
+          detail:
+            `Companies House answered 200 for ${url.pathname} with content type ` +
+            `"${contentType}" rather than JSON, which is the signature of an error page or an ` +
+            `interstitial served with the wrong status.`,
+        };
       }
 
       try {
@@ -350,10 +362,19 @@ export class CompaniesHouseAdapter implements CompanyRegistryPort {
         // would dress an unvalidated third-party body as a checked one.
         return { kind: 'OK', body: await response.json() };
       } catch {
-        return { kind: 'FAILURE', signal: { unparsableBody: true, httpStatus: response.status } };
+        return {
+          kind: 'FAILURE',
+          signal: { unparsableBody: true, httpStatus: response.status },
+          detail: `Companies House returned a body for ${url.pathname} that is not valid JSON.`,
+        };
       }
     } catch (error) {
-      return { kind: 'FAILURE', signal: networkSignal(error) };
+      const signal = networkSignal(error);
+      return {
+        kind: 'FAILURE',
+        signal,
+        detail: `Companies House could not be reached for ${url.pathname} (${signal.syscallCode ?? 'network error'}).`,
+      };
     } finally {
       clearTimeout(timer);
     }

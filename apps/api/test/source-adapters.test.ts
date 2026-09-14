@@ -618,6 +618,7 @@ describe('evidence fetch', () => {
   };
   const authorisation = {
     sourceVersionId: 'sv-1',
+    licenceTermsVersion: 'terms-1',
     robotsPosition: 'HONOURED' as const,
     robotsExceptionApprovedBy: null,
     jurisdictionEnabled: true,
@@ -625,6 +626,9 @@ describe('evidence fetch', () => {
     urlPolicyPassed: true,
     ssrfValidated: true,
     relevanceScore: 0.8,
+    relevanceMethod: 'TEST_FIXTURE',
+    issuedBy: 'FetchGateService',
+    issuedAt: '2026-01-01T00:00:00.000Z',
   };
   const budget = {
     maxBytes: 1_000_000,
