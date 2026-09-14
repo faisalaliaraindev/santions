@@ -27,6 +27,96 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (late) — Started the live fetch gate: URL policy and robots, both pure
+
+**Context for whoever picks this up.** The session before this one built the search pipeline and
+a working end-to-end demo **on fixture data**. The customer conversation that followed asked for
+a **realistic test on real adverse media**, so the work now is connecting real sources. This
+entry is the first increment of that, and it is deliberately a small, complete one: two pure
+modules with their tests, committed green, with no half-written adapter left behind.
+
+**Did — two pure modules, no I/O.**
+
+**1. `packages/domain/src/fetch/url-policy.ts` — the SEC-02 gate.** Decides whether a URL may be
+fetched at all: https only, port allowlist, no embedded credentials, and IP-literal screening
+against loopback, private, link-local (including `169.254.169.254`, the cloud metadata service),
+carrier-grade NAT, multicast, IPv6 unique-local and IPv4-mapped IPv6.
+
+**The split that matters and must not be collapsed.** `screenUrl` judges what the string alone
+can show. It **cannot** stop `news.example.com` resolving to `127.0.0.1`, because that needs DNS.
+So the gate has two halves and the adapter must call both: `screenUrl` before resolving, and
+`screenResolvedAddress` on **every** address DNS returns, immediately before connecting. The
+second half is what defeats DNS rebinding, and `isForbiddenAddress` is exported separately so
+the adapter cannot quietly skip it.
+
+Canonicalisation is here too, and it is not cosmetic: it lower-cases the host, drops the
+fragment and tracking parameters, and sorts the query — so the same article reached through two
+feeds deduplicates to one lead. Without it, axis D counts one story as two independent sources.
+The path is left exactly as written, because paths are case-sensitive and "normalising" one
+turns a working URL into a 404.
+
+**2. `packages/domain/src/fetch/robots.ts` — robots.txt, parsed and applied.** De facto standard:
+`Allow` honoured, `*` and `$` wildcards, longest match wins, `Allow` beats `Disallow` on a tie,
+stacked `User-agent` lines share a group, unknown directives ignored rather than failing the file.
+
+**The decision worth arguing with is the failure case.** A robots.txt that times out, 500s or
+returns an HTML error page yields `UNKNOWN`, **not** `ALLOWED`. Reading "no rule found" as
+permission makes an outage at the publisher into consent. A genuine 404 is different and is
+treated as permission — the publisher chose not to write one.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         509 passed  (was 475: +34 for url-policy and robots)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  189 passed
+test:security     106 passed
+pnpm verify:local  every suite ok except end-to-end, still [n/i]
+```
+
+**Left half-done:** nothing. Both modules are complete and tested; no adapter was started, so
+there is no partial I/O code to untangle.
+
+**Next session should:** build `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort`,
+replacing the mock. It is the next item on the critical path and everything else in the live
+work depends on it. Concretely:
+
+1. Resolve the host with `node:dns` and call `screenResolvedAddress` on **every** returned
+   address before connecting. Do not cache the resolution.
+2. Fetch and cache robots.txt per host; `UNKNOWN` refuses unless the source registry carries an
+   approved exception (`robotsPosition: EXCEPTION_APPROVED` with a named approver — the field
+   already exists on the source schema).
+3. Enforce the byte, decompressed-byte, redirect and timeout budgets. Re-screen the URL on
+   **every** redirect hop: a 302 to `http://169.254.169.254/` is the obvious bypass.
+4. Conditional GET with stored ETag / Last-Modified.
+5. An honest user agent naming the service with a contact URL (FR-06 requires it).
+6. Return `FailureSignal` values, never classes — the FR-06 table classifies.
+
+Then, in order: news discovery connectors (Google News RSS, Bing News RSS, GDELT — GDELT has a
+JSON mode, so only the two RSS sources need an XML parser and that dependency decision is still
+open); the SearXNG connector against the instance already running in the local stack; the
+taxonomy lexicon (**the largest quality gap — the term list is empty, so today the system only
+searches the bare name**); then real extraction to replace the keyword placeholder.
+
+**The plan these steps come from** is in the conversation and summarised here so it is not lost:
+Stage 0 — real company data, needs only a free Companies House key. Stage 1 — the block above,
+roughly 5–8 working days, which is what produces the first genuine result on a real person.
+Stage 2 — source health, breakers and budgets (D5), before any sustained live running. Stage 3 —
+clustering and richer identity matching. Stage 4 — labelled cases and the accuracy measurement,
+which can start now because it needs no code.
+
+**Decisions touched:** none recorded. **D6 is now directly in the path** — the lexicon is the
+next quality blocker and the audit must gate activation before any term reaches an outbound
+query. **D5 is no longer optional**: the moment a real source is dialled, rate limits and
+breakers stop being a later phase.
+
+**Still true and worth repeating:** no live source has been contacted by this project. Nothing
+in this entry changes that — both modules are pure and neither opens a socket.
+
+---
+
 ## 2026-09-14 (evening) — **Out of phase order, for a demo**: the search pipeline, the findings API, and the Zquence client
 
 **Read this first.** The phase order was broken deliberately. D5 and D6 are **not** done; this

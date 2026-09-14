@@ -43,6 +43,9 @@ export * from './capability/capability.js';
 
 export * from './reliability/failure-classification.js';
 
+export * from './fetch/url-policy.js';
+export * from './fetch/robots.js';
+
 export * from './identity/name-frequency-distribution.js';
 
 export * from './association/officer-resolution.js';

@@ -9,6 +9,11 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
+> 🔧 **Current work: connecting real sources, so a realistic test can be run.** The pipeline
+> works end to end on fixture data; the customer conversation asked for real adverse media. The
+> SEC-02 URL gate and the robots parser are done (pure, tested). **Next is the real fetch
+> adapter** — see the top handoff entry for the exact six steps and the ordered plan behind them.
+>
 > ⚠️ **The phase order was broken deliberately on 2026-09-14.** A customer call needed something
 > demonstrable, so a compressed slice of **Phase E** was built ahead of D5 and D6: the search
 > pipeline, the first job handler, the findings API, and a typed client for an integrator.
@@ -140,7 +145,7 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **475 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **509 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
 **189 integration** tests and `pnpm test:security` **106 security** tests.
