@@ -122,6 +122,13 @@ because nothing approved could be asked. That is honest and it is what Phase D w
 **Must close by G5.** Until it does, the CR coverage statement says association coverage is
 `UNKNOWN` and why.
 
+**Update, Phase D step D2 (2026-09-14):** the engineering half is now built. The UK Companies
+House adapter exists and works against a real contract, and it declares `jurisdictions: ['GB']`
+so that asking it about Costa Rica throws rather than returning a coverage gap. Nothing about
+that changes the answer for CR, and the decision is unchanged and still open — but it is now
+open with the alternative fully built, so closing it is a product call about scope rather than a
+question about whether the engineering is feasible.
+
 ### D15 — The Costa Rican primary-source evidence base
 
 **Raised at:** Phase D step D0, 2026-09-11. Evidence in

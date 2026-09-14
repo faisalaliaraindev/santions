@@ -1465,8 +1465,7 @@
           "contentFormat": {
             "type": "string",
             "enum": ["HTML", "PDF", "JSON", "XML_FEED", "MIXED"]
-          },
-          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] }
+          }
         },
         "required": [
           "sourceName",
@@ -1484,8 +1483,7 @@
           "parserVersion",
           "licenceTermsVersion",
           "robotsPosition",
-          "contentFormat",
-          "mode"
+          "contentFormat"
         ],
         "additionalProperties": false
       },

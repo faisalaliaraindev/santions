@@ -47,6 +47,11 @@ import {
   SEARCH_INDEX_PORT,
   type SearchIndexPort,
 } from './search-index/search-index.port.js';
+import {
+  buildSourceAdapters,
+  SOURCE_ADAPTERS,
+  type SourceAdapterSet,
+} from './sources/sources.registry.js';
 import { TransactionRunner } from './persistence/transaction.runner.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
 import { SearchesController } from './searches/searches.controller.js';
@@ -243,6 +248,18 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
             return new InMemorySearchIndex();
         }
       },
+      inject: [APP_CONFIG],
+    },
+    {
+      // The six FR-05 source seams (Phase D step D2). One factory rather than six providers:
+      // the mode rule — a mock is unreachable in live mode — is a single rule, and six
+      // factories would be six places to get it right. See `sources/sources.registry.ts`.
+      provide: SOURCE_ADAPTERS,
+      useFactory: (config: AppConfig): SourceAdapterSet =>
+        buildSourceAdapters({
+          mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
+          companiesHouseApiKey: config.sources.companiesHouseApiKey,
+        }),
       inject: [APP_CONFIG],
     },
     {

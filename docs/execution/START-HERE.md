@@ -9,8 +9,17 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
-> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 and D1 are
-> done; D2 is next.**
+> Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0, D1 and D2
+> are done; D3 is next.**
+>
+> **D2 built the source seams:** all six FR-05 ports in `apps/api/src/sources`, deterministic
+> mocks for all six, and one real adapter — **UK Companies House, GB only, which is the proving
+> ground for the FR-02 graph and is _not_ Costa Rican coverage**. Every port returns a four-way
+> `SourceOutcome`, so a registry outage, an empty answer and a bound overrun stay three
+> different facts (T20); a mock cannot be constructed in live mode because its constructor
+> needs a witness a live process cannot obtain (T55); and FR-05 content conformance is now
+> enforced at submit and at activation. See `docs/decisions.md` D-021, D-022, D-023. The T14 and
+> T15 fixtures are already written and are waiting for D3's resolver.
 >
 > **D1 built the administrative spine:** one propose → approve → activate lifecycle for sources,
 > taxonomy and policy with four-eyes enforcement (T45), the SEC-05 rights engine as an actual
@@ -94,10 +103,10 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **338 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **395 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**141 integration** tests and `pnpm test:security` **106 security** tests.
+**147 integration** tests and `pnpm test:security` **106 security** tests.
 
 Coverage is gated at 85/80 and currently reports 94.69% / 90.47% — but only under CI's own
 invocation, which is
@@ -184,6 +193,7 @@ Inside `apps/api/src`, the four directories Phase C added:
 | `jobs/`         | `QueuePort` + SQS adapter, `OutboxPublisher`, `verifyJobOwnership` (SEC-01), and C6's `JobConsumer`, `WorkerRuntime`, `DeadLetterPort` and `JobHandler` interface |
 | `search-index/` | `SearchIndexPort` behind the D12 seam, the Meilisearch adapter, the FI-10 reconciler                                                                              |
 | `storage/`      | `ObjectStorePort` + S3 adapter, `EvidenceStagingService` (stage → verify → commit, plus the orphan sweep), `RetentionSweeper`                                     |
+| `sources/`      | The six FR-05 ports (D2), their deterministic mocks in `mock/`, and the GB-only Companies House adapter                                                           |
 
 The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint

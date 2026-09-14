@@ -1,0 +1,89 @@
+/**
+ * A lead — the only thing discovery is allowed to produce.
+ *
+ * FR-05: "An unreviewed discovered domain remains a lead." FR-06: "Search snippets and
+ * headlines alone remain leads, not supported adverse findings." Those two sentences are why
+ * this type exists separately from anything the banding engine can see: a lead is a URL and a
+ * headline, and a headline is a claim about an article, not evidence from one.
+ *
+ * The type therefore carries **no category, no stage and no party role**. Not "they are
+ * optional and discovery leaves them null" — they are absent, so that a discovery adapter
+ * cannot classify, and the compiler is what enforces it rather than a review comment. FR-06 is
+ * explicit that relevance filtering never decides adversity; this is the same rule one layer
+ * earlier.
+ *
+ * Shared by `NewsDiscoveryPort` and `WebDiscoveryPort` because the cascade treats their output
+ * identically — rungs 2–6 all feed the same relevance filter and the same fetch gate. The
+ * ports differ in how they are *asked*, not in what they return.
+ */
+
+import type { PreciseDate } from '@erly/adverse-domain';
+
+import type { AdapterProvenance } from './source-adapter.js';
+
+/**
+ * The discovery cascade rung this lead came from (FR-05's table).
+ *
+ * Recorded on the lead, not just on the run, because a lead from rung 0 (the local index of
+ * polled publisher feeds) and a lead from rung 5 (SearXNG over a mixed engine set) deserve
+ * different treatment downstream, and because rung 7 — "stop and emit coverage state" — is
+ * only meaningful if we can say which rungs were actually reached.
+ */
+export type CascadeRung = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export interface Lead {
+  /**
+   * Deterministic within a run: derived from the canonicalised URL, so the same article found
+   * at rung 2 and again at rung 4 is one lead with two sightings rather than two leads. Set by
+   * the adapter, because only the adapter knows what it canonicalised.
+   */
+  readonly leadId: string;
+  /** Canonicalised absolute https URL. The fetch gate (FR-06) re-validates; this is not it. */
+  readonly url: string;
+  readonly title: string;
+  /**
+   * The snippet exactly as the discovery source returned it, or null when it returned none.
+   * Never synthesised from the title: a snippet is what a relevance filter scores, and a
+   * fabricated one would be scored as though the source had said it.
+   */
+  readonly snippet: string | null;
+  /** Publisher as the discovery source names it. Resolved to a registry source later. */
+  readonly publisher: string;
+  readonly publisherDomain: string;
+  /**
+   * FR-07: four date fields, each with declared precision, and a missing one stays null. This
+   * is the publication date as *discovery* reported it — frequently absent from an RSS item
+   * and frequently wrong when present, which is why it is re-parsed from the fetched document
+   * rather than trusted.
+   */
+  readonly publishedAt: PreciseDate;
+  /** BCP 47 where the source declares one. Null when it does not — never guessed from text. */
+  readonly language: string | null;
+  readonly rung: CascadeRung;
+  /** Which planned query (FR-04) produced this lead. Carried through to the coverage view. */
+  readonly queryId: string;
+  readonly provenance: AdapterProvenance;
+}
+
+/**
+ * What was asked of a discovery adapter.
+ *
+ * `language` and `country` are separate and both required-or-explicitly-null, because FR-05
+ * asks for "Google News RSS per language and edition" — a Spanish-language query on the Costa
+ * Rican edition is a different query from a Spanish-language query on the Spanish edition, and
+ * folding them together loses the distinction the cascade is built on.
+ */
+export interface DiscoveryQuery {
+  readonly tenantId: string;
+  /** The FR-04 planned query this executes. Its id ends up on every resulting lead. */
+  readonly queryId: string;
+  readonly text: string;
+  /** BCP 47, or null for a language-neutral query. */
+  readonly language: string | null;
+  /** ISO 3166-1 alpha-2 edition, or null. Never a region label — see FR-05. */
+  readonly country: string | null;
+  /** Inclusive ISO date bounds, or null for unbounded. FR-06 treats the window as a gate. */
+  readonly window: { readonly from: string; readonly to: string } | null;
+  /** Hard cap on returned leads. Exceeding it produces a `BOUNDED` outcome, never a silent cut. */
+  readonly limit: number;
+}

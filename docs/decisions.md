@@ -563,3 +563,76 @@ common way a coverage model ends up claiming capability it does not have.
 Costa Rica's rows are seeded from the D0 dossier (`docs/sources/cr-dossier.md`) as data, not
 code: officer associations `UNKNOWN` blocked by D14, company registry `PARTIAL`, court records
 `UNKNOWN` blocked by D15. Nothing in `packages/domain/src/capability` knows what Costa Rica is.
+
+---
+
+## D-021 — A source adapter returns a four-way outcome, never a list
+
+**Status:** Accepted · **Decided at:** Phase D step D2, 2026-09-14
+
+Every FR-05 port returns `SourceOutcome<T>`: `OK`, `BOUNDED`, `NO_RESULTS` or `FAILED`. A caller
+cannot reach the data without first matching on which of the four happened.
+
+The alternative — returning `Officer[]` and throwing on failure — collapses three different
+facts into one empty array. A registry that is down, a registry that holds nobody under that
+name, and a traversal that stopped at its bound all produce `[]`, and `[]` downstream reads as
+"no associations exist". FR-02 closes with the opposite sentence: "No result from a registry does
+not prove no associations exist." T20 asks for the three to be separately observable, and a type
+that cannot express the difference makes that a matter of discipline at every call site.
+
+`BOUNDED` carries the data **and** the truncation, because a bounded traversal still found real
+associations and discarding them would be worse than reporting them with the bound stated.
+`leavesCoverageIncomplete` is a one-line helper precisely so the fifteenth caller does not write
+`status !== 'OK'` and start reporting an empty answer as a coverage gap.
+
+Classification happens once, inside `failed()`, through the FR-06 table. An adapter reports facts
+— a status code, a syscall name, a content type — and never decides its own retry policy.
+
+---
+
+## D-022 — A mock adapter is unreachable in live mode by construction, not by a check
+
+**Status:** Accepted · **Decided at:** Phase D step D2, 2026-09-14
+
+Every mock adapter's constructor requires a `MockModeWitness`. The witness has a private
+constructor and one factory, `forMode`, which returns `null` for `LIVE`. A live-mode process
+cannot obtain one, so it cannot construct a mock adapter.
+
+The obvious alternative is `if (mode === 'LIVE') throw` at the top of each mock. It works, and it
+is forgettable: the check that eventually is not written is the one in the _next_ mock adapter,
+written in a hurry six months from now. Omitting the witness does not compile.
+
+T55 — fixture data must never be servable as a live result — is enforced twice over as a result:
+on the record, by the `mode` stamp on every provenance; and on the process, by the witness.
+
+The same decision removed `mode` from `sourceContentSchema`. A caller-supplied mode lets a
+fixture source declare itself `LIVE` inside a mock stack, which is T55 with the labelling under
+the attacker's control. Mode is stamped on the envelope from the running configuration, and
+content that carries it is rejected rather than ignored.
+
+---
+
+## D-023 — FR-05 conformance is enforced at submit, not at propose
+
+**Status:** Accepted · **Decided at:** Phase D step D2, 2026-09-14
+
+A source version's content is checked against the full FR-05 field list when it is **submitted
+for approval**, and again at **activation** as a backstop. It is not checked when a draft is
+proposed or edited.
+
+A draft is allowed to be incomplete — that is what a draft is. Refusing to save a half-filled
+twenty-field form is how people end up keeping source configuration in a text file until it is
+finished, and then pasting it in all at once with no draft history.
+
+Submission is the right gate because approving is the act that carries responsibility. An
+approver must never be asked to approve a record that cannot be interpreted; "I approved it, I
+assumed the fields were right" is not a position to put a named person in.
+
+Activation repeats the check because a record can reach `APPROVED` by other routes: the bootstrap
+seeds versions directly, and a restore re-enters at the gate. An active source whose fields the
+adapters cannot read contributes nothing while still appearing in the coverage statement.
+
+Taxonomy and policy content are **not** checked, and the `switch` in `assertContentConforms` is
+exhaustive so that a fourth record kind is a compile error rather than a silent pass. Taxonomy's
+field schema lands in D6 with the lexicon audit; policy's with the retention decision (D-012).
+Enforcing an invented schema on either now would be enforcing a guess.

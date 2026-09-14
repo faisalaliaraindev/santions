@@ -27,6 +27,128 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 — Phase D step **D2 done**: the six FR-05 seams, six deterministic mocks, one real registry adapter, and the conformance gate D1 left open
+
+**Did — four things.**
+
+**1. All six FR-05 ports, in `apps/api/src/sources/`.** `NewsDiscoveryPort`,
+`WebDiscoveryPort`, `PrimarySourcePort`, `CompanyRegistryPort`, `EvidenceFetchPort`,
+`ExtractionModelPort`. Defined together and now, rather than one at a time as adapters arrive,
+because a seam invented at the moment its first adapter is written is shaped by that adapter.
+Three things are shared and live in `source-adapter.ts`:
+
+- **`SourceOutcome<T>` — four statuses, never a list** (`OK` / `BOUNDED` / `NO_RESULTS` /
+  `FAILED`). A caller cannot reach the data without first matching on what happened. An adapter
+  returning `Officer[]` collapses "the registry is down", "the registry holds nobody by that
+  name" and "we stopped at the bound" into one empty array, and an empty array downstream reads
+  as _no associations exist_ — the sentence FR-02 explicitly closes by forbidding. Decision
+  **D-021**.
+- **Provenance rides with the data** — adapter id, source id, parser version, stability class,
+  mode, retrieval time. FR-05's volatility control keys off the parser version and D5's breaker
+  off the stability class; both are useless if they have to be recovered from the registry after
+  the fact.
+- **`MockModeWitness`** — decision **D-022**, below.
+
+**2. Deterministic mocks for all six, with the fixtures authored from T14/T15/T20 first.**
+`apps/api/src/sources/mock/`. The registry corpus is CR (D-010 enables Costa Rica only), sorted
+before return, and stamped from an injected fixed clock — a mock with incidental ordering makes a
+graph test fail once a fortnight and look like a resolution bug every time.
+
+- **T14** — two officers under one **byte-identical** name (`María Fernanda Solís Rojas`), with
+  different partial dates of birth and **disjoint** companies. A fixture using "María" and
+  "Maria" would be testing the name matcher instead and would pass for the wrong reason. One of
+  the two publishes no `appointmentCount`, because registers vary and a bound check that reads
+  that field must cope with the register that does not say.
+- **T15** — five directorships that produce all five tenure labels through `labelTenure`,
+  including the appointment known only to the **year** and the directorship with **no
+  resignation at all**. The probe events live beside the tenures rather than in the test,
+  because they are half of the same design.
+- **T20** — the registry can be made to fail, holds a name with nothing under it, and holds a
+  name matched by twelve officers. Three outcomes, separately asserted, and asserted to be
+  three _different_ statuses.
+
+**3. One real adapter: UK Companies House** (`companies-house.adapter.ts`) — and it is **not**
+Costa Rican coverage. `jurisdictions: ['GB']`, and asking it about CR **throws** rather than
+returning a `FAILED` outcome, because a coverage gap would put a line in a coverage statement
+implying CR officer data was attempted when it was never attempted at all. D14 stands unchanged.
+
+**4. FR-05 content conformance — the half of D1 that was left open.**
+`apps/api/src/admin/source-content.ts`, enforced at **submit** and again at **activation**, never
+at propose. A draft is allowed to be incomplete; a version put in front of an approver is not,
+because approving is the act that carries responsibility. Decision **D-023**.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         395 passed  (was 338: +57 in apps/api/test/source-adapters.test.ts)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  147 passed  (was 141: +6 for FR-05 conformance)
+test:security     106 passed  (unchanged)
+coverage          94.69% statements / 90.47% branches (gate 85/80) — unchanged; the new code
+                  is in apps/api, which this project's coverage include does not measure
+pnpm verify:local  every suite ok except end-to-end, still [n/i] and still exits non-zero
+```
+
+Run against the real stack: `pnpm local:up` (7/7 healthy) and `pnpm local:bootstrap` before the
+integration and security suites. Docker was not running at the start of the session and was
+started for this.
+
+**Found — four things, two of them latent defects on any already-seeded database.**
+
+1. **`mode` was a caller-supplied field on `sourceContentSchema`.** So a source version proposed
+   through the admin API in a mock stack could declare itself `LIVE` — T55 with the labelling
+   under the proposer's control. Removed from the schema; the service stamps mode on the
+   envelope from the running configuration, and `.strict()` now rejects content that carries it
+   rather than ignoring it. OpenAPI regenerated and committed.
+2. **`mode` and `seededAt` were leaking into version _content_.** They were not in
+   `ENVELOPE_KEYS`, and a seeded record stores its fields flat, so `splitContent` was putting
+   both into content. Harmless while nothing read content; the moment conformance was enforced,
+   every seeded source failed for carrying a `mode` it never declared. Both are envelope fields.
+3. **Two renamed fields survived on this machine's database, because the bootstrap is an
+   upsert and `$set` never deletes.** `approvalState` (renamed to `status` in **D1**) and
+   `sourceType` (renamed to `connectorType` in D2) were both still sitting on the seeded
+   sources. This only became visible because the new integration test holds every seeded source
+   to the same conformance standard as an administered one — and it failed, correctly, naming a
+   field nobody in the current code has ever written. The bootstrap now unsets both explicitly
+   rather than leaving it to a `local:reset` somebody may reasonably never run. **Worth
+   remembering for every future rename: the seed file changing is not the database changing.**
+4. **A mock-mode check inside each adapter is a check that eventually is not written.** The
+   first design had `if (mode === 'LIVE') throw` at the top of each mock. It works, and the one
+   that gets omitted is the one in the _next_ mock adapter, six months from now. Replaced with
+   `MockModeWitness`: a private constructor, one factory returning `null` for `LIVE`, and every
+   mock constructor requiring one. Omitting it does not compile.
+
+**Left half-done:** nothing in D2 — but read the scope line in the Phase D brief carefully.
+T14, T15 and T20 are marked `[~]`, not `[x]`, and deliberately: D2 built the **fixtures and the
+seams** that make those tests possible, not the behaviour they ultimately assert. That the wrong
+person's companies do not attach is **D3** (the resolver does not exist yet). That the person
+search completes through a registry outage is **D4**. Marking them done here would be claiming
+a test passes that has not been written.
+
+Five of the six ports have **no live adapter**, by design — they are Phase E. In live mode
+`buildSourceAdapters` returns `null` for them rather than a mock or an empty stub, so a caller
+must handle "this capability has no source" explicitly. An empty stub would make a live process
+report clean results from sources that were never consulted.
+
+**Next session should:** start **D3** — `Company`, `AssociationAssertion` and `GraphSnapshot`,
+with resolution as an **identity grade** (axis A with the name-frequency prior), not a string
+comparison, and the snapshot frozen and pinned to the run the way `EntitlementsService.pinVersions`
+pins versions. The T14 fixture is waiting for exactly this: two officers, one name, disjoint
+companies, and nothing on `OfficerCandidate` that would let a resolver attach either. See
+[`phase-d.md`](./phase-d.md) step D3.
+
+**Decisions touched:** **D-021, D-022, D-023 recorded** (four-way outcome; the mock-mode witness
+and mode off the content schema; conformance at submit rather than propose). **D14 updated, not
+closed** — the engineering alternative it was waiting on is now built and proven against a real
+register, so what remains is a product call about CR scope rather than a feasibility question.
+**D7** (which extraction model) is untouched and still open; `ExtractionModelPort` exists
+precisely so Phase F can benchmark candidates that are interchangeable, and the mock is honestly
+labelled rule-based with a null `modelId` rather than pretending to be a model.
+
+---
+
 ## 2026-09-11 (late) — Phase D: brief expanded, **D0 done** (CR source dossier), **D1 done** (approval lifecycle + SEC-05 gate + capability coverage)
 
 **Did — three things.**

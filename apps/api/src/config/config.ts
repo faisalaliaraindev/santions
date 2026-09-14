@@ -88,6 +88,20 @@ const rawSchema = z.object({
   SEARCH_INDEX_KIND: z.enum(['meilisearch', 'opensearch', 'in-memory']).default('meilisearch'),
   MEILI_HOST: z.string().url().optional(),
   MEILI_MASTER_KEY: z.string().min(1).optional(),
+
+  /**
+   * The free Companies House API key (Phase D step D2).
+   *
+   * Optional, and absent is a supported state rather than a misconfiguration: without it the
+   * GB company-registry adapter is not constructed at all, which is deliberately different
+   * from constructing one that 401s on every call. The first makes the capability visibly
+   * unavailable; the second produces a coverage gap that looks like an outage at Companies
+   * House — a gap somebody would then go and investigate at the wrong end.
+   *
+   * The value lives here, never in the source registry: SEC-04 has the registry store a
+   * `credentialsRef` and nothing more.
+   */
+  COMPANIES_HOUSE_API_KEY: z.string().min(1).optional(),
 });
 
 export type AppConfig = Readonly<{
@@ -127,6 +141,10 @@ export type AppConfig = Readonly<{
     kind: 'meilisearch' | 'opensearch' | 'in-memory';
     host: string | null;
     apiKey: string | null;
+  };
+  sources: {
+    /** Null when no key is configured. See `COMPANIES_HOUSE_API_KEY` for why that is fine. */
+    companiesHouseApiKey: string | null;
   };
 }>;
 
@@ -287,6 +305,18 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       );
     }
 
+    // A placeholder here is not a cosmetic problem: FR-06 classifies a 401 from a free source
+    // as AUTH_CREDENTIAL, which is never retried and alerts an operator. A development
+    // placeholder in production would therefore present as "Companies House revoked our key".
+    if (raw.COMPANIES_HOUSE_API_KEY !== undefined) {
+      const marker = looksLikeDevelopmentValue(raw.COMPANIES_HOUSE_API_KEY);
+      if (marker !== null) {
+        problems.push(
+          `COMPANIES_HOUSE_API_KEY is a development placeholder (contains "${marker}").`,
+        );
+      }
+    }
+
     if (raw.CORS_ORIGINS.split(',').some((o) => o.trim() === '*')) {
       problems.push(
         'CORS_ORIGINS contains "*". A wildcard origin is never permitted in production.',
@@ -350,6 +380,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       kind: raw.SEARCH_INDEX_KIND,
       host: raw.MEILI_HOST ?? null,
       apiKey: raw.MEILI_MASTER_KEY ?? null,
+    },
+    sources: {
+      companiesHouseApiKey: raw.COMPANIES_HOUSE_API_KEY ?? null,
     },
   };
 }

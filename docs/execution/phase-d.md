@@ -1,6 +1,6 @@
 # Phase D — Sources, association graph and taxonomy administration
 
-**Gate:** G5 · **Status:** IN PROGRESS — D0 and D1 done, D2 next · **Prerequisite:** Phase C complete (it is)
+**Gate:** G5 · **Status:** IN PROGRESS — D0, D1 and D2 done, D3 next · **Prerequisite:** Phase C complete (it is)
 
 ---
 
@@ -403,9 +403,9 @@ configured.
 
 - [x] D0 — `docs/sources/cr-dossier.md` exists; every claim labelled `DOCUMENTED` / `INFERRED` / `UNKNOWN`; no live call made; the CR officer-data question raised as **D14**, and the depersonalised-judgments question as **D15**
 - [x] D1 — one versioned-approval service serving sources, taxonomy and policy; draft mutable, active immutable, suspend without four eyes, restore with; reason required and audited
-- [~] D1 — the full FR-05 field list exists as `sourceContentSchema` and alpha-2 validation rejects "EU" / "MENA" / "SEA"; **conformance is not yet enforced on stored content** — D2 does that, with the adapters that consume the fields
+- [x] D1 — the full FR-05 field list exists as `sourceContentSchema` and alpha-2 validation rejects "EU" / "MENA" / "SEA"; **conformance is enforced as of D2** at submit and at activation (decision D-023)
 - [x] D1 — the rights engine is `decideRights` / `clearForActivation` in `packages/domain/src/rights/`, default-deny, with model disclosure as its own operation, and prohibited collection methods non-approvable (named `decideFieldUse` in the outline)
-- [ ] D2 — all six ports defined; deterministic mocks for all six; one real `CompanyRegistryPort` adapter; every record carries `mode: "MOCK"` where applicable
+- [x] D2 — all six ports defined; deterministic mocks for all six; one real `CompanyRegistryPort` adapter (UK Companies House, **GB only, not CR coverage**); every record carries `mode: "MOCK"` where applicable, and a mock cannot be constructed in live mode at all (decision D-022)
 - [ ] D3 — `Company`, `AssociationAssertion`, `GraphSnapshot`; resolution is an identity grade; snapshot frozen and pinned to the run; `GET /v1/searches/{searchId}/associations` serves it
 - [ ] D3 — Costa Rican name-frequency distribution loaded into the shared `nameFrequencyProfiles`, or its absence recorded with what it costs
 - [ ] D4 — configurable one-hop bounds, visible when they bind; `COMPLETE` / `INCOMPLETE` / `UNKNOWN` kept distinct; person-only degraded execution
@@ -413,9 +413,9 @@ configured.
 - [ ] D5 — two new rows appended to `docs/failure-injection-matrix.md`
 - [ ] D6 — lexicon audit blocks activation; a language cannot be enabled without a measured recall figure; effective-scope resolution exposed for Phase E
 - [ ] D6 — Spanish lexicon reviewed by a Spanish reader, **or** its unreviewed state recorded in the coverage statement and the handoff
-- [ ] **T14** — two officers sharing a name: the wrong person's companies do not attach, and the candidate is visible as unresolved
-- [ ] **T15** — all five tenure labels correct, including `YEAR`-precision appointment and missing resignation; approved scope enforced
-- [ ] **T20** — registry outage, zero response and graph limit tested **separately**; person search completes in all three; coverage accurate in all three
+- [~] **T14** — the fixture holds two officers under one byte-identical name with disjoint companies, and `OfficerCandidate` carries no field an adapter could use to attach one; **the resolver that must not attach them is D3**
+- [~] **T15** — all five tenure labels produced from the fixture directorships, including the `YEAR`-precision appointment and the missing resignation; **approved-scope enforcement is D3**
+- [~] **T20** — outage, zero response and bound overrun are three distinct `SourceOutcome` statuses and are tested separately; **that the person search completes in all three is D4**
 - [ ] **T36** — a source suspended mid-run stops being used within that run; blocked actions and coverage gaps reported; a result produced before suspension is unchanged but reads as sourced from a since-suspended source
 - [x] **T45** — the proposer of a source, taxonomy or policy version cannot approve it; the denial is audited (and the audit survives the aborted transaction)
 - [ ] **T79** — a protected-characteristic term fails the build **and** is refused at activation

@@ -496,3 +496,64 @@ of their own records. `RequirePermission(...permissions)` admits a caller holdin
 declared permissions, and the service then enforces the exact one against the record it has
 loaded. With a single permission — every other route in the service — the behaviour is unchanged.
 The route-level check is a coarse gate, never the whole check.
+
+---
+
+## The six source seams (Phase D step D2)
+
+FR-05 names six ports. All six are defined in `apps/api/src/sources`, all six have deterministic
+mocks in `apps/api/src/sources/mock`, and exactly one has a real adapter.
+
+| Port                  | Cascade rungs | Real adapter in Phase D               |
+| :-------------------- | :------------ | :------------------------------------ |
+| `NewsDiscoveryPort`   | 2, 3, 4       | none — Phase E                        |
+| `WebDiscoveryPort`    | 5, 6          | none — Phase E                        |
+| `PrimarySourcePort`   | 1             | none — Phase E                        |
+| `CompanyRegistryPort` | —             | **UK Companies House, GB only**       |
+| `EvidenceFetchPort`   | —             | none — Phase E                        |
+| `ExtractionModelPort` | —             | none — Phase F selects the model (D7) |
+
+All six are defined now rather than one at a time, because a seam invented at the moment its
+first adapter is written is shaped by that adapter. Defining them against the specification, with
+mocks that must satisfy them, is what stops `WebDiscoveryPort` becoming "whatever SearXNG
+returns".
+
+**The Companies House adapter is not Costa Rican coverage.** D-010 enables Costa Rica only; this
+adapter declares `jurisdictions: ['GB']` and `assertJurisdictionCovered` throws on anything else.
+It exists as the proving ground for the port and the FR-02 graph — real pagination, real failure
+modes, a real partial date of birth. Costa Rica has no free automatable officer-level source at
+all (D0, open decision **D14**), and no adapter changes that.
+
+### What the shared vocabulary carries
+
+`source-adapter.ts` holds three things every port shares.
+
+**The outcome** — `SourceOutcome<T>`, four statuses, decision D-021. A caller cannot reach the
+data without matching on what happened.
+
+**Provenance on the record** — adapter id, source id, parser version, stability class, mode and
+retrieval time ride with the data rather than being looked up afterwards. FR-05's volatility
+control keys the scheduled contract test off the parser version and D5's breaker off the
+stability class; both are useless if the figure has to be recovered from the registry later.
+
+**The mode rule** — `MockModeWitness`, decision D-022. A live process cannot construct a mock.
+
+### Where the gates live, and where they do not
+
+Two refusals in this directory are **throws**, not `FAILED` outcomes, and the distinction is
+load-bearing. A `FAILED` outcome means a source was asked and did not answer, which opens a
+coverage gap for that source. But asking a British register about Costa Rica, or fetching a URL
+whose robots position was never established, are **our** decisions not to ask. Recording either as
+a coverage gap would put a line in a coverage statement for an attempt that was never made.
+
+`EvidenceFetchPort` takes a `FetchAuthorisation` as a required input rather than deriving one.
+The gate decision and the gate action are separate so the decision can be audited on its own —
+and so a second, subtly different copy of the gate cannot grow inside the HTTP client.
+
+### Source content conformance
+
+`assertContentConforms` (`apps/api/src/admin/source-content.ts`) checks a source version's content
+against the FR-05 field list at **submit** and again at **activation**, never at propose — see
+decision D-023 for why a draft is allowed to be incomplete. `mode` is not a content field: it is
+stamped on the envelope from the running configuration, and content that declares it is rejected
+(T55).

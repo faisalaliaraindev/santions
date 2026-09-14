@@ -80,28 +80,64 @@ const SEED_EVIDENCE_RETENTION_DAYS = 30;
 /**
  * Source registry entries pointing at the local fixture server only. No live source is
  * configured, and none may be activated without the Phase H (G10) measurement.
+ *
+ * **Expanded in D2 to the full FR-05 field list.** These carried nine fields until the
+ * adapters existed; now the content of a source version is checked against
+ * `sourceContentSchema` when it is submitted for approval and again when it is activated, so a
+ * seeded source that did not conform would be one an administrator could look at but never put
+ * through an approval — a registry entry that exists and cannot be administered. `sourceType`
+ * became `connectorType`, which is the name the schema and the ports use; nothing read the old
+ * one.
+ *
+ * `mode: 'MOCK'` is stamped on the envelope by the upsert below, not declared here. It is not
+ * a content field: a source that could declare its own mode could declare a fixture live
+ * (T55).
  */
 const SEED_SOURCES = [
   {
     sourceId: 'fixture-newsroom',
     sourceName: 'Fixture Newsroom CR (mock)',
-    sourceType: 'NEWS_DISCOVERY',
+    publisher: 'Local fixture server',
+    connectorType: 'FIXTURE_MOCK',
     authorityTier: 2,
     cascadeRung: 0,
     canonicalDomains: ['fixtures.local'],
     countries: ['CR'],
     languages: ['es', 'en'],
+    credentialsRef: null,
+    // A fixture server has no free tier to exhaust. Null is "no declared budget", which is the
+    // honest value — zero would mean "no requests permitted" and stop the fixture working.
+    freeTierHourlyBudget: null,
+    freeTierDailyBudget: null,
+    stabilityClass: 'DOCUMENTED_STABLE',
+    parserVersion: 'fixture-1',
+    licenceTermsVersion: 'fixture-local-1',
+    // Not HONOURED: there is no robots.txt on a fixture server to honour, and claiming to have
+    // honoured one would put a false statement in the record that the fetch gate reads.
+    robotsPosition: 'NOT_ESTABLISHED',
+    contentFormat: 'HTML',
     status: 'ACTIVE',
   },
   {
     sourceId: 'fixture-court',
     sourceName: 'Fixture Court Records CR (mock)',
-    sourceType: 'PRIMARY_SOURCE',
+    publisher: 'Local fixture server',
+    connectorType: 'FIXTURE_MOCK',
     authorityTier: 1,
     cascadeRung: 1,
     canonicalDomains: ['fixtures.local'],
     countries: ['CR'],
     languages: ['es', 'en'],
+    credentialsRef: null,
+    freeTierHourlyBudget: null,
+    freeTierDailyBudget: null,
+    stabilityClass: 'DOCUMENTED_STABLE',
+    parserVersion: 'fixture-1',
+    licenceTermsVersion: 'fixture-local-1',
+    robotsPosition: 'NOT_ESTABLISHED',
+    // The real Costa Rican judicial publications are PDF, and the fixture matches that so the
+    // extraction path a CR source would take is the one the fixture exercises.
+    contentFormat: 'PDF',
     status: 'ACTIVE',
   },
 ];
@@ -316,6 +352,22 @@ export async function seedData(db) {
       { sourceId: source.sourceId, version: 1 },
       { ...source, version: 1 },
     );
+    // The bootstrap is an upsert, so a field *removed* from `SEED_SOURCES` survives on a
+    // database that was seeded before the change — `$set` never deletes. Two have been renamed
+    // and both were still sitting on this machine's database: `approvalState` became `status`
+    // in D1, and `sourceType` became `connectorType` in D2.
+    //
+    // That is not cosmetic now that D2 checks content against the FR-05 schema. A leftover
+    // field lands in the version's *content*, the schema is `.strict()`, and the next person to
+    // administer that source gets a conformance error naming a field nobody in the current code
+    // has ever written. Unset explicitly here rather than left to a `local:reset` that somebody
+    // may reasonably never run.
+    await db
+      .collection('sourceVersions')
+      .updateOne(
+        { sourceId: source.sourceId, version: 1 },
+        { $unset: { sourceType: '', approvalState: '' } },
+      );
   }
 
   for (const coverage of CAPABILITY_COVERAGE) {

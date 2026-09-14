@@ -55,6 +55,7 @@ import {
 } from '@erly/adverse-domain';
 
 import { ApiException } from '../common/api-exception.js';
+import { assertContentConforms } from './source-content.js';
 import { AuditService, type AuditActor } from '../persistence/audit.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';
 
@@ -484,6 +485,14 @@ export class VersionedRecordService {
             });
           }
 
+          // FR-05 conformance, checked at the moment the version is put in front of an
+          // approver (D2). A draft may be incomplete; a submission may not, because approving
+          // is the act that carries responsibility and nobody should be asked to take it on a
+          // record that cannot be interpreted. See `source-content.ts`.
+          if (input.action === 'SUBMIT') {
+            assertContentConforms(input.kind, current.content);
+          }
+
           if (rule.requiresFourEyes) {
             const decision = canApprove({
               approver: input.principal,
@@ -581,6 +590,12 @@ export class VersionedRecordService {
       async (session) => {
         const current = await this.load(collection, identity, input.kind, input.version, session);
         this.checkRevision(current, input.expectedRevision);
+
+        // The backstop. Submit already checked this, but a record can reach `APPROVED` by
+        // other routes — the bootstrap seeds versions directly, and a restore re-enters at the
+        // gate — and an active source whose fields the adapters cannot read is a source that
+        // silently contributes nothing while appearing in the coverage statement.
+        assertContentConforms(input.kind, current.content);
 
         const resuming = current.status === 'ACTIVATING';
         const begin = canTransition(current.status, 'BEGIN_ACTIVATION');
@@ -968,7 +983,16 @@ function toRecord(document: Document, kind: AdminRecordKind): VersionedRecord {
   };
 }
 
-/** Envelope fields this service owns. Everything else on a seeded record is its content. */
+/**
+ * Envelope fields this service owns. Everything else on a seeded record is its content.
+ *
+ * `mode` and `seededAt` were missing until D2 and the omission was not cosmetic. A seeded
+ * record stores its fields flat, so both were being split into *content* — and once D2 started
+ * checking content against the FR-05 schema, a seeded source failed conformance for carrying a
+ * `mode` it never declared and a `seededAt` the bootstrap wrote. Both are envelope: the
+ * service stamps `mode` from the running configuration on every version it writes, and
+ * `seededAt` is bootstrap metadata that no adapter reads.
+ */
 const ENVELOPE_KEYS = new Set([
   '_id',
   'sourceId',
@@ -976,6 +1000,8 @@ const ENVELOPE_KEYS = new Set([
   'versionId',
   'version',
   'status',
+  'mode',
+  'seededAt',
   'content',
   'rightsPolicy',
   'dataProfile',

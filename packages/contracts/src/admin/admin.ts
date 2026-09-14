@@ -194,10 +194,20 @@ export const sourceContentSchema = z
     robotsPosition: z.enum(['HONOURED', 'EXCEPTION_APPROVED', 'NOT_ESTABLISHED']),
     /** How the source publishes: CR's gazette is PDF, most news is HTML. Drives extraction. */
     contentFormat: z.enum(['HTML', 'PDF', 'JSON', 'XML_FEED', 'MIXED']),
-    /** Fixture sources are never reachable from a live run (T55). */
-    mode: z.enum(['MOCK', 'LIVE']),
   })
   .strict();
+
+/**
+ * Note what is **not** in this schema: `mode`.
+ *
+ * It was here in D1 and has been removed in D2, because a caller-supplied `mode` is a way to
+ * declare a fixture source LIVE inside a mock stack — the exact thing T55 forbids. The
+ * operating mode is stamped on the envelope by `VersionedRecordService` from the process
+ * configuration, so it describes the stack that produced the record rather than the intent of
+ * whoever proposed it. `.strict()` means a request that still sends `mode` is rejected rather
+ * than ignored, which is the difference between a caller learning their field did nothing and
+ * a caller believing it did something.
+ */
 
 export const proposeVersionSchema = z
   .object({

@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Principal, RightsPolicy } from '../../packages/domain/src/index.js';
 
 import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
+import { assertSourceContentConforms } from '../../apps/api/src/admin/source-content.js';
 import {
   VersionedRecordService,
   type DataProfile,
@@ -95,6 +96,38 @@ function profile(overrides: Partial<DataProfile> = {}): DataProfile {
   };
 }
 
+/**
+ * A source version's content, conforming to the FR-05 registry field list.
+ *
+ * Added in D2, when conformance started being enforced at submit and at activation. Before
+ * that these tests proposed `{ sourceName: 'Test source' }` and it was accepted — which was the
+ * point of the D1 handoff note saying content was stored opaquely.
+ *
+ * Note the absence of `mode`: it is stamped on the envelope by the service from the process
+ * configuration, and content that declares it is refused (T55).
+ */
+function sourceContent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sourceName: 'Test source',
+    publisher: 'Test publisher',
+    connectorType: 'FIXTURE_MOCK',
+    canonicalDomains: ['fixtures.local'],
+    authorityTier: 2,
+    cascadeRung: 0,
+    countries: ['CR'],
+    languages: ['es'],
+    credentialsRef: null,
+    freeTierHourlyBudget: null,
+    freeTierDailyBudget: null,
+    stabilityClass: 'DOCUMENTED_STABLE',
+    parserVersion: 'test-1',
+    licenceTermsVersion: 'test-terms-1',
+    robotsPosition: 'NOT_ESTABLISHED',
+    contentFormat: 'HTML',
+    ...overrides,
+  };
+}
+
 /** Propose → submit → approve, leaving a version that is ready to activate. */
 async function approvedSource(input?: {
   policy?: RightsPolicy;
@@ -105,7 +138,7 @@ async function approvedSource(input?: {
     kind: 'SOURCE',
     principal: PROPOSER,
     recordId,
-    content: { sourceName: 'Test source', connectorType: 'NEWS_DISCOVERY_RSS' },
+    content: sourceContent(),
     rightsPolicy: input?.policy ?? policy(),
     dataProfile: input?.profile ?? profile(),
     now: NOW,
@@ -197,7 +230,7 @@ describe('the propose → approve → activate lifecycle', () => {
       kind: 'SOURCE',
       principal: PROPOSER,
       recordId,
-      content: {},
+      content: sourceContent(),
       rightsPolicy: policy(),
       dataProfile: profile(),
       now: NOW,
@@ -247,7 +280,7 @@ describe('the propose → approve → activate lifecycle', () => {
       kind: 'SOURCE',
       principal: PROPOSER,
       recordId,
-      content: { sourceName: 'first' },
+      content: sourceContent({ sourceName: 'first' }),
       rightsPolicy: policy(),
       dataProfile: profile(),
       now: NOW,
@@ -267,7 +300,7 @@ describe('the propose → approve → activate lifecycle', () => {
         principal: PROPOSER,
         recordId,
         version: proposed.version,
-        content: { sourceName: 'switched after approval was requested' },
+        content: sourceContent({ sourceName: 'switched after approval was requested' }),
         now: NOW,
       }),
     ).rejects.toThrow(/cannot be edited/);
@@ -288,7 +321,7 @@ describe('the propose → approve → activate lifecycle', () => {
       kind: 'SOURCE',
       principal: PROPOSER,
       recordId: first.recordId,
-      content: { sourceName: 'revised' },
+      content: sourceContent({ sourceName: 'revised' }),
       rightsPolicy: policy(),
       dataProfile: profile(),
       now: NOW,
@@ -440,7 +473,7 @@ describe('the SEC-05 gate in front of ACTIVE', () => {
       kind: 'SOURCE',
       principal: PROPOSER,
       recordId,
-      content: { sourceName: 'undeclared' },
+      content: sourceContent({ sourceName: 'undeclared' }),
       now: NOW,
     });
     await records.transition({
@@ -619,6 +652,157 @@ describe('suspension and restoration', () => {
   }, 15_000);
 });
 
+/**
+ * Phase D step D2 — the FR-05 conformance gate D1 left open.
+ *
+ * The interesting property is *where* it refuses: a draft may be incomplete, a submission may
+ * not. If the check moved to propose, an administrator could not save half a twenty-field form
+ * and would keep the configuration in a text file until it was finished.
+ */
+describe('FR-05 content conformance', () => {
+  it('accepts an incomplete draft — that is what a draft is', async () => {
+    const recordId = `src-${randomUUID()}`;
+    const proposed = await records.propose({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      content: { sourceName: 'Half filled in' },
+      rightsPolicy: policy(),
+      dataProfile: profile(),
+      now: NOW,
+    });
+    expect(proposed.status).toBe('PROPOSED');
+  });
+
+  it('refuses to put a non-conforming version in front of an approver', async () => {
+    const recordId = `src-${randomUUID()}`;
+    const proposed = await records.propose({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      content: { sourceName: 'Half filled in' },
+      rightsPolicy: policy(),
+      dataProfile: profile(),
+      now: NOW,
+    });
+
+    await expect(
+      records.transition({
+        kind: 'SOURCE',
+        principal: PROPOSER,
+        recordId,
+        version: proposed.version,
+        action: 'SUBMIT',
+        now: NOW,
+      }),
+    ).rejects.toThrow(/FR-05 registry field list/);
+
+    const after = await records.findVersion({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      version: proposed.version,
+    });
+    expect(after.status).toBe('PROPOSED');
+  });
+
+  it('rejects a regional pseudo-code in place of a country (FR-05)', async () => {
+    const recordId = `src-${randomUUID()}`;
+    const proposed = await records.propose({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      // "EU" is not a source permission. Every country must be named.
+      content: sourceContent({ countries: ['EU'] }),
+      rightsPolicy: policy(),
+      dataProfile: profile(),
+      now: NOW,
+    });
+
+    await expect(
+      records.transition({
+        kind: 'SOURCE',
+        principal: PROPOSER,
+        recordId,
+        version: proposed.version,
+        action: 'SUBMIT',
+        now: NOW,
+      }),
+    ).rejects.toThrow(/FR-05 registry field list/);
+  });
+
+  it('refuses content that declares its own mode (T55)', async () => {
+    const recordId = `src-${randomUUID()}`;
+    const proposed = await records.propose({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      // A fixture source declaring itself LIVE is exactly the thing T55 forbids. The mode is
+      // the envelope's, stamped from the running configuration.
+      content: sourceContent({ mode: 'LIVE' }),
+      rightsPolicy: policy(),
+      dataProfile: profile(),
+      now: NOW,
+    });
+
+    await expect(
+      records.transition({
+        kind: 'SOURCE',
+        principal: PROPOSER,
+        recordId,
+        version: proposed.version,
+        action: 'SUBMIT',
+        now: NOW,
+      }),
+    ).rejects.toThrow(/must not declare `mode`/);
+  });
+
+  it('holds every seeded source to the same standard as an administered one', async () => {
+    // Read-only, and it borrows no tenant: source configuration is shared. The property is
+    // that the bootstrap cannot seed a source the admin API would refuse to activate — which
+    // would leave a registry entry that exists and can never be administered.
+    // `seededAt` is what the bootstrap stamps and the service does not, so this reads the
+    // seeded sources and not the drafts other tests in this file leave behind.
+    const seeded = await db
+      .collection('sourceVersions')
+      .find({ seededAt: { $exists: true } })
+      .toArray();
+    expect(seeded.length).toBeGreaterThan(0);
+    for (const document of seeded) {
+      const record = await records.findVersion({
+        kind: 'SOURCE',
+        principal: PROPOSER,
+        recordId: document['sourceId'] as string,
+        version: document['version'] as number,
+      });
+      expect(() => {
+        assertSourceContentConforms(record.content);
+      }).not.toThrow();
+    }
+  });
+
+  it('leaves taxonomy content unchecked, because no schema for it exists yet', async () => {
+    // Deliberate, and stated so that a later reader does not take the silence for an oversight:
+    // taxonomy's field schema lands in D6 with the lexicon audit on the activation path.
+    const proposed = await records.propose({
+      kind: 'TAXONOMY',
+      principal: PROPOSER,
+      recordId: TENANT,
+      content: { anything: 'at all' },
+      now: NOW,
+    });
+    const submitted = await records.transition({
+      kind: 'TAXONOMY',
+      principal: PROPOSER,
+      recordId: TENANT,
+      version: proposed.version,
+      action: 'SUBMIT',
+      now: NOW,
+    });
+    expect(submitted.status).toBe('AWAITING_APPROVAL');
+  });
+});
+
 describe('concurrency', () => {
   it('refuses a transition taken against a stale revision, with a recovery path', async () => {
     const recordId = `src-${randomUUID()}`;
@@ -626,7 +810,7 @@ describe('concurrency', () => {
       kind: 'SOURCE',
       principal: PROPOSER,
       recordId,
-      content: {},
+      content: sourceContent(),
       rightsPolicy: policy(),
       dataProfile: profile(),
       now: NOW,
