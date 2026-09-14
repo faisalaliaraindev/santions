@@ -58,6 +58,12 @@ import {
   tenureLabelSchema,
   unresolvedCandidateSchema,
 } from '../searches/associations.js';
+import {
+  evidenceBandSchema,
+  findingSchema,
+  findingsPageSchema,
+  rejectedLeadSchema,
+} from '../searches/findings.js';
 
 /** A JSON Schema fragment. Structural on purpose — this is document data, not domain data. */
 export type SchemaObject = Record<string, unknown>;
@@ -99,6 +105,11 @@ export const COMPONENT_SCHEMAS = {
   AssociationEdge: associationEdgeSchema,
   UnresolvedOfficerCandidate: unresolvedCandidateSchema,
   AssociationGraph: associationGraphSchema,
+
+  EvidenceBand: evidenceBandSchema,
+  Finding: findingSchema,
+  RejectedLead: rejectedLeadSchema,
+  FindingsPage: findingsPageSchema,
 
   ProposeVersionRequest: proposeVersionSchema,
   UpdateDraftRequest: updateDraftSchema,

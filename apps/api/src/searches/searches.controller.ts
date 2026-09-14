@@ -8,6 +8,7 @@ import {
   type AssociationGraph,
   type CancelSearchInput,
   type CreateSearchInput,
+  type FindingsPage,
   type SearchSummary,
 } from '@erly/adverse-contracts';
 import type { Principal } from '@erly/adverse-domain';
@@ -153,6 +154,24 @@ export class SearchesController {
     return toAssociationWire(
       await this.graph.loadForSearch({ tenantId: requireTenant(principal), searchId }),
     );
+  }
+
+  /**
+   * GET /v1/searches/:searchId/findings — what the run produced, and what it could not.
+   *
+   * Returns the three result dimensions alongside the findings, deliberately: a client that
+   * reads findings without reading coverage is a client that reports a clean result for a run
+   * in which every source was blocked (section 6.2). The FR-13 no-match statement is present
+   * whenever there are no findings, and it never says "clear" or "no adverse media".
+   */
+  @Get(':searchId/findings')
+  @RequirePermission('search:read')
+  @RequireScope('search:read')
+  async findings(
+    @CurrentPrincipal() principal: Principal,
+    @Param('searchId') searchId: string,
+  ): Promise<FindingsPage> {
+    return this.searches.findingsFor({ tenantId: requireTenant(principal), searchId });
   }
 
   /**

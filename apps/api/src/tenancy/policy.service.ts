@@ -24,6 +24,9 @@ import { resolveGraphBounds, type GraphBounds } from '@erly/adverse-domain';
 
 import { ApiException } from '../common/api-exception.js';
 
+/** Matches the seeded policy. Used when a version declares none or declares nonsense. */
+export const DEFAULT_QUERY_PLAN_CAP = 200;
+
 /**
  * The policy fields this service reads.
  *
@@ -54,6 +57,14 @@ export interface PinnedPolicy {
   readonly version: number;
   readonly historicalScopeApproved: boolean;
   readonly graphBounds: GraphBounds;
+  /**
+   * FR-04's cap on the bounded query plan. Defaults to 200, matching the seed.
+   *
+   * A cap of zero would produce an empty plan, which `boundPlan` refuses anyway because F1 and
+   * F4 are undroppable — so an absent or nonsensical value falls back rather than producing a
+   * search that asked nothing.
+   */
+  readonly queryPlanCap: number;
   /**
    * Problems found reading the declared bounds. Carried, never thrown: a configuration typo
    * must not take a screening run down, and a run that silently fell back to defaults is a run
@@ -96,6 +107,12 @@ export class PolicyService {
       // field existed has not approved anything.
       historicalScopeApproved: record.historicalScopeApproved === true,
       graphBounds: bounds,
+      queryPlanCap:
+        typeof record.queryPlanCap === 'number' &&
+        Number.isInteger(record.queryPlanCap) &&
+        record.queryPlanCap > 0
+          ? record.queryPlanCap
+          : DEFAULT_QUERY_PLAN_CAP,
       boundProblems: problems,
     };
   }

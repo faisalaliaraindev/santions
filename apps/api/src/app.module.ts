@@ -4,6 +4,10 @@ import { MongoClient, type Db } from 'mongodb';
 
 import { AdminController } from './admin/admin.controller.js';
 import { AssociationGraphService } from './associations/association-graph.service.js';
+import { TaxonomyService } from './admin/taxonomy.service.js';
+import { FindingsService } from './pipeline/findings.service.js';
+import { SearchJobHandler } from './pipeline/search-job.handler.js';
+import { SearchPipeline } from './pipeline/search-pipeline.service.js';
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { AuthController } from './auth/auth.controller.js';
@@ -341,6 +345,61 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [APP_CONFIG],
     },
     {
+      provide: TaxonomyService,
+      useFactory: (db: Db) => new TaxonomyService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      provide: FindingsService,
+      useFactory: (db: Db) => new FindingsService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      // The FR-04 → FR-11 pipeline (Phase E). Every judgement it makes is a pure function from
+      // `@erly/adverse-domain`; this provider only supplies it the I/O it sequences.
+      provide: SearchPipeline,
+      useFactory: (
+        subjects: SubjectsService,
+        associations: AssociationGraphService,
+        taxonomies: TaxonomyService,
+        policies: PolicyService,
+        adapters: SourceAdapterSet,
+        evidence: EvidenceStagingService,
+        findings: FindingsService,
+        config: AppConfig,
+      ) =>
+        new SearchPipeline(
+          subjects,
+          associations,
+          taxonomies,
+          policies,
+          adapters,
+          evidence,
+          findings,
+          config.mode,
+        ),
+      inject: [
+        SubjectsService,
+        AssociationGraphService,
+        TaxonomyService,
+        PolicyService,
+        SOURCE_ADAPTERS,
+        EvidenceStagingService,
+        FindingsService,
+        APP_CONFIG,
+      ],
+    },
+    {
+      provide: SearchJobHandler,
+      useFactory: (
+        db: Db,
+        pipeline: SearchPipeline,
+        findings: FindingsService,
+        transactions: TransactionRunner,
+      ) => new SearchJobHandler(db, pipeline, findings, transactions),
+      inject: [MONGO_DB, SearchPipeline, FindingsService, TransactionRunner],
+    },
+    {
       provide: JobConsumer,
       useFactory: (
         stages: StageExecutionService,
@@ -348,9 +407,10 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         transactions: TransactionRunner,
         deadLetters: DeadLetterPort,
         searches: SearchesService,
+        searchHandler: SearchJobHandler,
         config: AppConfig,
-      ) =>
-        new JobConsumer(
+      ) => {
+        const consumer = new JobConsumer(
           stages,
           receipts,
           transactions,
@@ -365,13 +425,20 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
             maxExecutionMs: config.jobs.maxExecutionMs,
             maxDeliveries: config.jobs.maxDeliveries,
           },
-        ),
+        );
+        // The registration that lets the worker start at all. Until Phase E there was no
+        // handler, and `WorkerRuntime.start()` refused rather than dead-lettering every
+        // queued search as unroutable (decision D-016).
+        consumer.register(searchHandler);
+        return consumer;
+      },
       inject: [
         StageExecutionService,
         InboxReceiptService,
         TransactionRunner,
         DEAD_LETTER_PORT,
         SearchesService,
+        SearchJobHandler,
         APP_CONFIG,
       ],
     },
@@ -442,7 +509,10 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         i: IndexerService,
         st: StageExecutionService,
         ag: AssociationGraphService,
-      ) => new SearchesService(db, e, s, t, a, o, i, st, ag),
+        fs2: FindingsService,
+        tx: TaxonomyService,
+        config: AppConfig,
+      ) => new SearchesService(db, e, s, t, a, o, i, st, ag, fs2, tx, config.mode),
       inject: [
         MONGO_DB,
         EntitlementsService,
@@ -453,6 +523,9 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         IndexerService,
         StageExecutionService,
         AssociationGraphService,
+        FindingsService,
+        TaxonomyService,
+        APP_CONFIG,
       ],
     },
 

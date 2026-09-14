@@ -8,6 +8,26 @@
 
 import { z } from 'zod';
 
+/**
+ * An optional variable, where **an empty value means "not set"**.
+ *
+ * `.optional()` alone is not enough. `VAR=` in a `.env` file, a Kubernetes env entry with no
+ * value, and a shell `export VAR=` all produce the empty string, not `undefined` — so a bare
+ * `z.string().min(1).optional()` rejects the ordinary way people write "I am not using this
+ * one" and the process refuses to start with a validation error naming a variable the operator
+ * deliberately left blank.
+ *
+ * This was not theoretical: `COMPANIES_HOUSE_API_KEY=` is exactly how the committed
+ * `.env.example` expresses "no key configured", and it stopped both the API and the worker from
+ * booting. Blank is absent.
+ */
+function optional<T extends z.ZodTypeAny>(schema: T): z.ZodOptional<T> {
+  return z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    schema.optional(),
+  ) as unknown as z.ZodOptional<T>;
+}
+
 const rawSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   ADVERSE_SEARCH_MODE: z.enum(['mock', 'live']).default('mock'),
@@ -35,12 +55,12 @@ const rawSchema = z.object({
    * accepts searches with no queue configured is publishing into a variable, so the absence is
    * warned about loudly at startup rather than defaulted away quietly.
    */
-  JOBS_QUEUE_URL: z.string().url().optional(),
+  JOBS_QUEUE_URL: optional(z.string().url()),
   AWS_REGION: z.string().min(1).default('eu-west-2'),
   /** Set only when pointing at LocalStack. Absent in production. */
-  AWS_ENDPOINT_URL: z.string().url().optional(),
-  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  AWS_ENDPOINT_URL: optional(z.string().url()),
+  AWS_ACCESS_KEY_ID: optional(z.string().min(1)),
+  AWS_SECRET_ACCESS_KEY: optional(z.string().min(1)),
   /** How often the outbox publisher polls. */
   OUTBOX_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
 
@@ -51,7 +71,7 @@ const rawSchema = z.object({
    * cases it can, where waiting five deliveries to discover what we already know is four
    * deliveries of wasted capacity and a DLQ entry with no reason attached.
    */
-  JOBS_DEAD_LETTER_QUEUE_URL: z.string().url().optional(),
+  JOBS_DEAD_LETTER_QUEUE_URL: optional(z.string().url()),
 
   /**
    * How long a worker's claim on a stage lasts before another worker may take it (REL-01).
@@ -78,7 +98,7 @@ const rawSchema = z.object({
    * The evidence bucket. Optional here and required in production by the guard below, so a
    * developer with no LocalStack gets the in-process store rather than a startup crash.
    */
-  S3_EVIDENCE_BUCKET: z.string().min(1).optional(),
+  S3_EVIDENCE_BUCKET: optional(z.string().min(1)),
   OBJECT_STORE_KIND: z.enum(['s3', 'in-memory']).default('s3'),
 
   /**
@@ -86,8 +106,8 @@ const rawSchema = z.object({
    * Phase A, not a decision — C4's measurement closes D12.
    */
   SEARCH_INDEX_KIND: z.enum(['meilisearch', 'opensearch', 'in-memory']).default('meilisearch'),
-  MEILI_HOST: z.string().url().optional(),
-  MEILI_MASTER_KEY: z.string().min(1).optional(),
+  MEILI_HOST: optional(z.string().url()),
+  MEILI_MASTER_KEY: optional(z.string().min(1)),
 
   /**
    * The free Companies House API key (Phase D step D2).
@@ -101,7 +121,7 @@ const rawSchema = z.object({
    * The value lives here, never in the source registry: SEC-04 has the registry store a
    * `credentialsRef` and nothing more.
    */
-  COMPANIES_HOUSE_API_KEY: z.string().min(1).optional(),
+  COMPANIES_HOUSE_API_KEY: optional(z.string().min(1)),
 });
 
 export type AppConfig = Readonly<{

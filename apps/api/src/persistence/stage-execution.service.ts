@@ -249,7 +249,7 @@ export class StageExecutionService {
     readonly leaseToken: string;
     readonly leaseMs: number;
     readonly now: Date;
-  }): Promise<Date | null> {
+  }): Promise<{ readonly leaseExpiresAt: Date; readonly revision: number } | null> {
     const leaseExpiresAt = new Date(input.now.getTime() + input.leaseMs);
 
     const renewed = await this.stages.findOneAndUpdate(
@@ -264,7 +264,18 @@ export class StageExecutionService {
       { returnDocument: 'after' },
     );
 
-    return renewed === null ? null : leaseExpiresAt;
+    // **The new revision is returned, and the caller must carry it forward.**
+    //
+    // Renewing bumps `revision`, and `completeFenced` fences on the revision the caller
+    // captured when it took the lease. A caller that keeps using the original value therefore
+    // invalidates its own completion the moment it heartbeats once — the work succeeds, the
+    // fence refuses it, the result is discarded and the message is redelivered. Nothing caught
+    // this for three phases because no job handler existed to call `heartbeat()`.
+    //
+    // Returning the value rather than dropping the increment keeps the fence meaningful: it
+    // still refuses a write from anyone whose revision is stale, and the lease owner's own
+    // renewals no longer count as staleness.
+    return renewed === null ? null : { leaseExpiresAt, revision: renewed.revision };
   }
 
   /**

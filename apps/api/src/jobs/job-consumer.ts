@@ -330,6 +330,11 @@ export class JobConsumer {
   }): Promise<Disposition> {
     const { envelope, handler, tenantId, stageKey, lease, channel } = input;
 
+    // The revision this worker's fence is held against. It advances with **our own** renewals
+    // and with nothing else, so a heartbeat no longer looks like a competing writer when the
+    // stage is completed. See `StageExecutionService.renewLease` for what went wrong before.
+    let fenceRevision = lease.revision;
+
     try {
       await handler.execute({
         tenantId,
@@ -337,17 +342,25 @@ export class JobConsumer {
         runId: envelope.aggregateId,
         stageKey,
         attempt: lease.attempt,
-        heartbeat: async () =>
-          (await this.stages.renewLease({
+        heartbeat: async () => {
+          const renewed = await this.stages.renewLease({
             tenantId,
             stageExecutionId: lease.stageExecutionId,
             leaseToken: lease.leaseToken,
             leaseMs: this.options.leaseMs,
             now: new Date(),
-          })) !== null,
+          });
+          if (renewed === null) {
+            // The lease is gone or the deadline has passed. `fenceRevision` is left alone: the
+            // completion should be refused, which is exactly what a stale revision achieves.
+            return false;
+          }
+          fenceRevision = renewed.revision;
+          return true;
+        },
       });
     } catch (error) {
-      return this.recordFailure({ ...input, error });
+      return this.recordFailure({ ...input, revision: fenceRevision, error });
     }
 
     // Success. The stage's terminal state and the receipt commit together (FI-09): if they
@@ -359,7 +372,7 @@ export class JobConsumer {
           tenantId,
           stageExecutionId: lease.stageExecutionId,
           leaseToken: lease.leaseToken,
-          expectedRevision: lease.revision,
+          expectedRevision: fenceRevision,
           state: 'SUCCEEDED',
           now: new Date(),
           session,
@@ -411,6 +424,8 @@ export class JobConsumer {
     readonly stageKey: string;
     readonly lease: Lease;
     readonly channel: string;
+    /** The revision this worker's fence is held against, advanced by its own renewals. */
+    readonly revision?: number | undefined;
     readonly error: unknown;
   }): Promise<Disposition> {
     const { envelope, tenantId, stageKey, lease, channel, error } = input;
@@ -431,7 +446,7 @@ export class JobConsumer {
       tenantId,
       stageExecutionId: lease.stageExecutionId,
       leaseToken: lease.leaseToken,
-      expectedRevision: lease.revision,
+      expectedRevision: input.revision ?? lease.revision,
       state: classified.retry ? 'FAILED' : 'ABANDONED',
       failureClass: classified.failureClass,
       failureDetail: classified.detail,

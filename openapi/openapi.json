@@ -331,6 +331,28 @@
         }
       }
     },
+    "/v1/searches/{searchId}/findings": {
+      "get": {
+        "operationId": "getSearchFindings",
+        "tags": ["searches"],
+        "summary": "Read what a search produced, and what it could not",
+        "description": "Returns the findings **together with the three result dimensions**. That pairing is\ndeliberate: a client that reads findings alone cannot tell a genuinely clean run\nfrom one in which every source was blocked, because both return an empty array.\n\nA `band` is never a score and never arrives alone — `axes` and `rationale` travel\nwith it, because FR-08 requires the four contributing values be retained verbatim\nand FR-13 requires the reviewer be able to see why. There is no numeric risk score\nanywhere in this response, by design (invariant I9).\n\n`rejectedLeads` are candidates that were found and **not** promoted, each with its\nreason. They are returned rather than discarded because a pipeline that silently\ndrops what it decided against cannot be audited (FR-06).\n\nWhen there are no findings, `noMatchStatement` is present and names what was\nsearched, what was not, and what that does and does not mean. It never says\n\"clear\", \"clean\" or \"no adverse media\".\n\n`mode: \"MOCK\"` means every record came from fixture data and no live source was\ncontacted. It is never servable as a live result.",
+        "parameters": [
+          { "name": "searchId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The findings, the rejected leads, and the coverage they sit inside.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/FindingsPage" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "404": { "$ref": "#/components/responses/Error404" }
+        }
+      }
+    },
     "/v1/searches/{searchId}/associations": {
       "get": {
         "operationId": "getSearchAssociations",
@@ -1404,6 +1426,269 @@
           "unresolvedCandidates",
           "refreshOfSnapshotId",
           "builtAt"
+        ],
+        "additionalProperties": false
+      },
+      "EvidenceBand": {
+        "type": "string",
+        "enum": [
+          "CORROBORATED",
+          "SUPPORTED",
+          "AMBIGUOUS",
+          "COMPANY_CONTEXT",
+          "CONTRADICTED",
+          "LEAD_ONLY"
+        ]
+      },
+      "Finding": {
+        "type": "object",
+        "properties": {
+          "findingId": { "type": "string" },
+          "searchId": { "type": "string" },
+          "band": { "$ref": "#/components/schemas/EvidenceBand" },
+          "axes": {
+            "type": "object",
+            "properties": {
+              "identity": {
+                "type": "string",
+                "enum": ["CORROBORATED", "PARTIAL", "WEAK", "CONTRADICTED"]
+              },
+              "attribution": {
+                "type": "string",
+                "enum": ["DIRECT_PERSONAL", "ROLE_INFERRED", "COMPANY_ONLY", "NO_ATTRIBUTION"]
+              },
+              "stage": { "type": "string" },
+              "partyRole": { "type": "string" },
+              "authorityTier": { "type": "integer", "minimum": 1, "maximum": 5 },
+              "independenceCount": { "type": "integer", "minimum": 0 }
+            },
+            "required": [
+              "identity",
+              "attribution",
+              "stage",
+              "partyRole",
+              "authorityTier",
+              "independenceCount"
+            ],
+            "additionalProperties": false
+          },
+          "rationale": { "type": "array", "items": { "type": "string" } },
+          "category": { "type": "string", "nullable": true },
+          "proceduralStage": { "type": "string" },
+          "partyRole": { "type": "string" },
+          "namingAuthority": { "type": "string", "nullable": true },
+          "attribution": {
+            "type": "object",
+            "properties": {
+              "grade": {
+                "$ref": "#/components/schemas/Finding/properties/axes/properties/attribution"
+              },
+              "isInference": { "type": "boolean" },
+              "statement": { "type": "string", "nullable": true },
+              "companyRef": { "type": "string", "nullable": true },
+              "companyName": { "type": "string", "nullable": true },
+              "tenureLabel": { "type": "string", "nullable": true }
+            },
+            "required": [
+              "grade",
+              "isInference",
+              "statement",
+              "companyRef",
+              "companyName",
+              "tenureLabel"
+            ],
+            "additionalProperties": false
+          },
+          "document": {
+            "type": "object",
+            "properties": {
+              "documentId": { "type": "string" },
+              "documentVersion": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+              "url": { "type": "string" },
+              "title": { "type": "string" },
+              "publisher": { "type": "string" },
+              "sourceId": { "type": "string" },
+              "authorityTier": { "type": "integer", "minimum": 1, "maximum": 5 },
+              "language": { "type": "string", "nullable": true },
+              "eventDate": { "$ref": "#/components/schemas/PreciseDate" },
+              "publicationDate": { "$ref": "#/components/schemas/PreciseDate" },
+              "updateDate": { "$ref": "#/components/schemas/PreciseDate" },
+              "retrievalDate": { "$ref": "#/components/schemas/PreciseDate" },
+              "cascadeRung": { "type": "integer", "minimum": 0, "maximum": 7 },
+              "mode": { "type": "string", "enum": ["MOCK", "LIVE"] }
+            },
+            "required": [
+              "documentId",
+              "documentVersion",
+              "url",
+              "title",
+              "publisher",
+              "sourceId",
+              "authorityTier",
+              "language",
+              "eventDate",
+              "publicationDate",
+              "updateDate",
+              "retrievalDate",
+              "cascadeRung",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "subjectMentionSpans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "start": { "type": "integer" }, "end": { "type": "integer" } },
+              "required": ["start", "end"],
+              "additionalProperties": false
+            }
+          },
+          "conductSpan": {
+            "allOf": [
+              { "$ref": "#/components/schemas/Finding/properties/subjectMentionSpans/items" }
+            ],
+            "nullable": true
+          },
+          "stageSpan": {
+            "allOf": [
+              { "$ref": "#/components/schemas/Finding/properties/subjectMentionSpans/items" }
+            ],
+            "nullable": true
+          },
+          "identityFactors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string" },
+                "strength": { "type": "string", "enum": ["STRONG", "MODERATE", "WEAK"] },
+                "direction": {
+                  "type": "string",
+                  "enum": ["CORROBORATING", "ABSENT", "CONTRADICTING"]
+                },
+                "detail": { "type": "string" }
+              },
+              "required": ["kind", "strength", "direction", "detail"],
+              "additionalProperties": false
+            }
+          },
+          "queryId": { "type": "string" },
+          "queryFamily": { "type": "string" },
+          "extractorVersion": { "type": "string" },
+          "modelId": { "type": "string", "nullable": true },
+          "promptVersion": { "type": "string", "nullable": true },
+          "createdAt": { "type": "string" }
+        },
+        "required": [
+          "findingId",
+          "searchId",
+          "band",
+          "axes",
+          "rationale",
+          "category",
+          "proceduralStage",
+          "partyRole",
+          "namingAuthority",
+          "attribution",
+          "document",
+          "subjectMentionSpans",
+          "conductSpan",
+          "stageSpan",
+          "identityFactors",
+          "queryId",
+          "queryFamily",
+          "extractorVersion",
+          "modelId",
+          "promptVersion",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "RejectedLead": {
+        "type": "object",
+        "properties": {
+          "leadId": { "type": "string" },
+          "url": { "type": "string" },
+          "title": { "type": "string" },
+          "publisher": { "type": "string" },
+          "cascadeRung": { "type": "integer", "minimum": 0, "maximum": 7 },
+          "queryId": { "type": "string" },
+          "reason": { "type": "string" },
+          "stage": { "type": "string", "enum": ["FETCH", "EXTRACTION", "CLASSIFICATION"] }
+        },
+        "required": [
+          "leadId",
+          "url",
+          "title",
+          "publisher",
+          "cascadeRung",
+          "queryId",
+          "reason",
+          "stage"
+        ],
+        "additionalProperties": false
+      },
+      "FindingsPage": {
+        "type": "object",
+        "properties": {
+          "searchId": { "type": "string" },
+          "execution": { "type": "string" },
+          "findingsState": { "type": "string" },
+          "coverage": { "type": "string" },
+          "noMatchStatement": {
+            "type": "object",
+            "properties": {
+              "headline": { "type": "string" },
+              "limitations": { "type": "array", "items": { "type": "string" } },
+              "disclaimer": { "type": "string" }
+            },
+            "required": ["headline", "limitations", "disclaimer"],
+            "additionalProperties": false,
+            "nullable": true
+          },
+          "findings": { "type": "array", "items": { "$ref": "#/components/schemas/Finding" } },
+          "rejectedLeads": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RejectedLead" }
+          },
+          "sourceOutcomes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourceId": { "type": "string" },
+                "sourceName": { "type": "string" },
+                "cascadeRung": { "type": "integer" },
+                "outcome": { "type": "string" },
+                "detail": { "type": "string", "nullable": true },
+                "truncation": { "type": "string", "nullable": true }
+              },
+              "required": [
+                "sourceId",
+                "sourceName",
+                "cascadeRung",
+                "outcome",
+                "detail",
+                "truncation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unmeasuredLanguages": { "type": "array", "items": { "type": "string" } },
+          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] }
+        },
+        "required": [
+          "searchId",
+          "execution",
+          "findingsState",
+          "coverage",
+          "noMatchStatement",
+          "findings",
+          "rejectedLeads",
+          "sourceOutcomes",
+          "unmeasuredLanguages",
+          "mode"
         ],
         "additionalProperties": false
       },

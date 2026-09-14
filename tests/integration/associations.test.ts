@@ -33,6 +33,8 @@ import { StageExecutionService } from '../../apps/api/src/persistence/stage-exec
 import { TransactionRunner } from '../../apps/api/src/persistence/transaction.runner.js';
 import { IndexerService } from '../../apps/api/src/search-index/indexer.service.js';
 import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-index.port.js';
+import { FindingsService } from '../../apps/api/src/pipeline/findings.service.js';
+import { TaxonomyService } from '../../apps/api/src/admin/taxonomy.service.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import type { MockCompanyRegistryAdapter } from '../../apps/api/src/sources/mock/company-registry.mock.js';
 import {
@@ -574,6 +576,9 @@ describe('degraded execution — the run survives a registry outage (FR-02)', ()
       new IndexerService(db, new InMemorySearchIndex(), new SourceDocumentService(db)),
       new StageExecutionService(db),
       graph,
+      new FindingsService(db),
+      new TaxonomyService(db),
+      'mock',
     );
 
     const created = await searches.create({
@@ -716,6 +721,9 @@ describe('the historical scope needs an approval (FR-02)', () => {
       new IndexerService(db, new InMemorySearchIndex(), new SourceDocumentService(db)),
       new StageExecutionService(db),
       graphOver(mockAdapters()),
+      new FindingsService(db),
+      new TaxonomyService(db),
+      'mock',
     );
   }
 

@@ -56,6 +56,8 @@ import { AssociationGraphService } from '../../apps/api/src/associations/associa
 import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
 import { buildSourceAdapters } from '../../apps/api/src/sources/sources.registry.js';
 import { PolicyService } from '../../apps/api/src/tenancy/policy.service.js';
+import { FindingsService } from '../../apps/api/src/pipeline/findings.service.js';
+import { TaxonomyService } from '../../apps/api/src/admin/taxonomy.service.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
@@ -275,6 +277,9 @@ beforeAll(async () => {
     new IndexerService(db, new InMemorySearchIndex(), new SourceDocumentService(db)),
     stages,
     associationGraphFor(db, subjects, runner, audit),
+    new FindingsService(db),
+    new TaxonomyService(db),
+    'mock',
   );
 
   await Promise.all([
@@ -309,6 +314,50 @@ afterAll(async () => {
     await db.collection(collection).deleteMany({ tenantId: TENANT });
   }
   await mongo.close();
+});
+
+describe('a handler that heartbeats still completes', () => {
+  /**
+   * The regression test for a bug that survived three phases undetected.
+   *
+   * `renewLease` increments the stage's `revision`, and `completeFenced` fences on the revision
+   * captured when the lease was taken. So a handler that called `heartbeat()` invalidated its
+   * own completion: the work succeeded, the fence refused it, the result was discarded, and the
+   * message went back to the queue to be done again. Nothing caught it because until Phase E
+   * there were no handlers, and therefore nothing ever called `heartbeat()`.
+   *
+   * The fence now advances with the lease owner's own renewals and with nothing else.
+   */
+  it('is not refused by its own heartbeat', async () => {
+    const tenantId = tenant();
+    const { searchId } = await createRun(tenantId);
+
+    let heartbeats = 0;
+    const handler: JobHandler = {
+      eventType: 'search.queued',
+      stageKeyFor: (envelope) => `fetch:${envelope.aggregateId}`,
+      execute: async (context) => {
+        // Three renewals, as a long-running pipeline does between its stages.
+        for (let i = 0; i < 3; i += 1) {
+          const alive = await context.heartbeat();
+          expect(alive).toBe(true);
+          heartbeats += 1;
+        }
+      },
+    };
+
+    const consumer = consumerWith(handler);
+    const envelope = envelopeFor({ tenantId, runId: searchId });
+    const disposition = await consumer.handle(messageFor(envelope), new Date());
+
+    expect(heartbeats).toBe(3);
+    // ACKNOWLEDGE, not RETRY_LATER. A discarded success is worse than a failure: the work was
+    // done, the result was thrown away, and the queue grew.
+    expect(disposition.kind).toBe('ACKNOWLEDGE');
+
+    const stage = await stages.findByKey(tenantId, searchId, `fetch:${searchId}`);
+    expect(stage?.state).toBe('SUCCEEDED');
+  });
 });
 
 describe('T24 — redelivery commits no duplicate stage', () => {

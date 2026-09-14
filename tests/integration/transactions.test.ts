@@ -30,6 +30,8 @@ import { AssociationGraphService } from '../../apps/api/src/associations/associa
 import { CapabilityCoverageService } from '../../apps/api/src/admin/capability-coverage.service.js';
 import { buildSourceAdapters } from '../../apps/api/src/sources/sources.registry.js';
 import { PolicyService } from '../../apps/api/src/tenancy/policy.service.js';
+import { FindingsService } from '../../apps/api/src/pipeline/findings.service.js';
+import { TaxonomyService } from '../../apps/api/src/admin/taxonomy.service.js';
 import { SearchesService } from '../../apps/api/src/searches/searches.service.js';
 import { NameFrequencyService } from '../../apps/api/src/subjects/name-frequency.service.js';
 import { SubjectsService } from '../../apps/api/src/subjects/subjects.service.js';
@@ -89,6 +91,9 @@ beforeAll(async () => {
     indexer,
     new StageExecutionService(db),
     associationGraphFor(db, subjects, runner, audit),
+    new FindingsService(db),
+    new TaxonomyService(db),
+    'mock',
   );
 
   await Promise.all([outbox.ensureIndexes(), audit.ensureIndexes(), searches.ensureIndexes()]);

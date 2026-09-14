@@ -479,6 +479,45 @@ function buildPaths(): Record<string, SchemaObject> {
       },
     },
 
+    '/v1/searches/{searchId}/findings': {
+      get: {
+        operationId: 'getSearchFindings',
+        tags: ['searches'],
+        summary: 'Read what a search produced, and what it could not',
+        description: [
+          'Returns the findings **together with the three result dimensions**. That pairing is',
+          'deliberate: a client that reads findings alone cannot tell a genuinely clean run',
+          'from one in which every source was blocked, because both return an empty array.',
+          '',
+          'A `band` is never a score and never arrives alone — `axes` and `rationale` travel',
+          'with it, because FR-08 requires the four contributing values be retained verbatim',
+          'and FR-13 requires the reviewer be able to see why. There is no numeric risk score',
+          'anywhere in this response, by design (invariant I9).',
+          '',
+          '`rejectedLeads` are candidates that were found and **not** promoted, each with its',
+          'reason. They are returned rather than discarded because a pipeline that silently',
+          'drops what it decided against cannot be audited (FR-06).',
+          '',
+          'When there are no findings, `noMatchStatement` is present and names what was',
+          'searched, what was not, and what that does and does not mean. It never says',
+          '"clear", "clean" or "no adverse media".',
+          '',
+          '`mode: "MOCK"` means every record came from fixture data and no live source was',
+          'contacted. It is never servable as a live result.',
+        ].join('\n'),
+        parameters: [{ name: 'searchId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'The findings, the rejected leads, and the coverage they sit inside.',
+            content: json(ref('FindingsPage')),
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+        },
+      },
+    },
+
     '/v1/searches/{searchId}/associations': {
       get: {
         operationId: 'getSearchAssociations',

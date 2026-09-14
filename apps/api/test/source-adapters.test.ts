@@ -700,7 +700,7 @@ describe('extraction', () => {
     language: 'es',
     subjectNameForms: [SHARED_NAME],
     taxonomyVersionId: 'tax-1',
-    enabledCategoryIds: ['fraud-financial-crime'],
+    enabledCategoryIds: ['FRAUD_FINANCIAL_CRIME'],
   };
 
   it('emits spans that point at the text they came from', async () => {
@@ -731,7 +731,7 @@ describe('extraction', () => {
     // assertion, not a bribery assertion.
     const outcome = await extractor().extract({
       ...input,
-      enabledCategoryIds: ['bribery-corruption'],
+      enabledCategoryIds: ['BRIBERY_CORRUPTION'],
     });
     expect(outcome.status).toBe('NO_RESULTS');
   });

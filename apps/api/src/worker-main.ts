@@ -13,10 +13,11 @@
  * The HTTP server is never created here: `createApplicationContext` builds the providers and
  * nothing else. A worker that also listened would be an unaudited way into the API.
  *
- * **This exits non-zero today, deliberately.** No job handler exists yet — the pipeline is
- * Phase E — and a worker with no handlers does not idle: it receives every queued search and
- * dead-letters it as unroutable. Starting would look healthy while draining the queue into the
- * DLQ, so it refuses, says why, and consumes nothing.
+ * **It starts, as of Phase E.** `SearchJobHandler` is registered against the consumer, so the
+ * worker consumes `search.queued` and runs the pipeline. It still refuses to start if no
+ * handler is registered — a worker with no handlers does not idle, it receives every queued
+ * search and dead-letters it as unroutable, which would look healthy while draining the queue
+ * into the DLQ. The refusal stays; what changed is that there is now something to register.
  */
 
 import 'reflect-metadata';

@@ -11,15 +11,27 @@ import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { CancelSearchInput, CreateSearchInput, SearchSummary } from '@erly/adverse-contracts';
+import type {
+  CancelSearchInput,
+  CreateSearchInput,
+  Finding,
+  FindingsPage,
+  SearchSummary,
+} from '@erly/adverse-contracts';
 import {
   aggregateRun,
+  enabledCategories,
+  renderNoMatchStatement,
+  REVIEW_DISCLAIMER,
+  unmeasuredLanguages,
   type AssociationScope,
   type Principal,
   type SourceCoverageOutcome,
 } from '@erly/adverse-domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
+import { TaxonomyService } from '../admin/taxonomy.service.js';
+import { FindingsService, type FindingRecord } from '../pipeline/findings.service.js';
 import { ApiException } from '../common/api-exception.js';
 import {
   ADVERSE_MEDIA,
@@ -75,6 +87,9 @@ export class SearchesService {
     private readonly indexer: IndexerService,
     private readonly stages: StageExecutionService,
     private readonly associations: AssociationGraphService,
+    private readonly findings: FindingsService,
+    private readonly taxonomies: TaxonomyService,
+    private readonly mode: 'mock' | 'live',
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
   }
@@ -586,6 +601,99 @@ export class SearchesService {
     return toWire(updated);
   }
 
+  /**
+   * The findings page: what the run produced, and what it could not.
+   *
+   * The three dimensions are repeated on this response on purpose. A client that fetches
+   * findings alone has no way to tell a genuinely clean run from one where every source was
+   * blocked, and section 6.2 exists precisely because those two look identical if you only
+   * count results.
+   *
+   * The FR-13 no-match statement is rendered whenever there are no findings — including when
+   * the run is still queued, where it honestly says nothing has been searched yet rather than
+   * implying an empty result.
+   */
+  async findingsFor(input: {
+    readonly tenantId: string;
+    readonly searchId: string;
+  }): Promise<FindingsPage> {
+    const run = await this.searches.findOne({
+      tenantId: input.tenantId,
+      searchId: input.searchId,
+    });
+    if (run === null) {
+      throw ApiException.notFound('Search', `tenant=${input.tenantId} search=${input.searchId}`);
+    }
+
+    const [{ findings, rejectedLeads }, taxonomy] = await Promise.all([
+      this.findings.listForSearch({ tenantId: input.tenantId, searchId: input.searchId }),
+      this.taxonomies.loadPinned(input.tenantId, run.pinnedVersions.taxonomyVersion),
+    ]);
+
+    const sourceOutcomes = run.sourceOutcomes ?? [];
+    const unmeasured = unmeasuredLanguages(taxonomy, run.requestedScope.languages);
+
+    const noMatchStatement =
+      findings.length > 0
+        ? null
+        : renderNoMatchStatement({
+            sourceCount: sourceOutcomes.length,
+            languages: run.requestedScope.languages,
+            jurisdictions: run.requestedScope.jurisdictions,
+            enabledCategories: run.requestedScope.jurisdictions.flatMap((jurisdiction) =>
+              enabledCategories(taxonomy, jurisdiction),
+            ),
+            taxonomyVersion: run.pinnedVersions.taxonomyVersion,
+            policyVersion: run.pinnedVersions.policyVersion,
+            runAt: run.createdAt.toISOString(),
+            // D2 is open: no source archive horizon has been measured, so the statement says
+            // so rather than naming a date nobody has verified.
+            archiveHorizon:
+              'not established — no source archive horizon has been measured (D2, gate G10)',
+            coverage: run.coverage,
+            failedSources: sourceOutcomes.filter(
+              (outcome) => outcome.outcome === 'FAILED' || outcome.outcome === 'SKIPPED',
+            ),
+            unmeasuredLanguages: unmeasured,
+          });
+
+    return {
+      searchId: run.searchId,
+      execution: run.execution,
+      findingsState: run.findings,
+      coverage: run.coverage,
+      noMatchStatement:
+        noMatchStatement === null
+          ? null
+          : {
+              headline: noMatchStatement.headline,
+              limitations: [...noMatchStatement.lines],
+              disclaimer: REVIEW_DISCLAIMER,
+            },
+      findings: findings.map(toFindingWire),
+      rejectedLeads: rejectedLeads.map((lead) => ({
+        leadId: lead.leadId,
+        url: lead.url,
+        title: lead.title,
+        publisher: lead.publisher,
+        cascadeRung: lead.cascadeRung,
+        queryId: lead.queryId,
+        reason: lead.reason,
+        stage: lead.stage,
+      })),
+      sourceOutcomes: sourceOutcomes.map((outcome) => ({
+        sourceId: outcome.sourceId,
+        sourceName: outcome.sourceName,
+        cascadeRung: outcome.cascadeRung,
+        outcome: outcome.outcome,
+        detail: outcome.detail,
+        truncation: outcome.truncation,
+      })),
+      unmeasuredLanguages: [...unmeasured],
+      mode: this.mode === 'live' ? 'LIVE' : 'MOCK',
+    };
+  }
+
   /** Tenant scoping is in the query, never a check afterwards (SEC-01). */
   async findById(tenantId: string, searchId: string): Promise<SearchSummary> {
     const record = await this.searches.findOne({ tenantId, searchId });
@@ -665,5 +773,81 @@ function toWire(record: SearchRecord): SearchSummary {
     refreshOfSearchId: record.refreshOfSearchId,
     progress: record.progress,
     revision: record.revision,
+  };
+}
+
+/**
+ * A stored finding, as the contract serves it.
+ *
+ * An explicit mapping rather than returning the record. The stored shape carries a tenant id
+ * and internal keys that are operational detail, and a response built by spreading a database
+ * record grows a field the day somebody adds one to the collection.
+ */
+function toFindingWire(record: FindingRecord): Finding {
+  return {
+    findingId: record.findingId,
+    searchId: record.searchId,
+    band: record.band,
+    axes: {
+      identity: record.axes.identity as Finding['axes']['identity'],
+      attribution: record.axes.attribution as Finding['axes']['attribution'],
+      stage: record.axes.stage,
+      partyRole: record.axes.partyRole,
+      authorityTier: record.axes.authorityTier,
+      independenceCount: record.axes.independenceCount,
+    },
+    rationale: [...record.rationale],
+    category: record.category,
+    proceduralStage: record.proceduralStage,
+    partyRole: record.partyRole,
+    namingAuthority: record.namingAuthority,
+    attribution: {
+      grade: record.attribution.grade as Finding['attribution']['grade'],
+      isInference: record.attribution.isInference,
+      statement: record.attribution.statement,
+      companyRef: record.attribution.companyRef,
+      companyName: record.attribution.companyName,
+      tenureLabel: record.attribution.tenureLabel,
+    },
+    document: {
+      documentId: record.document.documentId,
+      documentVersion: record.document.documentVersion,
+      url: record.document.url,
+      title: record.document.title,
+      publisher: record.document.publisher,
+      sourceId: record.document.sourceId,
+      authorityTier: record.document.authorityTier,
+      language: record.document.language,
+      eventDate: record.document.eventDate,
+      publicationDate: record.document.publicationDate,
+      updateDate: record.document.updateDate,
+      retrievalDate: record.document.retrievalDate,
+      cascadeRung: record.document.cascadeRung,
+      mode: record.document.mode,
+    },
+    subjectMentionSpans: record.subjectMentionSpans.map((span) => ({
+      start: span.start,
+      end: span.end,
+    })),
+    conductSpan:
+      record.conductSpan === null
+        ? null
+        : { start: record.conductSpan.start, end: record.conductSpan.end },
+    stageSpan:
+      record.stageSpan === null
+        ? null
+        : { start: record.stageSpan.start, end: record.stageSpan.end },
+    identityFactors: record.identityFactors.map((factor) => ({
+      kind: factor.kind,
+      strength: factor.strength as Finding['identityFactors'][number]['strength'],
+      direction: factor.direction as Finding['identityFactors'][number]['direction'],
+      detail: factor.detail,
+    })),
+    queryId: record.queryId,
+    queryFamily: record.queryFamily,
+    extractorVersion: record.extractorVersion,
+    modelId: record.modelId,
+    promptVersion: record.promptVersion,
+    createdAt: record.createdAt.toISOString(),
   };
 }

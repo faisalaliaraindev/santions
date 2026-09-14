@@ -28,7 +28,7 @@ import type { Lead } from '../lead.js';
 import type { EngineMixQuery, SiteSearchQuery, WebDiscoveryPort } from '../web-discovery.port.js';
 import type { FailureSignal } from '@erly/adverse-domain';
 
-import { FIXTURE_LEADS } from './discovery-fixtures.js';
+import { FIXTURE_LEADS, queryMatchesFixture } from './discovery-fixtures.js';
 import { withinWindow } from './news-discovery.mock.js';
 
 export const MOCK_WEB_DISCOVERY_DESCRIPTOR: AdapterDescriptor = {
@@ -116,9 +116,7 @@ export class MockWebDiscoveryAdapter implements WebDiscoveryPort {
       return Promise.resolve(failed(this.descriptor, now, this.fault));
     }
 
-    const matches = FIXTURE_LEADS.filter(
-      (f) => f.matches.toLowerCase() === text.trim().toLowerCase(),
-    )
+    const matches = FIXTURE_LEADS.filter((f) => queryMatchesFixture(text, f.requires))
       .filter((f) => domain === null || f.lead.publisherDomain === domain)
       .filter((f) => withinWindow(f.lead.publishedAt.value, window))
       .toSorted((a, b) => a.lead.leadId.localeCompare(b.lead.leadId));

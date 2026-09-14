@@ -71,6 +71,35 @@ export const FIXTURE_DOCUMENTS: readonly FetchFixture[] = [
     robots: 'ALLOWED',
   },
   {
+    // The syndicated copy of the story above, at a second domain. Near-identical text on
+    // purpose: FR-10's clustering has to recognise that two sightings of one wire report are
+    // not two independent sources, and it cannot do that unless a corpus contains the pair.
+    url: 'https://www.crhoy-example.com/nacionales/caso-talamanca-2024',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Fiscalía acusa a directiva de Inversiones Talamanca por ' +
+      'presunto fraude</h1><p>La Fiscalía Adjunta de Delitos Económicos presentó acusación ' +
+      'formal contra María Fernanda Solís Rojas, presidenta de Inversiones Talamanca S.A.</p>' +
+      '</article></body></html>',
+    etag: 'W/"talamanca-syndicated-1"',
+    lastModified: 'Thu, 14 Mar 2024 12:40:00 GMT',
+    robots: 'ALLOWED',
+  },
+  {
+    // Names the subject, reports no categorised conduct. It must stay a lead: FR-06 is explicit
+    // that a headline alone is never a supported adverse finding, and this is the document that
+    // proves the pipeline rejects rather than promotes when there is nothing to promote.
+    url: 'https://www.observador-example.cr/archivo/12841',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Talamanca: la causa sigue abierta</h1><p>El caso que involucra ' +
+      'a María Fernanda Solís Rojas continúa sin resolución, según fuentes consultadas.</p>' +
+      '</article></body></html>',
+    etag: 'W/"observador-12841"',
+    lastModified: 'Fri, 22 Mar 2024 09:15:00 GMT',
+    robots: 'ALLOWED',
+  },
+  {
     url: 'https://boletin-example.go.cr/notificaciones/2024/03/18',
     contentType: 'application/pdf',
     body: '%PDF-1.4 notificación expediente 24-000123-0042-PE',

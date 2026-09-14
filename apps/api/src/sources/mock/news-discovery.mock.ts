@@ -31,7 +31,7 @@ import type { DiscoveryQuery, Lead } from '../lead.js';
 import type { ContractProbeResult, NewsDiscoveryPort } from '../news-discovery.port.js';
 import type { FailureSignal } from '@erly/adverse-domain';
 
-import { FIXTURE_LEADS } from './discovery-fixtures.js';
+import { FIXTURE_LEADS, queryMatchesFixture } from './discovery-fixtures.js';
 
 export const MOCK_NEWS_DISCOVERY_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'mock-news-discovery',
@@ -84,7 +84,7 @@ export class MockNewsDiscoveryAdapter implements NewsDiscoveryPort {
     }
 
     const matches = FIXTURE_LEADS.filter(
-      (f) => NEWS_RUNGS.has(f.rung) && f.matches.toLowerCase() === query.text.trim().toLowerCase(),
+      (f) => NEWS_RUNGS.has(f.rung) && queryMatchesFixture(query.text, f.requires),
     )
       .filter((f) => withinWindow(f.lead.publishedAt.value, query.window))
       .filter((f) => query.language === null || f.lead.language === query.language)

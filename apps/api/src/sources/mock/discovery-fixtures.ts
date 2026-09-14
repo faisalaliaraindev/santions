@@ -27,18 +27,45 @@ import type { CascadeRung, Lead } from '../lead.js';
 export type UnstampedLead = Omit<Lead, 'provenance' | 'queryId' | 'rung'>;
 
 export interface FixtureLead {
-  /** Which query text this lead answers. Matched case-insensitively, whole string. */
-  readonly matches: string;
+  /**
+   * Terms a query must contain for this lead to be returned. **All** of them, compared after
+   * folding case and diacritics.
+   *
+   * This replaced whole-string equality, which was a mistake worth naming: a mock that answers
+   * exactly one query string tests string equality, not the pipeline. Every planned query is
+   * built by the FR-04 family templates — `"Name"`, `"Name" director`, `"Name" fraude` — so an
+   * equality match meant the planner and the fixtures had to agree character for character, and
+   * the first realistic plan returned nothing while looking like a discovery failure.
+   */
+  readonly requires: readonly string[];
   readonly rung: CascadeRung;
   readonly lead: UnstampedLead;
 }
 
+/** Fold for comparison: lower case, diacritics stripped, whitespace collapsed. */
+export function foldForMatch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Does this query carry every term the fixture requires? */
+export function queryMatchesFixture(queryText: string, requires: readonly string[]): boolean {
+  const haystack = foldForMatch(queryText);
+  return requires.every((term) => haystack.includes(foldForMatch(term)));
+}
+
+export const DISCOVERY_SUBJECT_NAME = 'María Fernanda Solís Rojas';
+/** A planned query that reaches the fixture corpus. Any query naming the subject does. */
 export const DISCOVERY_QUERY_WITH_RESULTS = 'María Fernanda Solís Rojas fraude';
 export const DISCOVERY_QUERY_WITH_NO_RESULTS = 'Wilberth Zamora Quesada';
 
 export const FIXTURE_LEADS: readonly FixtureLead[] = [
   {
-    matches: DISCOVERY_QUERY_WITH_RESULTS,
+    requires: [DISCOVERY_SUBJECT_NAME],
     rung: 2,
     lead: {
       leadId: 'lead-primary-0001',
@@ -53,7 +80,7 @@ export const FIXTURE_LEADS: readonly FixtureLead[] = [
   },
   {
     // Same story, different domain. Syndication, not corroboration.
-    matches: DISCOVERY_QUERY_WITH_RESULTS,
+    requires: [DISCOVERY_SUBJECT_NAME],
     rung: 2,
     lead: {
       leadId: 'lead-duplicate-0001',
@@ -68,7 +95,7 @@ export const FIXTURE_LEADS: readonly FixtureLead[] = [
   },
   {
     // No snippet, and no publication date. Both absent, both stay absent.
-    matches: DISCOVERY_QUERY_WITH_RESULTS,
+    requires: [DISCOVERY_SUBJECT_NAME],
     rung: 4,
     lead: {
       leadId: 'lead-sparse-0001',
@@ -82,7 +109,7 @@ export const FIXTURE_LEADS: readonly FixtureLead[] = [
     },
   },
   {
-    matches: DISCOVERY_QUERY_WITH_RESULTS,
+    requires: [DISCOVERY_SUBJECT_NAME],
     rung: 5,
     lead: {
       leadId: 'lead-web-0001',

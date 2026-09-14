@@ -37,7 +37,7 @@ import type {
   ExtractionModelPort,
   TextSpan,
 } from '../extraction-model.port.js';
-import type { PartyRole, StageValue } from '@erly/adverse-domain';
+import type { AdverseCategory, PartyRole, StageValue } from '@erly/adverse-domain';
 
 export const MOCK_EXTRACTION_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'mock-extraction',
@@ -68,13 +68,25 @@ const STAGE_KEYWORDS: readonly { readonly term: string; readonly stage: StageVal
   { term: 'absolutoria', stage: 'ACQUITTAL_DISMISSAL_OVERTURNED' },
 ];
 
-/** Keyword → taxonomy category id. Only emitted when the tenant has the category enabled. */
-const CATEGORY_KEYWORDS: readonly { readonly term: string; readonly categoryId: string }[] = [
-  { term: 'fraude', categoryId: 'fraud-financial-crime' },
-  { term: 'fraud', categoryId: 'fraud-financial-crime' },
-  { term: 'lavado', categoryId: 'money-laundering-tf' },
-  { term: 'cohecho', categoryId: 'bribery-corruption' },
-  { term: 'soborno', categoryId: 'bribery-corruption' },
+/**
+ * Keyword → taxonomy category. Only emitted when the tenant has the category enabled.
+ *
+ * The ids are the **real** `AdverseCategory` values from `@erly/adverse-domain`, not a local
+ * spelling. An earlier version of this file invented kebab-case ids (`fraud-financial-crime`),
+ * which typechecked because `categoryId` is a string and matched nothing because the taxonomy
+ * uses `FRAUD_FINANCIAL_CRIME`. Every extraction was silently discarded as "category not
+ * enabled" — a mock disagreeing with the domain about its own vocabulary, which no unit test
+ * caught because both halves were internally consistent.
+ */
+const CATEGORY_KEYWORDS: readonly {
+  readonly term: string;
+  readonly categoryId: AdverseCategory;
+}[] = [
+  { term: 'fraude', categoryId: 'FRAUD_FINANCIAL_CRIME' },
+  { term: 'fraud', categoryId: 'FRAUD_FINANCIAL_CRIME' },
+  { term: 'lavado', categoryId: 'MONEY_LAUNDERING_TF' },
+  { term: 'cohecho', categoryId: 'BRIBERY_CORRUPTION' },
+  { term: 'soborno', categoryId: 'BRIBERY_CORRUPTION' },
 ];
 
 /** Stage → the party role the text supports. Conservative: never stronger than the stage. */
