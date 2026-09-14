@@ -9,6 +9,17 @@ of previous sessions. It is deliberately short.
 
 > **Phase D — Sources, association graph and taxonomy administration (gate G5)**
 >
+> ⚠️ **The phase order was broken deliberately on 2026-09-14.** A customer call needed something
+> demonstrable, so a compressed slice of **Phase E** was built ahead of D5 and D6: the search
+> pipeline, the first job handler, the findings API, and a typed client for an integrator.
+> **A search now runs end to end in mock mode** — `pnpm demo:api`.
+>
+> **Phase D is NOT complete and G5 is NOT passed.** D5 (source health, breakers, budgets, the
+> mid-run kill switch) and D6 (the lexicon audit on the activation path, the Spanish lexicon)
+> are untouched. Read the top handoff entry before deciding what to do next: it lists what the
+> pipeline does not yet do, and the largest gap — FR-10 clustering is not wired, so a syndicated
+> copy counts as a second independent source.
+>
 > Brief: [`phase-d.md`](./phase-d.md), expanded into a full brief on 2026-09-11. **D0 through D4
 > are done; D5 is next.**
 >
@@ -129,12 +140,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **460 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **475 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**179 integration** tests and `pnpm test:security` **106 security** tests.
+**189 integration** tests and `pnpm test:security` **106 security** tests.
 
-Coverage is gated at 85/80 and currently reports 94.92% / 90.72% — but only under CI's own
+Coverage is gated at 85/80 and currently reports 93.56% / 90.73% — but only under CI's own
 invocation, which is
 `pnpm exec vitest run --project unit --project invariants --project evaluation --coverage`.
 Running `--project unit` alone reports ~84% and fails, because domain code is also exercised by
@@ -221,6 +232,7 @@ Inside `apps/api/src`, the four directories Phase C added:
 | `storage/`      | `ObjectStorePort` + S3 adapter, `EvidenceStagingService` (stage → verify → commit, plus the orphan sweep), `RetentionSweeper`                                     |
 | `sources/`      | The six FR-05 ports (D2), their deterministic mocks in `mock/`, and the GB-only Companies House adapter                                                           |
 | `associations/` | The FR-02 graph (D3): officer resolution, the `DIRECTOR_OF` edges, and the snapshot frozen to the run                                                             |
+| `pipeline/`     | The search pipeline, the job handler that runs it, and the findings store (Phase E slice)                                                                         |
 
 The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint

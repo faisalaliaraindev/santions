@@ -43,7 +43,7 @@ export default tseslint.config(
   {
     // Operator scripts are plain ESM JavaScript. Type-aware rules do not apply, so they are
     // linted with the untyped recommended set rather than pulled into a tsconfig project.
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'examples/**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
       parserOptions: { projectService: false, project: false },

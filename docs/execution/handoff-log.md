@@ -27,6 +27,120 @@ Say what you did about it.
 
 ---
 
+## 2026-09-14 (evening) — **Out of phase order, for a demo**: the search pipeline, the findings API, and the Zquence client
+
+**Read this first.** The phase order was broken deliberately. D5 and D6 are **not** done; this
+session jumped to a compressed slice of **Phase E** because a customer call needed something
+demonstrable. What exists now is a working end-to-end search in mock mode and a typed client for
+an integrator. What does not exist is everything D5 and D6 were going to build — source health,
+breakers, budgets, the kill switch, the lexicon audit on the activation path, and the Spanish
+lexicon. Phase D is **not** complete and gate G5 is **not** passed.
+
+**Did — four things.**
+
+**1. The search pipeline, and the first job handler this service has ever had.**
+`apps/api/src/pipeline/`. Phase C built the consumer and registered nothing against it (D-016),
+so an accepted search returned `QUEUED` and stayed there forever. A search now runs:
+associations → bounded query plan → discovery → fetch into committed evidence → extraction →
+four-axis banding → completion.
+
+Almost none of this is new logic. `buildQueryPlan` is new and pure; everything else —
+`boundPlan`, `gradeIdentity`, `gradeAttribution`, `classifyEvent`, `computeAuthority`,
+`assignBand`, `aggregateRun`, `renderNoMatchStatement` — was written and tested in Phase G0 and
+**had no caller**. The pipeline sequences them and records what happened; every judgement stays
+a pure function, so a bug in the pipeline produces a wrong record rather than a wrong rule.
+
+**2. `GET /v1/searches/{id}/findings`**, as a first-class contract schema so the control panel
+can generate its client from it later. Findings arrive **with** the three result dimensions,
+because a caller holding an empty array and no coverage cannot tell a clean run from one where
+every source was blocked. No numeric score anywhere (I9). Every claim carries spans into the
+stored document. Rejected leads are returned with reasons rather than discarded (FR-06).
+
+**3. `pnpm demo:api`** — one command that drives the whole thing over real HTTP with a machine
+API key, faking no step. It starts the API and worker if they are not running, issues a key,
+creates a subject, submits, polls, and prints findings, associations, rejected leads, coverage
+and a plain statement of what the run is and is not.
+
+**4. `@erly/adverse-client` + `examples/zquence-integration.mjs` + `docs/integration/zquence.md`.**
+The G9 pull half: a typed Node client, a worked example, and the integration contract written
+down. Per the G9 brief these live in this repository until Zquence workspace access is granted.
+
+**Verified:**
+
+```
+lint clean · typecheck clean · format:check clean
+test:unit         475 passed  (was 460: +15 client tests)
+test:invariants    29 passed
+test:evaluation    12 passed
+test:integration  189 passed  (was 179: +9 pipeline, +1 fence regression)
+test:security     106 passed
+coverage          93.56% statements / 90.73% branches (gate 85/80)
+pnpm verify:local  every suite ok except end-to-end, still [n/i]
+```
+
+Run against the real stack, and the demo run was watched end to end: a search submitted over
+HTTP came back `SUCCEEDED / POTENTIAL_MATCHES / INCOMPLETE` with two findings, their reasoning,
+one rejected lead and an honest coverage statement.
+
+**Found — five bugs, four of them latent for phases.**
+
+1. **`renewLease` invalidated the fence it was supposed to protect.** It increments the stage's
+   `revision`; `completeFenced` fences on the revision captured at lease time. So **any handler
+   that heartbeats invalidated its own completion**: the work succeeded, the fence refused it,
+   the result was discarded and the message was redelivered. Nothing caught it for three phases
+   because no handler existed to call `heartbeat()`. The fence now advances with the lease
+   owner's own renewals and with nothing else. Regression test added in `jobs.test.ts`.
+2. **My handler incremented the run's `revision`**, which is the consumer's fence field. Two
+   writers on one counter is exactly the drift the fence exists to prevent. The handler now
+   guards on `execution !== 'CANCELLED'` (T30) and leaves the revision alone.
+3. **The mock extractor invented category ids that matched nothing.** It used kebab-case
+   (`fraud-financial-crime`) while the taxonomy uses `FRAUD_FINANCIAL_CRIME`, so every extraction
+   was silently dropped as "category not enabled". It typechecked because the field is a string,
+   and no unit test saw it because both halves were internally consistent. Now typed as
+   `AdverseCategory`.
+4. **An optional env var written `VAR=` failed `.min(1)`** instead of reading as unset, which
+   stopped the API and the worker booting from the committed `.env.example`. Blank is now absent,
+   for every optional variable.
+5. **The discovery mock matched queries by whole-string equality**, so it answered exactly one
+   hard-coded string and nothing a real planner produces. It now matches on required terms.
+
+**Also corrected:** coverage now reports `INCOMPLETE` when a searched language has no measured
+recall figure. Every source completing says the _sources_ worked; it says nothing about whether
+queries in an unmeasured language find what exists.
+
+**Left half-done — read this before the next session builds on it.**
+
+- **Syndicated copies are not clustered.** One story carried by two publishers currently produces
+  **two findings**, each reporting `independenceCount: 1`. `decideClustering` and the FR-10 rules
+  exist in the domain package and the pipeline does not call them. This is visible in the demo
+  and is documented as a known gap in `docs/integration/zquence.md`. It was left rather than
+  rushed: a wrong independence count inflates bands, which is worse than a visible duplicate.
+- **Axis A is thin.** The pipeline builds a single identity factor from "the document names the
+  subject". The real identifier extraction (dates of birth, roles, places in the text) is not
+  wired, so identity grades are `PARTIAL` where they should often be stronger or weaker.
+- **Axis D is single-document.** Authority is computed per finding over one source, so
+  independence is always 1. Real independence needs the clustering above.
+- **One job, one stage.** The pipeline runs as a single `search:execute` stage rather than the
+  FR-09 stage ladder. The consumer's guarantees apply at search level, which is sound, but
+  progress reporting is coarse (`stagesCompleted: 6` is hard-coded).
+- **No callbacks.** Polling only; the signed-webhook half of G9 is not built.
+- **D5 and D6 are untouched.**
+
+**Next session should:** decide explicitly whether to finish Phase D (D5 source health and
+breakers, D6 the lexicon audit on the activation path) or to continue Phase E properly. If the
+demo leads to more integration work, the highest-value single fix is **wiring FR-10 clustering
+into the pipeline** — it is the difference between "two articles" and "one story, two
+publishers", and it is what `axes.independenceCount` is supposed to mean. Start at
+`SearchPipeline.assess`, where findings are currently produced one per extracted assertion.
+
+**Decisions touched:** none recorded, and that is deliberate — this session implemented against
+existing decisions rather than taking new ones. **D-016 is now satisfied** (a handler exists, so
+the worker starts). **D-011 unchanged**: no name-frequency distribution is loaded, so every
+identity grade in Costa Rica is computed without the top-decile penalty. **D2 unchanged**: no
+archive horizon is measured, and the no-match statement says so rather than naming a date.
+
+---
+
 ## 2026-09-14 (later still) — Phase D step **D4 done**: configurable bounds, visible truncation, and association coverage that reaches the run
 
 **Did — four things, one of which corrects D3.**

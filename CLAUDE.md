@@ -40,6 +40,7 @@ pnpm lint / typecheck
 pnpm openapi:generate  # regenerate openapi/openapi.json from packages/contracts
 pnpm verify:local      # aggregates mandatory non-live checks; currently fails by design
 pnpm local:up          # start the local stack
+pnpm demo:api          # end-to-end walkthrough over the real HTTP API (mock sources)
 ```
 
 ## Key documents

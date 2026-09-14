@@ -143,6 +143,12 @@ importers:
         specifier: ^7.0.0
         version: 7.2.2
 
+  packages/client:
+    dependencies:
+      '@erly/adverse-contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/contracts:
     dependencies:
       '@erly/adverse-domain':
