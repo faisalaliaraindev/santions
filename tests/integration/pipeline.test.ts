@@ -41,6 +41,8 @@ import { SourceHealthService } from '../../apps/api/src/sources/source-health.se
 import { SourceVersionService } from '../../apps/api/src/sources/source-version.service.js';
 import { FindingsService } from '../../apps/api/src/pipeline/findings.service.js';
 import { SearchJobHandler } from '../../apps/api/src/pipeline/search-job.handler.js';
+import { CascadeService } from '../../apps/api/src/pipeline/cascade.service.js';
+import { LadderBuilder } from '../../apps/api/src/pipeline/ladder.builder.js';
 import { SearchPipeline } from '../../apps/api/src/pipeline/search-pipeline.service.js';
 import { IndexerService } from '../../apps/api/src/search-index/indexer.service.js';
 import { InMemorySearchIndex } from '../../apps/api/src/search-index/search-index.port.js';
@@ -251,6 +253,11 @@ beforeAll(async () => {
       contactUrl: null,
     }),
     'mock',
+    // The FR-05 ladder, built from the same seeded registry the fetch gate reads. So this suite
+    // walks the rungs the fixtures are actually approved at — and reports the rungs nothing is
+    // approved for as unsearched, which is what the bootstrap really leaves behind.
+    new LadderBuilder(db, adapters),
+    new CascadeService(sourceHealth),
   );
 
   handler = new SearchJobHandler(db, pipeline, findings, runner);

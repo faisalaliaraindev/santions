@@ -35,6 +35,7 @@ export * from './clustering/rules.js';
 
 export * from './planning/query-families.js';
 export * from './planning/build-plan.js';
+export * from './planning/cascade.js';
 
 export * from './coverage/result-state.js';
 export * from './identity/transliteration.js';

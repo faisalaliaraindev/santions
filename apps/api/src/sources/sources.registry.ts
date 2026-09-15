@@ -55,8 +55,19 @@ import type { WebDiscoveryPort } from './web-discovery.port.js';
  * missing capability an empty result.
  */
 export interface SourceAdapterSet {
-  readonly newsDiscovery: NewsDiscoveryPort | null;
-  readonly webDiscovery: WebDiscoveryPort | null;
+  /**
+   * Every news-discovery adapter this process holds, **in no particular order**.
+   *
+   * A list rather than one port, because the FR-05 ladder has several news rungs and each is
+   * served by whichever approved sources record that rung. One port could only ever serve one
+   * source, which would make the ladder a property of the code instead of a property of the
+   * registry (`LadderBuilder`, D-045).
+   *
+   * Empty is a legitimate state and means exactly what it says: no rung this seam serves has an
+   * adapter, so those rungs report as unsearched.
+   */
+  readonly newsDiscovery: readonly NewsDiscoveryPort[];
+  readonly webDiscovery: readonly WebDiscoveryPort[];
   readonly primarySource: PrimarySourcePort | null;
   /** The only seam with a real adapter in Phase D — and it covers GB, not CR. */
   readonly companyRegistry: CompanyRegistryPort | null;
@@ -115,8 +126,8 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
         'reaches a real source, and every record it produces is stamped MOCK (T55).',
     );
     return {
-      newsDiscovery: new MockNewsDiscoveryAdapter(witness),
-      webDiscovery: new MockWebDiscoveryAdapter(witness),
+      newsDiscovery: [new MockNewsDiscoveryAdapter(witness)],
+      webDiscovery: [new MockWebDiscoveryAdapter(witness)],
       primarySource: new MockPrimarySourceAdapter(witness),
       companyRegistry: new MockCompanyRegistryAdapter(witness),
       evidenceFetch: new MockEvidenceFetchAdapter(witness),
@@ -183,8 +194,12 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
   }
 
   return {
-    newsDiscovery: null,
-    webDiscovery: null,
+    // Empty, not null. There is no live news or web discovery adapter constructed here yet:
+    // `RssNewsDiscoveryAdapter` exists and is built per approved source by the composition root
+    // once a source is activated. An empty list makes every rung it would serve report as
+    // unsearched, which is the truth.
+    newsDiscovery: [],
+    webDiscovery: [],
     primarySource: null,
     companyRegistry:
       options.companiesHouseApiKey === null

@@ -17,7 +17,7 @@
  * ports differ in how they are *asked*, not in what they return.
  */
 
-import type { PreciseDate, TaxonomyVersion } from '@erly/adverse-domain';
+import type { CascadeRung, PreciseDate, TaxonomyVersion } from '@erly/adverse-domain';
 
 import type { AdapterProvenance } from './source-adapter.js';
 
@@ -28,8 +28,12 @@ import type { AdapterProvenance } from './source-adapter.js';
  * polled publisher feeds) and a lead from rung 5 (SearXNG over a mixed engine set) deserve
  * different treatment downstream, and because rung 7 — "stop and emit coverage state" — is
  * only meaningful if we can say which rungs were actually reached.
+ *
+ * **Re-exported from the domain package, not redeclared.** The ladder and its failure policies
+ * live in `packages/domain/src/planning/cascade.ts`; two structurally identical definitions would
+ * typecheck against each other happily and drift the moment one of them gained a rung.
  */
-export type CascadeRung = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type { CascadeRung };
 
 export interface Lead {
   /**

@@ -236,6 +236,13 @@ isolated worker with request interception and no shared profile. **No default re
 - [x] Step 2 — `SourceOutcome.FAILED` carries a required human `detail` (**D-038**), so a robots refusal reads as what it was rather than as "could not be retrieved (HARD_BLOCK)"
 - [x] Step 2 — the relevance score is derived and labelled `PRELIMINARY_NAME_PRESENCE_v1`, and **does not gate** (**D-037**); the FR-06 signal set and its threshold are step 4
 - [ ] Step 2 remainder — the per-lead relevance **threshold**, the nine FR-06 signals, and the egress **pool** (identities, sticky rotation, `ProxyPort`) are steps 4 and 7, unchanged
+- [x] Step 3 — **the seven-rung cascade is built** (**D-045**): the FR-05 ladder as a pure table
+      and decision in `packages/domain/src/planning/cascade.ts`, walked by `CascadeService`, and
+      built from the registry by `LadderBuilder` so a source sits at the rung its approved version
+      records. The ladder is walked in full rather than first-hit-wins, because axis D grants
+      CORROBORATED on two independent Tier 2–3 sources and stopping early makes that unreachable.
+      A rung with no approved source reports **unsearched**, which is why mock mode now admits it
+      searches two rungs of seven
 - [~] Step 3 — **the XML parser dependency is decided, built and tested** (`fast-xml-parser@4.5.7`
   pinned, behind a DOCTYPE gate this project owns, **D-039**); the **per-domain breaker** is built
   and wired (**D-040**); the **D17 stop conditions** are recorded on the source version, applied by

@@ -70,8 +70,12 @@ describe('the mode rule', () => {
       companiesHouseApiKey: null,
       fetchContactUrl: null,
     });
-    expect(live.newsDiscovery).toBeNull();
-    expect(live.webDiscovery).toBeNull();
+    // Empty, not null: the discovery seams are lists now (D-045). The distinction the old
+    // assertion carried is preserved — nothing mock is reachable — and an empty list is what
+    // makes every rung those seams would serve report as **unsearched** rather than as searched
+    // and empty.
+    expect(live.newsDiscovery).toHaveLength(0);
+    expect(live.webDiscovery).toHaveLength(0);
     expect(live.primarySource).toBeNull();
     expect(live.extractionModel).toBeNull();
     // Null rather than mocked — an unavailable capability, not an empty one.
@@ -102,8 +106,10 @@ describe('the mode rule', () => {
       fetchContactUrl: null,
     });
     const all = [
-      mock.newsDiscovery,
-      mock.webDiscovery,
+      // The discovery seams are lists now — the FR-05 ladder has several rungs and each is
+      // served by whichever approved sources record it (D-045).
+      ...mock.newsDiscovery,
+      ...mock.webDiscovery,
       mock.primarySource,
       mock.companyRegistry,
       mock.evidenceFetch,
@@ -124,8 +130,8 @@ describe('every adapter declares a parser version and a stability class (FR-05)'
       fetchContactUrl: null,
     });
     const descriptors = [
-      mock.newsDiscovery?.descriptor,
-      mock.webDiscovery?.descriptor,
+      ...mock.newsDiscovery.map((port) => port.descriptor),
+      ...mock.webDiscovery.map((port) => port.descriptor),
       mock.primarySource?.descriptor,
       mock.companyRegistry?.descriptor,
       mock.evidenceFetch?.descriptor,

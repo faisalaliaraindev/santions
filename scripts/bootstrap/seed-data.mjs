@@ -157,8 +157,13 @@ const SEED_SOURCES = [
   // other source, and the only thing that distinguishes them is `connectorType: 'FIXTURE_MOCK'`
   // and a `mode: 'MOCK'` stamp that T55 refuses to let them shed.
   ...[
+    // The rung each mock is approved at, and it must match the rung its adapter actually
+    // serves — the FR-05 ladder is built from the registry (D-045), so a mock seeded at the
+    // wrong rung makes mock mode rehearse a ladder that does not exist. The web mock serves
+    // rungs 5 and 6; it is approved at 5, and rung 6 honestly reports as unsearched because
+    // no high-authority domain is approved for direct site search.
     ['src-mock-news-discovery', 'Mock news discovery', 2, 'XML_FEED'],
-    ['src-mock-web-discovery', 'Mock web discovery', 3, 'JSON'],
+    ['src-mock-web-discovery', 'Mock web discovery', 5, 'JSON'],
     ['src-mock-primary', 'Mock primary source', 1, 'HTML'],
     ['src-mock-cr-registry', 'Mock company registry', 1, 'JSON'],
     ['src-mock-fetch', 'Mock evidence fetch', 0, 'HTML'],

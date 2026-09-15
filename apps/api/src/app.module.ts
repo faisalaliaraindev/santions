@@ -7,6 +7,8 @@ import { AssociationGraphService } from './associations/association-graph.servic
 import { TaxonomyService } from './admin/taxonomy.service.js';
 import { FindingsService } from './pipeline/findings.service.js';
 import { SearchJobHandler } from './pipeline/search-job.handler.js';
+import { CascadeService } from './pipeline/cascade.service.js';
+import { LadderBuilder } from './pipeline/ladder.builder.js';
 import { SearchPipeline } from './pipeline/search-pipeline.service.js';
 import { FetchGateService } from './sources/fetch-gate.service.js';
 import { SourceVersionService } from './sources/source-version.service.js';
@@ -423,6 +425,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         sourceHealth: SourceHealthService,
         fetchGate: FetchGateService,
         config: AppConfig,
+        ladder: LadderBuilder,
+        cascade: CascadeService,
       ) =>
         new SearchPipeline(
           subjects,
@@ -435,6 +439,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           sourceHealth,
           fetchGate,
           config.mode,
+          ladder,
+          cascade,
         ),
       inject: [
         SubjectsService,
@@ -447,7 +453,23 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         SourceHealthService,
         FetchGateService,
         APP_CONFIG,
+        LadderBuilder,
+        CascadeService,
       ],
+    },
+    {
+      // What sits on the FR-05 ladder, read from the registry on every run (D-045). Not cached:
+      // a cached ladder keeps asking a source an administrator retired.
+      provide: LadderBuilder,
+      useFactory: (db: Db, adapters: SourceAdapterSet) => new LadderBuilder(db, adapters),
+      inject: [MONGO_DB, SOURCE_ADAPTERS],
+    },
+    {
+      // Walking it. Separate from the builder so the walk is testable against a ladder of stubs
+      // with no database at all.
+      provide: CascadeService,
+      useFactory: (health: SourceHealthService) => new CascadeService(health),
+      inject: [SourceHealthService],
     },
     {
       provide: SearchJobHandler,

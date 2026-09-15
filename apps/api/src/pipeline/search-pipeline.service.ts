@@ -77,10 +77,14 @@ import {
   type PreciseDate,
   type SourceCoverageOutcome,
   type TenureLabel,
+  cascadeCoverageOutcomes,
+  type RungAttempt,
   type TaxonomyVersion,
 } from '@erly/adverse-domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
+import { CascadeService } from './cascade.service.js';
+import { LadderBuilder } from './ladder.builder.js';
 import { TaxonomyService } from '../admin/taxonomy.service.js';
 import {
   FindingsService,
@@ -140,6 +144,16 @@ export class SearchPipeline {
      */
     private readonly fetchGate: FetchGateService,
     private readonly mode: 'mock' | 'live',
+    /**
+     * The FR-05 ladder: what is on it, and walking it (Phase E step 3, **D-045**).
+     *
+     * Two objects rather than one because they answer different questions and change for
+     * different reasons. `LadderBuilder` reads the registry, so the ladder follows approvals
+     * without a deployment. `CascadeService` walks whatever it is handed, so the walk is
+     * testable against a ladder of stubs with no database at all.
+     */
+    private readonly ladder: LadderBuilder,
+    private readonly cascade: CascadeService,
   ) {}
 
   async execute(input: {
@@ -343,22 +357,23 @@ export class SearchPipeline {
     rungReached: number | null;
     discoveryOutcomes: readonly SourceCoverageOutcome[];
   }> {
-    const news = this.adapters.newsDiscovery;
-    const web = this.adapters.webDiscovery;
+    const ladder = await this.ladder.build();
 
-    if (news === null && web === null) {
+    if (ladder.length === 0) {
+      // Nothing is approved at any rung. Reported once, plainly, rather than as eight identical
+      // gaps — and never as an empty result, because nothing was searched.
       return {
         leads: [],
         rungReached: null,
         discoveryOutcomes: [
           {
             sourceId: 'discovery',
-            sourceName: 'News and web discovery',
-            cascadeRung: 2,
+            sourceName: 'Discovery cascade',
+            cascadeRung: 0,
             outcome: 'SKIPPED',
             detail:
-              'No discovery adapter is configured in this mode, so no discovery was attempted. ' +
-              'This is not evidence that nothing exists.',
+              'No approved source sits on the FR-05 discovery ladder in this process, so no ' +
+              'discovery was attempted. This is not evidence that nothing exists.',
             queriesAffected: queries.length,
             truncation: null,
           },
@@ -367,103 +382,61 @@ export class SearchPipeline {
     }
 
     const byUrl = new Map<string, SourcedLead>();
-    const outcomes: SourceCoverageOutcome[] = [];
+    const attempts: RungAttempt[] = [];
     let rungReached: number | null = null;
-    let newsFailures = 0;
-    let newsQueries = 0;
-    /** Set when health refuses the source, so the loop stops asking and the run says why. */
-    let newsRefusal: SourceCoverageOutcome | null = null;
 
-    for (const query of queries) {
-      if (news === null) {
-        continue;
-      }
-
-      // D5 / T36. Asked per query rather than once, because the answer can change between two
-      // queries of the same run: an operator engaging the kill switch, a breaker opening on the
-      // previous query's failure, or an hourly budget reaching its last call.
-      const access = await this.sourceHealth.checkAccess({
-        sourceId: news.descriptor.sourceId,
-        now: input.now,
-        queriesAffected: queries.length - newsQueries,
-      });
-      if (!access.decision.allowed) {
-        newsRefusal = access.coverageOutcome;
-        break;
-      }
-
-      newsQueries += 1;
-      const result = await news.discover({
-        tenantId: input.tenantId,
-        // The run's pinned scope travels with the query so a **live** connector can authorise
-        // its own poll through the same gate a document fetch goes through, rather than growing
-        // a second, weaker copy of it.
-        run: {
-          jobId: input.searchId,
-          subjectId: input.subjectId,
-          jurisdictions: input.jurisdictions,
-          languages: input.languages,
-          taxonomy: input.taxonomy,
+    for (const [index, query] of queries.entries()) {
+      const walk = await this.cascade.walk({
+        ladder,
+        query: {
+          tenantId: input.tenantId,
+          run: {
+            jobId: input.searchId,
+            subjectId: input.subjectId,
+            jurisdictions: input.jurisdictions,
+            languages: input.languages,
+            taxonomy: input.taxonomy,
+          },
+          queryId: query.queryId,
+          text: query.query,
+          language: query.language,
+          country: query.jurisdiction,
+          window: null,
+          limit: 25,
         },
-        queryId: query.queryId,
-        text: query.query,
-        language: query.language,
-        country: query.jurisdiction,
-        window: null,
-        limit: 25,
-      });
-
-      if (result.status === 'FAILED') {
-        newsFailures += 1;
-        // Fed back into the breaker through the FR-06 table, so a source that is failing this
-        // run is already refused on the next one rather than being rediscovered from scratch.
-        await this.sourceHealth.recordFailure({
-          sourceId: news.descriptor.sourceId,
-          signal: result.signal,
-          now: input.now,
-        });
-        continue;
-      }
-      await this.sourceHealth.recordSuccess({
-        sourceId: news.descriptor.sourceId,
+        // What a gap at this point costs: every query not yet run, this one included.
+        queriesAffected: queries.length - index,
         now: input.now,
       });
-      if (!hasData(result)) {
-        // The source answered and had nothing. Not a failure, and the rung was still reached.
-        rungReached = Math.max(rungReached ?? 0, 2);
-        continue;
+
+      attempts.push(...walk.attempts);
+      if (walk.rungReached !== null) {
+        rungReached = Math.max(rungReached ?? 0, walk.rungReached);
       }
 
-      for (const lead of result.data) {
-        rungReached = Math.max(rungReached ?? 0, lead.rung);
+      // Deduplicated across every query and every rung, so one story found by three families at
+      // two rungs is one lead. Counting it more than once is what would inflate axis D's
+      // independence count — the mistake FR-10 clustering exists to prevent, prevented here too.
+      for (const lead of walk.leads) {
         if (!byUrl.has(lead.url)) {
           byUrl.set(lead.url, { lead, query });
         }
       }
     }
 
-    if (newsRefusal !== null) {
-      // The refusal replaces the source's own outcome rather than accompanying it. Reporting
-      // both would have the run claim the source completed *and* was suspended, and the fact a
-      // reviewer needs is the one that says why the plan stopped short.
-      outcomes.push({ ...newsRefusal, sourceName: 'News discovery' });
-    } else if (news !== null) {
-      outcomes.push({
-        sourceId: news.descriptor.sourceId,
-        sourceName: 'News discovery',
-        cascadeRung: 2,
-        outcome:
-          newsFailures === 0 ? 'COMPLETED' : newsFailures === newsQueries ? 'FAILED' : 'PARTIAL',
-        detail:
-          newsFailures === 0
-            ? null
-            : `${String(newsFailures)} of ${String(newsQueries)} discovery queries failed.`,
-        queriesAffected: newsQueries,
-        truncation: null,
-      });
-    }
+    // One outcome per distinct gap rather than one per query: a rung with no source is one fact
+    // about the run, and repeating it per query would bury the coverage statement in duplicates.
+    const seen = new Set<string>();
+    const discoveryOutcomes = cascadeCoverageOutcomes(attempts).filter((outcome) => {
+      const key = `${String(outcome.cascadeRung)}:${outcome.sourceId}:${outcome.outcome}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
 
-    return { leads: [...byUrl.values()], rungReached, discoveryOutcomes: outcomes };
+    return { leads: [...byUrl.values()], rungReached, discoveryOutcomes };
   }
 
   /**

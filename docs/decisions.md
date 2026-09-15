@@ -1413,3 +1413,81 @@ is addressable per edition — has neither problem.
 product that can search widely and cannot yet say how well. Every coverage statement has to carry
 that, and the temptation to let source count stand in for recall gets stronger the more sources are
 approved. The invariants (I1–I10) are what stop it, and they do not know about countries.
+
+## D-045 — The cascade walks the whole ladder, and it is built from the registry
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15
+
+FR-05 tabulates eight rungs and what each does **on failure**. Two things it does not say had to
+be decided, and both change what the product reports.
+
+### What happens on success
+
+The table is silent, and the two readings are different products. **First hit wins** — stop at
+the first rung that returns candidates — is cheapest and politest. **Walk the whole ladder** is
+broader and costs more requests.
+
+**This walks the whole ladder, and the reason is axis D rather than preference.** FR-11 grants
+`CORROBORATED` on one Tier 1 source _or two independent Tier 2–3 sources_. Stopping at the first
+rung that returned anything makes the second clause structurally unreachable: a story found at
+rung 2 ends the walk, rungs 3 to 6 are never asked, and no second independent source can ever be
+found. The banding engine would carry a rule it could never satisfy, and every well-reported
+allegation would band one level below what the evidence supports.
+
+Two smaller signals agree. FR-05's own "reaching rung 7 **with no candidates**" implies rung 7 is
+reached routinely, with or without them. And FR-10 clustering exists because the same story is
+expected from several rungs — which only happens if several rungs are asked.
+
+The cost is real and is bounded by things that already exist: per-source hourly and daily budgets,
+both breakers, the stop conditions, and the planner's query cap. It is not bounded by stopping
+early, which would have bought politeness with correctness.
+
+### What is on the ladder
+
+**A source sits at the rung its approved version records** — not the rung a connector was written
+for. `LadderBuilder` reads `sourceVersions` fresh on every run and matches each approved source to
+an adapter by `sourceId`.
+
+That is what makes the ladder configuration. Approving an RSS source at rung 2 puts it on the
+ladder; retiring its version removes it; narrowing its countries takes it off the runs it no
+longer covers — all through the four-eyes lifecycle, none of it through a deployment. It is the
+same rule as D-043 one level up: the _address_ of a source is registry content, and so is its
+_position_.
+
+Read fresh rather than cached, for the reason every other registry read in this service is: a
+cached ladder keeps asking a source an administrator retired, and that window is the window
+somebody asked us to stop.
+
+### The distinction the whole thing exists to keep
+
+**A source that answered "nothing" is not a gap. A rung with nothing behind it is.**
+
+- `EMPTY` — the ladder worked, and this source had nothing. No coverage outcome.
+- `NO_SOURCE` — nothing is approved at this rung, so it **was not searched**. A `SKIPPED`
+  coverage outcome naming the rung.
+- `FAILED` — asked and not answered. A `FAILED` outcome, so nobody investigates an outage at a
+  publisher that is working.
+- `REFUSED` — health said no: kill switch, licence, budget, breaker. A `SKIPPED` outcome carrying
+  the reason verbatim.
+
+Collapsing the first two is how "we did not look" becomes "there is nothing there", and it is the
+failure this entire service is built to prevent. The visible consequence is that **mock mode now
+admits it searched two rungs of seven**: rungs 0, 1, 3, 4 and 6 have no approved discovery source
+and every run says so. Before this, discovery reported one line and the run looked far more
+thorough than it was.
+
+### What this deliberately does not do
+
+**It does not invent an adapter to fill a rung.** Rung 0 is a local index of polled feeds and
+there is no poller, so rung 0 reports unsearched on every run. An empty local index that always
+answered "nothing" would convert a missing capability into a clean answer — the same move as a
+mock in live mode, one layer along.
+
+**It does not stop early except where the table says so.** Rung 6 is "record and stop"; every
+other rung descends however it went. Stopping on a rung-2 failure would silently narrow coverage
+on every subsequent run.
+
+**Cost.** More outbound requests per query than a first-hit cascade, bounded by budgets and
+breakers rather than by giving up early. A coverage statement that is longer and less flattering.
+And a mock stack that now looks worse than it did yesterday while doing exactly the same work —
+which is the point.
