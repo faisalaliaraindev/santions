@@ -87,6 +87,11 @@ export const intendedUseSchema = z.enum([
  */
 export const connectorTypeSchema = z.enum([
   'NEWS_DISCOVERY_RSS',
+  /**
+   * GDELT DOC 2.0 — rung 3. A separate type from `NEWS_DISCOVERY_RSS` because it returns JSON
+   * rather than a feed and needs its own parse, not because it is a different kind of source.
+   */
+  'NEWS_DISCOVERY_GDELT',
   'WEB_DISCOVERY_SEARX',
   'PRIMARY_SOURCE_HTTP',
   'COMPANY_REGISTRY_HTTP',

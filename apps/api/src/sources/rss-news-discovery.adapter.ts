@@ -59,13 +59,16 @@
 
 import { Logger } from '@nestjs/common';
 
-import { canonicalise, screenUrl, type CountryCode, type PreciseDate } from '@erly/adverse-domain';
+import type { CountryCode } from '@erly/adverse-domain';
+
+import { buildEndpoint } from './discovery/endpoint.js';
+import { leadsFrom, matchesQuery } from './discovery/lead-mapping.js';
 
 import type { EvidenceFetchPort, FetchAuthorisation } from './evidence-fetch.port.js';
 import type { FetchGateService } from './fetch-gate.service.js';
 import type { CascadeRung, DiscoveryQuery, Lead } from './lead.js';
 import type { ContractProbeResult, NewsDiscoveryPort } from './news-discovery.port.js';
-import { decodeXml, parseFeed, XML_PARSER_VERSION, type FeedItem } from './parse/xml.js';
+import { decodeXml, parseFeed, XML_PARSER_VERSION } from './parse/xml.js';
 import {
   bounded,
   failed,
@@ -197,7 +200,7 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
       );
     }
 
-    const endpoint = this.endpointFor(version, query);
+    const endpoint = buildEndpoint(version, query.text);
     if (endpoint.kind === 'REFUSED') {
       return failed(this.descriptorFor(version), now, { policyRefusal: true }, endpoint.detail);
     }
@@ -278,17 +281,27 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
     }
 
     const rung = rungOf(version.cascadeRung);
-    const leads = this.leadsFrom({
-      items: parsed.feed.items,
-      feedLanguage: parsed.feed.language ?? language,
-      version,
-      query,
+    const leads = leadsFrom({
+      candidates: parsed.feed.items.map((item) => ({
+        title: item.title,
+        link: item.link,
+        snippet: item.summary,
+        publishedAtRaw: item.publishedAtRaw,
+        // The feed's declared language, or the source's. Never sniffed from the text.
+        language: parsed.feed.language ?? language,
+      })),
+      fallbackLanguage: parsed.feed.language ?? language,
+      publisherName: version.sourceName,
       rung,
-      now,
+      queryId: query.queryId,
+      provenance: stampProvenance(this.descriptorFor(version), now),
       // A fixed feed is the publisher's whole list, so the planned query has to be applied here.
       // A query feed already asked the publisher the question, and filtering their answer again
       // on our own string match would silently discard results they judged relevant.
-      matchLocally: version.endpointKind === 'FIXED_FEED',
+      matches:
+        version.endpointKind === 'FIXED_FEED'
+          ? (candidate): boolean => matchesQuery(query.text, candidate)
+          : undefined,
     });
 
     if (leads.length === 0) {
@@ -393,128 +406,6 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
   }
 
   /**
-   * The endpoint to read, built from the approved version.
-   *
-   * For a `QUERY_FEED` the planned query is set as **one search parameter** on the parsed
-   * endpoint. Setting a parameter rather than building a string is what keeps a query from
-   * introducing a path, a host or a second parameter — and the result is screened again by
-   * `screenUrl` here, before the gate screens it a third time, because this is the one URL in
-   * the system assembled from two sources rather than taken whole.
-   */
-  private endpointFor(
-    version: ActiveSourceVersion,
-    query: DiscoveryQuery,
-  ): { kind: 'URL'; url: string } | { kind: 'REFUSED'; detail: string } {
-    if (version.endpointUrl === null) {
-      return {
-        kind: 'REFUSED',
-        detail:
-          `${version.sourceName} records no endpoint, so there is no address to poll. A ` +
-          `connector never invents one — the address is part of what an approver signed (D-043).`,
-      };
-    }
-
-    if (version.endpointKind === 'FIXED_FEED') {
-      return { kind: 'URL', url: version.endpointUrl };
-    }
-
-    if (version.queryParam === null) {
-      return {
-        kind: 'REFUSED',
-        detail:
-          `${version.sourceName} is recorded as a QUERY_FEED and names no query parameter, so ` +
-          `this connector would have to guess where the query goes. A guess aimed at a third ` +
-          `party's server is not one worth making.`,
-      };
-    }
-
-    let url: URL;
-    try {
-      url = new URL(version.endpointUrl);
-    } catch {
-      return {
-        kind: 'REFUSED',
-        detail: `${version.sourceName} records an endpoint that is not a URL.`,
-      };
-    }
-    url.searchParams.set(version.queryParam, query.text);
-
-    const screening = screenUrl(url.toString());
-    if (!screening.allowed) {
-      return {
-        kind: 'REFUSED',
-        detail:
-          `The endpoint built for ${version.sourceName} was refused by the SEC-02 address ` +
-          `policy (${screening.rejection ?? 'REJECTED'}): ${screening.detail ?? url.toString()}`,
-      };
-    }
-    return { kind: 'URL', url: url.toString() };
-  }
-
-  /** Turn parsed feed items into leads, dropping anything that cannot honestly become one. */
-  private leadsFrom(input: {
-    readonly items: readonly FeedItem[];
-    readonly feedLanguage: string;
-    readonly version: ActiveSourceVersion;
-    readonly query: DiscoveryQuery;
-    readonly rung: CascadeRung;
-    readonly now: Date;
-    readonly matchLocally: boolean;
-  }): readonly Lead[] {
-    const provenance = stampProvenance(this.descriptorFor(input.version), input.now);
-    const leads: Lead[] = [];
-    const seen = new Set<string>();
-
-    for (const item of input.items) {
-      if (item.link === null || item.title === null) {
-        // A feed entry with no link is not a lead: there is nothing to fetch. Recording it with
-        // a synthesised URL would put an address in the record that the publisher never gave.
-        continue;
-      }
-
-      const screening = screenUrl(item.link);
-      if (!screening.allowed || screening.canonical === null) {
-        // Refused here rather than carried to the gate: a lead the policy will refuse is not a
-        // lead, and carrying it would put a URL we may never fetch into the coverage view as
-        // though it were a candidate.
-        continue;
-      }
-
-      if (input.matchLocally && !matchesQuery(input.query.text, item)) {
-        continue;
-      }
-
-      const canonical = canonicalise(new URL(screening.canonical));
-      if (seen.has(canonical)) {
-        // The same story twice in one feed. One lead, or axis D counts one story as two
-        // independent sources (FR-10).
-        continue;
-      }
-      seen.add(canonical);
-
-      leads.push({
-        leadId: `lead-${hash(canonical)}`,
-        url: canonical,
-        title: item.title,
-        // Exactly what the feed said, or null. Never synthesised from the title: a snippet is
-        // what a relevance filter scores, and a fabricated one would be scored as though the
-        // publisher had written it.
-        snippet: item.summary,
-        publisher: input.version.sourceName,
-        publisherDomain: new URL(canonical).hostname,
-        publishedAt: parsePublished(item.publishedAtRaw),
-        // The feed's declared language, or the source's. Never sniffed from the text.
-        language: input.feedLanguage,
-        rung: input.rung,
-        queryId: input.query.queryId,
-        provenance,
-      });
-    }
-
-    return leads;
-  }
-
-  /**
    * The descriptor for a record produced under a given version.
    *
    * `jurisdictions` comes from the approved version rather than from this file, so a coverage
@@ -546,63 +437,6 @@ function charsetOf(contentType: string | null): string | null {
     return null;
   }
   return /charset\s*=\s*"?([A-Za-z0-9._-]+)"?/i.exec(contentType)?.[1] ?? null;
-}
-
-/**
- * Does this item match the planned query?
- *
- * Only ever applied to a `FIXED_FEED`, where the publisher was not asked the question and the
- * feed is their whole list. Deliberately dumb: every whitespace-separated term of the query must
- * appear, case- and accent-insensitively, in the title or the summary.
- *
- * **This is not relevance filtering and it is not a judgement about adversity.** It decides
- * whether a headline is about the person the query names, and nothing else. FR-06's nine-signal
- * relevance filter is step 4, and its weights are to be set against the labelled corpus rather
- * than guessed here.
- */
-function matchesQuery(text: string, item: FeedItem): boolean {
-  const terms = fold(text)
-    .split(/\s+/)
-    .filter((term) => term.length > 1);
-  if (terms.length === 0) {
-    // An empty query matches the whole feed. That is what the contract probe asks for, and a
-    // planned query is never empty (`assertPlanIsEntityAnchored`).
-    return true;
-  }
-  const haystack = `${fold(item.title ?? '')} ${fold(item.summary ?? '')}`;
-  return terms.every((term) => haystack.includes(term));
-}
-
-/**
- * Case- and accent-folded, so `Solís` in a headline matches `Solis` in a query.
- *
- * Folding accents is the right direction here and the wrong one for identity matching: it widens
- * what is *considered*, and every candidate still goes through Axis A, which does not fold.
- */
-function fold(value: string): string {
-  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-}
-
-/**
- * The publication date a feed declared, with its precision.
- *
- * FR-07: a missing date stays null rather than becoming the retrieval date, and an unparsable one
- * does too. Backfilling either would put a date on a finding that no publisher ever stated, and
- * the date is what an event's recency is judged on.
- *
- * Precision is `DAY` rather than a finer value even when the feed gives a time, because the day
- * is what a reviewer reasons about and claiming minute precision from an RSS `pubDate` — which
- * publishers routinely set to the time of *generation* — would be precision we do not have.
- */
-function parsePublished(raw: string | null): PreciseDate {
-  if (raw === null) {
-    return { value: null, precision: 'UNKNOWN' };
-  }
-  const parsed = Date.parse(raw);
-  if (Number.isNaN(parsed)) {
-    return { value: null, precision: 'UNKNOWN' };
-  }
-  return { value: new Date(parsed).toISOString().slice(0, 10), precision: 'DAY' };
 }
 
 /** Which fields no item in the sample carried. The actionable half of a contract probe. */
@@ -651,21 +485,4 @@ function probeTaxonomy(version: ActiveSourceVersion, now: Date): DiscoveryQuery[
     approvedBy: 'contract-probe',
     activatedAt: now.toISOString(),
   };
-}
-
-/**
- * A short, stable hash of a canonical URL, for a deterministic lead id.
- *
- * Deterministic within and across runs, so the same article found at rung 2 and again at rung 4
- * is one lead with two sightings. Not cryptographic and does not need to be: a collision costs
- * two articles sharing an id inside one run's deduplication, and the canonical URL is compared
- * as well.
- */
-function hash(value: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
 }

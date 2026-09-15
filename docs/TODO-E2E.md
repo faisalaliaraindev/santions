@@ -141,6 +141,22 @@ Goal: the service makes its first real request, deliberately.
 - [ ] **S — Turn on the 15-minute poll and watch it.** Confirm 304s. Confirm no trip-wire fires
       by accident.
 
+- [x] **A live-mode stack.** `pnpm dev:live` — sets the mode, refuses to start without
+      `FETCH_CONTACT_URL`, and prints what changes, because two of the differences look like
+      breakage. The seeded taxonomy now enables `US` as well as `CR` (D-044): a source whose
+      countries the pinned taxonomy enables nothing for is refused `JURISDICTION_NOT_ENABLED`,
+      which reads like a bug.
+
+- [x] **Rungs 3 and 4 filled.** Rung 4 (Bing News RSS) needed **no code** — the RSS connector at
+      another approved address. Rung 3 (GDELT) needed a JSON parser and a connector type
+      (**D-046**). Templates for rungs 2, 3 and 4 are written and **inert**: no first-contact
+      approval, no robots position, and `ENDPOINT NOT VERIFIED` in the record itself.
+      _Files:_ `gdelt-discovery.adapter.ts`, `registry/discovery-rungs.ts`
+
+- [ ] 🔵 **M — Verify the rung 2, 3 and 4 endpoints and approve them.** The addresses are the
+      widely documented ones and **nobody has loaded them**. Each needs its endpoint confirmed, a
+      robots read, and a named first-contact approval before it can be used.
+
 - [ ] 🔵 **M — Repeat for every other source you want.** Each one needs its own named approval.
       Blocked on your source list.
 

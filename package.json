@@ -36,6 +36,7 @@
     "lexicon:audit": "vitest run --project unit packages/domain/test/taxonomy/lexicon-audit.test.ts",
     "dev:api": "node scripts/dev.mjs --only api",
     "dev:worker": "node scripts/dev.mjs --only worker",
+    "dev:live": "node scripts/dev.mjs --live",
     "bench:search-index": "pnpm build && node scripts/workload/search-index.mjs"
   },
   "devDependencies": {

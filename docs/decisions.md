@@ -1491,3 +1491,77 @@ on every subsequent run.
 breakers rather than by giving up early. A coverage statement that is longer and less flattering.
 And a mock stack that now looks worse than it did yesterday while doing exactly the same work —
 which is the point.
+
+## D-046 — A connector type means a response format; a template is not a proposal
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15
+
+Filling rungs 3 and 4 of the FR-05 ladder made two things explicit that D-043 implied.
+
+### Rung 4 cost nothing. Rung 3 cost a parser. That asymmetry is the test.
+
+**Bing News RSS needed no code at all.** It is `NEWS_DISCOVERY_RSS` at a different approved
+address, with `endpointKind: QUERY_FEED` so the planned query goes in as one parameter. Adding it
+is a registry row somebody approves — which is exactly what D-043 said adding a publisher should
+be.
+
+**GDELT needed `GdeltDiscoveryAdapter` and a connector type of its own**, because it returns JSON
+rather than a feed and nothing can parse a feed out of JSON.
+
+So the rule, stated so the next person can apply it: **a new connector type means a new response
+format, not a new source.** If adding a publisher appears to need one, that is the signal to check
+whether it really does. Two types now serve three rungs and will serve any number of RSS
+publishers; a third arrives only when something answers in a shape nothing can read.
+
+### The endpoint builder is shared because it carries a security rule
+
+`buildEndpoint` was private to the RSS adapter. GDELT was the second connector to need it, and
+copying twenty lines would have been quicker.
+
+It contains the rule that **the query is set as one search parameter on the recorded endpoint,
+never spliced into a string** — so a query cannot introduce a path segment, a host, a scheme or a
+second parameter, because `URL` does the assembling rather than the escaping being careful. A
+security rule that exists in two places is one that eventually disagrees with itself, and the
+second copy is always the one that gets it wrong. It now lives in `discovery/endpoint.ts` with
+`discovery/lead-mapping.ts` beside it, and both adapters call them.
+
+`leadsFrom` moved for the same reason, carrying three rules that are the product rather than
+convenience: a missing date stays null (FR-07), a snippet is never synthesised (FR-06 scores it),
+and one story is one lead (FR-10, so axis D cannot count a syndicated copy as independent).
+
+### A template is not a proposal, and is inert twice over
+
+`sec-litigation-releases.ts` is a **proposal**: every fact in it was established by desk research
+on a named date and it carries a named first-contact approval. The rung 2, 3 and 4 records are
+**templates** — the endpoints are the widely documented ones and **nobody has loaded them**.
+
+A widely documented URL is still a guess until somebody checks it, so each template is inert in
+two independent ways: `firstContactApproval: null` (D-042 refuses it) and `robotsPosition:
+NOT_ESTABLISHED` (the gate refuses that too). Either alone would be enough; both are there so a
+template does not become live because one was edited. A test asserts both, and asserts that the
+record itself says `ENDPOINT NOT VERIFIED` in its `policySummary` — in the record, not only in the
+file header, because a record is read by whoever approves it and the file is not.
+
+**No rate ceiling is recorded for any of them.** None of those publishers states a numeric limit,
+and a guessed ceiling in the registry is a number somebody would later treat as the publisher's
+own.
+
+**Cost.** Three records that look ready and are not, which is a state somebody could find
+confusing. Against that: the alternative was either three fabricated facts in records an approver
+signs, or nothing at all on rungs 2 to 4 — and the second is what "fill the rungs" was asking to
+change.
+
+### GDELT's parse fails loudly rather than emptily
+
+`parseGdelt` returns three outcomes, not two: `UNPARSABLE` for a body that is not JSON (GDELT
+serves an HTML error page on some failures), `UNRECOGNISED` for JSON with no `articles` array, and
+an empty list only for `articles: []`. Only the last means "nothing about this person".
+
+That is the same rule the RSS parser follows and for the same reason — the shape has **not** been
+verified against the live service, so a mismatch has to be a failure. A parser returning zero
+articles for all three would turn "GDELT changed its response" into clean results for every
+subject searched afterwards, silently, with nothing thrown (T84).
+
+The adapter also deliberately ignores GDELT's own tone and theme scores. A discovery source's
+opinion about a document is not evidence about a person, and FR-06 is explicit that filtering
+never decides adversity.

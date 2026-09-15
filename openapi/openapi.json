@@ -2021,6 +2021,7 @@
             "type": "string",
             "enum": [
               "NEWS_DISCOVERY_RSS",
+              "NEWS_DISCOVERY_GDELT",
               "WEB_DISCOVERY_SEARX",
               "PRIMARY_SOURCE_HTTP",
               "COMPANY_REGISTRY_HTTP",

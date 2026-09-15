@@ -6,6 +6,7 @@
  * pnpm dev            # API and worker together — what you usually want
  * pnpm dev:api        # API only
  * pnpm dev:worker     # worker only
+ * pnpm dev:live       # both, in LIVE mode. Read the banner it prints
  * ```
  *
  * Builds first rather than running TypeScript directly: Node's type stripping does not rewrite
@@ -23,6 +24,24 @@
  * The refusal itself is right and stays: a service that starts with a missing session secret is
  * a service that generates one, and a generated session secret is a session that survives a
  * restart only by accident. What was wrong was that nothing supplied the values.
+ *
+ * # Live mode
+ *
+ * `--live` sets `ADVERSE_SEARCH_MODE=live` for the child processes and prints what that changes,
+ * because the differences are not obvious and two of them look like breakage:
+ *
+ * - **Every fixture source is refused.** `MockModeWitness` cannot be constructed in live mode, so
+ *   no mock adapter exists at all, and `FetchGateService` refuses a `FIXTURE_MOCK` source
+ *   outright (T55). A search in a freshly bootstrapped live stack therefore finds nothing — every
+ *   seeded source is a fixture.
+ * - **Only a source with a named first-contact approval is reachable** (D-042), and only if its
+ *   `robotsPosition` is not `NOT_ESTABLISHED`.
+ * - **`FETCH_CONTACT_URL` is required.** Startup refuses without it rather than running an
+ *   anonymous crawler.
+ *
+ * And the one worth knowing before you propose anything: **a source version is stamped with the
+ * mode of the process that wrote it.** A record proposed in a mock stack carries `mode: MOCK`
+ * permanently, so a source intended for live use has to be proposed *here*, not there.
  *
  * # Why the worker is a second process and not a flag
  *
@@ -98,6 +117,7 @@ function selected() {
 }
 
 const targets = selected();
+const live = process.argv.includes('--live');
 
 const built = await run('pnpm', ['build']);
 if (built !== 0) {
@@ -109,7 +129,50 @@ const env = loadEnv();
 env['OIDC_AUDIENCE'] ??= 'adverse-search-api';
 env['CORS_ORIGINS'] ??= 'http://localhost:5173';
 
-console.log(`\nStarting: ${targets.join(', ')}. Stop with Ctrl+C.\n`);
+if (live) {
+  // Set after loadEnv so it overrides whatever .env says, rather than being ignored by the
+  // loader's "first value wins" rule.
+  env['ADVERSE_SEARCH_MODE'] = 'live';
+
+  if ((env['FETCH_CONTACT_URL'] ?? '').trim() === '') {
+    console.error(
+      '\nFETCH_CONTACT_URL is not set, and live mode refuses to start without it.\n\n' +
+        'FR-06 requires the outbound user agent to identify this service honestly with a\n' +
+        'contact URL. There is deliberately no default: a default would be a URL nobody reads\n' +
+        'on a host nobody owns, and a publisher who wanted us to stop would have nowhere to\n' +
+        'write.\n\n' +
+        '  echo "FETCH_CONTACT_URL=https://your-domain/bots/adverse-search" >> .env\n',
+    );
+    process.exit(1);
+  }
+
+  console.log(`
+────────────────────────────────────────────────────────────────────────
+  LIVE MODE
+────────────────────────────────────────────────────────────────────────
+
+  User agent   ErlyAdverseSearch/1.0 (+${env['FETCH_CONTACT_URL']})
+
+  What changes, and two of these look like breakage:
+
+    Every fixture source is refused. No mock adapter is constructed at
+    all, so a freshly bootstrapped stack finds nothing — every seeded
+    source is a fixture (T55).
+
+    Only a source with a named first-contact approval is reachable
+    (D-042), and only if its robotsPosition is not NOT_ESTABLISHED.
+
+    A source version is stamped with the mode of the process that wrote
+    it. Propose a source meant for live use HERE, not in a mock stack.
+
+  This process can open sockets to real publishers. Everything above is
+  what stands between it and doing so.
+
+────────────────────────────────────────────────────────────────────────
+`);
+}
+
+console.log(`\nStarting: ${targets.join(', ')} (${live ? 'LIVE' : 'mock'}). Stop with Ctrl+C.\n`);
 
 if (targets.length === 1) {
   const only = PROCESSES[targets[0]];

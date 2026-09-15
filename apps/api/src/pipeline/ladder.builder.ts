@@ -34,6 +34,7 @@ import type { EvidenceFetchPort } from '../sources/evidence-fetch.port.js';
 import type { FetchGateService } from '../sources/fetch-gate.service.js';
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import type { NewsDiscoveryPort } from '../sources/news-discovery.port.js';
+import { GdeltDiscoveryAdapter } from '../sources/gdelt-discovery.adapter.js';
 import { RssNewsDiscoveryAdapter } from '../sources/rss-news-discovery.adapter.js';
 import type { OperatingMode, SourceOutcome } from '../sources/source-adapter.js';
 import type { SourceVersionReader } from '../sources/source-version.service.js';
@@ -68,11 +69,17 @@ const DEFAULT_ENGINE_MIX: readonly string[] = ['duckduckgo', 'wikipedia'];
 /**
  * Connector types this builder can construct a **live** adapter for, per approved source.
  *
- * One entry today. Bing News RSS will be a second `NEWS_DISCOVERY_RSS` source and needs no code
- * at all — it is the same connector at a different address, which is the whole point of D-043.
- * GDELT is JSON and will need its own adapter and its own entry here.
+ * Two entries, and the asymmetry between them is the point of **D-043**. Bing News RSS needed no
+ * code at all — it is `NEWS_DISCOVERY_RSS` at a different approved address, so it is a registry
+ * row. GDELT returns JSON rather than a feed, so it needed a parser and therefore a type.
+ *
+ * Adding a publisher should almost always be the first kind. A new connector type means a new
+ * response format, not a new source.
  */
-const LIVE_RSS_CONNECTOR = 'NEWS_DISCOVERY_RSS';
+const LIVE_CONNECTORS: Readonly<Record<string, 'RSS' | 'GDELT'>> = {
+  NEWS_DISCOVERY_RSS: 'RSS',
+  NEWS_DISCOVERY_GDELT: 'GDELT',
+};
 
 /**
  * What the builder needs to construct a live discovery adapter for an approved source.
@@ -218,21 +225,22 @@ export class LadderBuilder {
     if (prebuilt !== undefined) {
       return prebuilt;
     }
-    return this.liveRssFor(source);
+    return this.liveConnectorFor(source);
   }
 
   /**
-   * Construct the live RSS connector for an approved source, or explain why not.
+   * Construct the live connector for an approved source, or explain why not.
    *
    * Every refusal here is logged rather than silent, because the rung will then report as
    * unsearched and an operator needs to be able to tell "nothing is approved for this rung" from
    * "something is approved and this process cannot read it".
    */
-  private liveRssFor(source: ApprovedDiscoverySource): NewsDiscoveryPort | null {
+  private liveConnectorFor(source: ApprovedDiscoverySource): NewsDiscoveryPort | null {
     if (this.live === null || this.live.mode !== 'LIVE') {
       return null;
     }
-    if (source.connectorType !== LIVE_RSS_CONNECTOR) {
+    const kind = LIVE_CONNECTORS[source.connectorType];
+    if (kind === undefined) {
       return null;
     }
 
@@ -253,15 +261,17 @@ export class LadderBuilder {
       return null;
     }
 
-    const adapter = new RssNewsDiscoveryAdapter({
+    const shared = {
       sourceId: source.sourceId,
       versions: this.live.versions,
       gate: this.live.gate,
       fetch: this.live.evidenceFetch,
-    });
+    };
+    const adapter =
+      kind === 'GDELT' ? new GdeltDiscoveryAdapter(shared) : new RssNewsDiscoveryAdapter(shared);
     this.liveAdapters.set(source.sourceId, adapter);
     this.logger.log(
-      `Live RSS connector for ${source.sourceName} (${source.sourceId}) at rung ` +
+      `Live ${kind} connector for ${source.sourceName} (${source.sourceId}) at rung ` +
         `${String(source.rung)}. Every request it makes passes the same gate a document fetch ` +
         `does, including the named first-contact approval (D-042).`,
     );

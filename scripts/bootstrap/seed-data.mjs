@@ -62,8 +62,23 @@ const SEED_TAXONOMY_CATEGORIES = [
   'GOVERNANCE_INTEGRITY',
 ];
 
-/** Decision D-010 closes D1: Costa Rica first, in Spanish and English. */
-const SEED_COUNTRIES = ['CR'];
+/**
+ * Countries the seeded taxonomy enables categories for.
+ *
+ * D-010 closed D1 as Costa Rica first; **D-044 revised the scope to worldwide**, and this is
+ * where that stops being an abstraction. A taxonomy enables categories per country, and a source
+ * whose countries the pinned taxonomy enables nothing for is refused with
+ * `JURISDICTION_NOT_ENABLED` — so a source can be approved, active, on the ladder, and still
+ * unreachable because no category is enabled where it operates.
+ *
+ * `US` is here because the first source approved for live use (the SEC litigation-releases feed,
+ * D17) is American. Without it, taking that source live produces a search that refuses itself for
+ * a reason that reads like a bug.
+ *
+ * Adding a country is a **taxonomy admin's** act through the approval lifecycle, not a
+ * deployment. This list is only what a fresh local stack starts from.
+ */
+const SEED_COUNTRIES = ['CR', 'US'];
 
 /**
  * Requested languages. NOT the same as enabled languages.
