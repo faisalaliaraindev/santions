@@ -17,7 +17,7 @@
  * ports differ in how they are *asked*, not in what they return.
  */
 
-import type { PreciseDate } from '@erly/adverse-domain';
+import type { PreciseDate, TaxonomyVersion } from '@erly/adverse-domain';
 
 import type { AdapterProvenance } from './source-adapter.js';
 
@@ -66,6 +66,29 @@ export interface Lead {
 }
 
 /**
+ * The run's pinned scope and identity, carried on every discovery query.
+ *
+ * **Why a discovery adapter needs this at all.** A mock does not — it reads a fixture. A *live*
+ * one has to authorise its own poll before it opens a socket, and authorising means checking the
+ * run's pinned scope, the pinned taxonomy and the source's approval, exactly as a document fetch
+ * does. Without it a live connector would either skip the gate or build a second, weaker copy of
+ * it, and the weaker of two paths is the one that eventually gets used for something it should
+ * not be (the phase brief's own words).
+ *
+ * The **pinned** taxonomy, never the currently active one: a run that started an hour ago is
+ * still running under what it pinned, and a source enabled since must not retroactively widen it.
+ */
+export interface DiscoveryRunContext {
+  /** The search run, for attribution. An unattributable outbound request is a defect (FR-06). */
+  readonly jobId: string;
+  readonly subjectId: string;
+  /** The run's requested jurisdictions and languages, as pinned. */
+  readonly jurisdictions: readonly string[];
+  readonly languages: readonly string[];
+  readonly taxonomy: TaxonomyVersion;
+}
+
+/**
  * What was asked of a discovery adapter.
  *
  * `language` and `country` are separate and both required-or-explicitly-null, because FR-05
@@ -75,6 +98,15 @@ export interface Lead {
  */
 export interface DiscoveryQuery {
   readonly tenantId: string;
+  /**
+   * The run this query belongs to. Required, and required of mocks too.
+   *
+   * Required rather than optional because an optional gate context is a gate somebody forgets:
+   * a live adapter handed a query with no run would have to choose between refusing (a coverage
+   * gap that looks like an outage) and proceeding unauthorised. Mocks ignore it, and that costs
+   * them one line.
+   */
+  readonly run: DiscoveryRunContext;
   /** The FR-04 planned query this executes. Its id ends up on every resulting lead. */
   readonly queryId: string;
   readonly text: string;

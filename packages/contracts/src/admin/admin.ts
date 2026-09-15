@@ -209,6 +209,34 @@ export const sourceAccessPolicySchema = z
      */
     endpointUrl: z.string().url().max(500).nullable(),
     /**
+     * Whether the endpoint is a fixed list or a search that takes a query.
+     *
+     * `FIXED_FEED` — the SEC's litigation releases, a gazette index — is polled whole and the
+     * planned query is matched against what came back. `QUERY_FEED` — Google News, Bing News —
+     * takes the query as a parameter, so a different query is a different request.
+     *
+     * The distinction is recorded rather than inferred from the URL because it changes the
+     * **rate**: a fixed feed is polled on a schedule regardless of how many searches are running,
+     * and a query feed is hit once per planned query, which is the difference between four
+     * requests an hour and four hundred.
+     */
+    endpointKind: z.enum(['FIXED_FEED', 'QUERY_FEED']),
+    /**
+     * For a `QUERY_FEED`, the **name of the query parameter** the connector sets. Null otherwise.
+     *
+     * A parameter name, deliberately, and not a URL template. The connector parses `endpointUrl`,
+     * sets this one search parameter to the planned query text, and serialises — so the query
+     * cannot introduce a path segment, a host, a scheme or a second parameter. A template with a
+     * `{query}` hole would be an executable instruction in the registry, which the schema header
+     * rules out, and it would be an injection point pointed at a third party's server.
+     */
+    queryParam: z
+      .string()
+      .min(1)
+      .max(40)
+      .regex(/^[A-Za-z0-9_.-]+$/, 'A bare query-parameter name — no URL, no template, no braces.')
+      .nullable(),
+    /**
      * Whether polls must carry `If-None-Match` / `If-Modified-Since`.
      *
      * Not politeness theatre: a conditional GET that hits returns 304 with no body, so the
@@ -256,7 +284,18 @@ export const sourceAccessPolicySchema = z
       .strict()
       .nullable(),
   })
-  .strict();
+  .strict()
+  .refine((policy) => policy.endpointKind !== 'QUERY_FEED' || policy.queryParam !== null, {
+    path: ['queryParam'],
+    message:
+      'A QUERY_FEED must name the query parameter the connector sets. Without it the ' +
+      'connector would have to guess where the query goes, and a guess aimed at a third ' +
+      "party's server is not a guess worth making.",
+  })
+  .refine((policy) => policy.endpointKind !== 'QUERY_FEED' || policy.endpointUrl !== null, {
+    path: ['endpointUrl'],
+    message: 'A QUERY_FEED must record the endpoint it queries.',
+  });
 export type SourceAccessPolicy = z.infer<typeof sourceAccessPolicySchema>;
 
 /**

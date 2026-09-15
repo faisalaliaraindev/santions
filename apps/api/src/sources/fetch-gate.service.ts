@@ -84,6 +84,15 @@ import type { ActiveSourceVersion, SourceVersionReader } from './source-version.
 /** How the preliminary score was produced. Recorded on every authorisation this gate issues. */
 export const PRELIMINARY_RELEVANCE_METHOD = 'PRELIMINARY_NAME_PRESENCE_v1';
 
+/**
+ * Recorded instead of a score when a source's **own endpoint** is polled.
+ *
+ * A feed is the list, not an item on it, so nothing has been judged relevant. `relevanceScore` is
+ * null alongside this, rather than a 1 chosen to satisfy the type — see the field's comment in
+ * `evidence-fetch.port.ts`.
+ */
+export const ENDPOINT_POLL_RELEVANCE_METHOD = 'NOT_APPLICABLE_ENDPOINT_POLL';
+
 /** The issuer recorded on every authorisation. There is one, and this is it. */
 export const FETCH_GATE_ISSUER = 'FetchGateService';
 
@@ -110,6 +119,7 @@ export type FetchGateRefusal =
   | 'ROBOTS_EXCEPTION_NOT_APPROVABLE'
   | 'FIXTURE_SOURCE_IN_LIVE_MODE'
   | 'NO_FIRST_CONTACT_APPROVAL'
+  | 'NO_ENDPOINT_RECORDED'
   | 'NO_EGRESS_IDENTITY';
 
 /**
@@ -130,6 +140,7 @@ export function isSourceLevelRefusal(refusal: FetchGateRefusal): boolean {
     case 'ROBOTS_EXCEPTION_NOT_APPROVABLE':
     case 'FIXTURE_SOURCE_IN_LIVE_MODE':
     case 'NO_FIRST_CONTACT_APPROVAL':
+    case 'NO_ENDPOINT_RECORDED':
     case 'NO_EGRESS_IDENTITY':
       return true;
     case 'JURISDICTION_NOT_IN_RUN_SCOPE':
@@ -178,6 +189,27 @@ export interface FetchGateInput {
   readonly now: Date;
 }
 
+/**
+ * What a poll of a source's own endpoint needs.
+ *
+ * Deliberately smaller than `FetchGateInput`: no lead, no subject name forms, no snippet, because
+ * none of them exists yet. The URL is optional and defaults to the recorded endpoint — a caller
+ * supplies one only to add the query parameter to a `QUERY_FEED`, and what it supplies is checked
+ * against the recorded endpoint's origin by the connector before it gets here.
+ */
+export interface EndpointGateInput {
+  readonly sourceId: string;
+  /** The endpoint with the query parameter set, or omitted to poll it as recorded. */
+  readonly url?: string | undefined;
+  readonly jurisdiction: string;
+  /** The language this poll is for — one the source declares, never one inferred. */
+  readonly language: string;
+  readonly runJurisdictions: readonly string[];
+  readonly runLanguages: readonly string[];
+  readonly taxonomy: TaxonomyVersion;
+  readonly now: Date;
+}
+
 @Injectable()
 export class FetchGateService {
   private readonly logger = new Logger('FetchGate');
@@ -205,6 +237,79 @@ export class FetchGateService {
    * the source; then the approval, because everything after it is read off the approved version.
    */
   async authorise(input: FetchGateInput): Promise<FetchGateDecision> {
+    return this.authoriseUrl(input, () => ({
+      score: preliminaryRelevance({
+        nameForms: input.subjectNameForms,
+        title: input.leadTitle,
+        snippet: input.leadSnippet,
+      }),
+      method: PRELIMINARY_RELEVANCE_METHOD,
+    }));
+  }
+
+  /**
+   * Authorise a poll of a source's **own endpoint** — its feed, its index — rather than a fetch
+   * of a document discovered through it.
+   *
+   * Every gate `authorise` runs, runs here too, and that is the point of it being one function
+   * underneath: a second path to a socket that checked four of the six things is how the weaker
+   * path becomes the one that gets used. What differs is only what cannot apply:
+   *
+   * - **the URL is the recorded endpoint**, read off the approved version rather than supplied by
+   *   a caller. A connector that could name its own URL would be a connector that could fetch
+   *   anything under a source's approval (**D-043**).
+   * - **relevance is null**, with `ENDPOINT_POLL_RELEVANCE_METHOD` saying why. The feed is the
+   *   list; nothing on it has been judged yet.
+   * - **the language is the source's**, not a lead's, because a feed has no per-item language
+   *   until it has been parsed. The run's enabled languages must still intersect it.
+   *
+   * The query text, for a `QUERY_FEED`, is set by the **caller** as one search parameter on the
+   * parsed endpoint — never spliced into a string here. See `RssNewsDiscoveryAdapter`.
+   */
+  async authoriseEndpoint(input: EndpointGateInput): Promise<FetchGateDecision> {
+    const version = await this.sourceVersions.loadActive(input.sourceId);
+    if (version === null) {
+      return this.refuse(
+        'NO_ACTIVE_SOURCE_VERSION',
+        `Source ${input.sourceId} has no active approved version, so nothing authorises a ` +
+          `request to it.`,
+        null,
+      );
+    }
+    if (version.endpointUrl === null) {
+      return this.refuse(
+        'NO_ENDPOINT_RECORDED',
+        `${version.sourceName} records no endpoint, so there is no address a poll could read. ` +
+          `A connector never invents one: the address is part of what an approver signed ` +
+          `(D-043). Record accessPolicy.endpointUrl on the version.`,
+        version,
+      );
+    }
+
+    return this.authoriseUrl(
+      {
+        sourceId: input.sourceId,
+        url: input.url ?? version.endpointUrl,
+        jurisdiction: input.jurisdiction,
+        // A feed's language is the source's declared one. Never guessed, and never a lead's,
+        // because no item has been parsed yet.
+        language: input.language,
+        runJurisdictions: input.runJurisdictions,
+        runLanguages: input.runLanguages,
+        taxonomy: input.taxonomy,
+        subjectNameForms: [],
+        leadTitle: '',
+        leadSnippet: null,
+        now: input.now,
+      },
+      () => ({ score: null, method: ENDPOINT_POLL_RELEVANCE_METHOD }),
+    );
+  }
+
+  private async authoriseUrl(
+    input: FetchGateInput,
+    relevance: () => { readonly score: number | null; readonly method: string },
+  ): Promise<FetchGateDecision> {
     const screening = screenUrl(input.url);
     if (!screening.allowed) {
       return this.refuse(
@@ -373,11 +478,7 @@ export class FetchGateService {
       );
     }
 
-    const relevanceScore = preliminaryRelevance({
-      nameForms: input.subjectNameForms,
-      title: input.leadTitle,
-      snippet: input.leadSnippet,
-    });
+    const scored = relevance();
 
     return {
       authorised: true,
@@ -396,8 +497,8 @@ export class FetchGateService {
         // inside the connection's own `lookup` on every hop (D-034). See the field's own comment
         // in `evidence-fetch.port.ts` for exactly what this asserts.
         ssrfValidated: true,
-        relevanceScore,
-        relevanceMethod: PRELIMINARY_RELEVANCE_METHOD,
+        relevanceScore: scored.score,
+        relevanceMethod: scored.method,
         issuedBy: FETCH_GATE_ISSUER,
         issuedAt: input.now.toISOString(),
       },

@@ -85,6 +85,17 @@ export interface ActiveSourceVersion {
    * links, and the discovery connector refuses such a source rather than inventing a URL for it.
    */
   readonly endpointUrl: string | null;
+  /**
+   * Whether that endpoint is a fixed list or a search taking a query.
+   *
+   * Defaults to `FIXED_FEED` when the version records nothing, because that is the reading that
+   * makes fewer requests: a fixed feed is polled once per cycle, a query feed once per planned
+   * query. A wrong guess in the other direction multiplies our traffic at somebody else's server
+   * by the size of the query plan.
+   */
+  readonly endpointKind: 'FIXED_FEED' | 'QUERY_FEED';
+  /** For a `QUERY_FEED`, the parameter name the connector sets. Null otherwise. */
+  readonly queryParam: string | null;
   /** The publisher's stated minimum interval between polls, in milliseconds. Null when none. */
   readonly pollFloorMs: number | null;
 }
@@ -147,6 +158,8 @@ export class SourceVersionService implements SourceVersionReader {
       authorityTier: numberOr(content['authorityTier'], 5),
       firstContactApproval: readFirstContactApproval(content['accessPolicy']),
       endpointUrl: readEndpointUrl(content['accessPolicy']),
+      endpointKind: readEndpointKind(content['accessPolicy']),
+      queryParam: readQueryParam(content['accessPolicy']),
       pollFloorMs: readPollFloorMs(content['accessPolicy']),
     };
   }
@@ -194,6 +207,26 @@ function readFirstContactApproval(value: unknown): FirstContactApproval | null {
 function readEndpointUrl(value: unknown): string | null {
   const policy = asRecord(value);
   return policy === null ? null : stringOrNull(policy['endpointUrl']);
+}
+
+/** `QUERY_FEED` only when the record says so. See the field comment for why that direction. */
+function readEndpointKind(value: unknown): 'FIXED_FEED' | 'QUERY_FEED' {
+  const policy = asRecord(value);
+  return policy !== null && policy['endpointKind'] === 'QUERY_FEED' ? 'QUERY_FEED' : 'FIXED_FEED';
+}
+
+/**
+ * The query parameter name, re-validated here as a bare name.
+ *
+ * The contract schema already constrains it, and it is checked again on the way out because this
+ * value is used to build a URL aimed at a third party's server. A registry document can be
+ * written by a path the schema did not run on — a migration, a fixture, a hand-edited record —
+ * and the cost of trusting one here is a request shaped by whatever that document said.
+ */
+function readQueryParam(value: unknown): string | null {
+  const policy = asRecord(value);
+  const name = policy === null ? null : stringOrNull(policy['queryParam']);
+  return name !== null && /^[A-Za-z0-9_.-]{1,40}$/.test(name) ? name : null;
 }
 
 function readPollFloorMs(value: unknown): number | null {

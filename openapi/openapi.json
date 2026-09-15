@@ -2107,6 +2107,14 @@
                 "maxLength": 500,
                 "nullable": true
               },
+              "endpointKind": { "type": "string", "enum": ["FIXED_FEED", "QUERY_FEED"] },
+              "queryParam": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40,
+                "pattern": "^[A-Za-z0-9_.-]+$",
+                "nullable": true
+              },
               "conditionalGet": { "type": "boolean" },
               "userAgentRequired": { "type": "boolean" },
               "policyUrl": {
@@ -2161,6 +2169,8 @@
               "requestCeilingPerSecond",
               "pollFloorSeconds",
               "endpointUrl",
+              "endpointKind",
+              "queryParam",
               "conditionalGet",
               "userAgentRequired",
               "policyUrl",

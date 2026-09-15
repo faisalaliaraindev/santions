@@ -106,6 +106,11 @@ const SEC_ACCESS_POLICY: SourceAccessPolicy = {
   requestCeilingPerSecond: SEC_REQUEST_CEILING_PER_SECOND,
   pollFloorSeconds: SEC_POLL_FLOOR_MS / 1000,
   endpointUrl: SEC_LITIGATION_RELEASES_FEED_URL,
+  // The whole feed, polled on a schedule and matched locally. The SEC publishes litigation
+  // releases as a list, not as a search — so a per-query request would be the same request
+  // repeated, which is how four polls an hour becomes four hundred.
+  endpointKind: 'FIXED_FEED',
+  queryParam: null,
   conditionalGet: true,
   userAgentRequired: true,
   policyUrl: 'https://www.sec.gov/about/webmaster-frequently-asked-questions',

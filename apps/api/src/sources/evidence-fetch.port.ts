@@ -102,8 +102,17 @@ export interface FetchAuthorisation {
    * it; the gate sets it, and the transport enforces the half the gate cannot.
    */
   readonly ssrfValidated: boolean;
-  /** FR-06 relevance. The score this candidate carried at the gate, for the coverage view. */
-  readonly relevanceScore: number;
+  /**
+   * FR-06 relevance. The score this candidate carried at the gate, for the coverage view.
+   *
+   * **Null when relevance does not apply**, which is one case and only one: a poll of a source's
+   * own endpoint — a feed, an index — rather than a fetch of a document discovered through it.
+   * Nothing has been judged at that point, because the thing being fetched is the list rather
+   * than an item on it, and putting a 1 there to satisfy the type would be recording a judgement
+   * that was never made in the record that exists to be audited. `relevanceMethod` says which
+   * case it is either way.
+   */
+  readonly relevanceScore: number | null;
   /**
    * How that score was produced, so a reviewer can tell a measured score from a preliminary one.
    *

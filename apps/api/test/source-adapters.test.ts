@@ -460,6 +460,32 @@ describe('jurisdiction is never inferred', () => {
   });
 });
 
+/**
+ * The run context every discovery query carries.
+ *
+ * The mocks ignore it — they read a fixture — and it is required of them anyway, because an
+ * optional gate context is a gate somebody forgets. A live connector authorises its own poll
+ * against exactly this.
+ */
+const TEST_RUN_CONTEXT = {
+  jobId: 'job-1',
+  subjectId: 'subject-1',
+  jurisdictions: ['CR'],
+  languages: ['es', 'en'],
+  taxonomy: {
+    taxonomyVersionId: 't:v1',
+    version: 1,
+    tenantId: 't',
+    categories: [],
+    lexicon: [],
+    languages: [],
+    status: 'ACTIVE' as const,
+    proposedBy: 'test',
+    approvedBy: 'test',
+    activatedAt: '2026-01-01T00:00:00.000Z',
+  },
+};
+
 describe('news discovery', () => {
   function news(): MockNewsDiscoveryAdapter {
     return new MockNewsDiscoveryAdapter(witness);
@@ -467,6 +493,9 @@ describe('news discovery', () => {
 
   const baseQuery = {
     tenantId: 't',
+    // Required of mocks too, and ignored by them. A live connector authorises its own poll
+    // against this; making it optional would make the gate something a caller can forget.
+    run: TEST_RUN_CONTEXT,
     queryId: 'q1',
     text: DISCOVERY_QUERY_WITH_RESULTS,
     language: null,
@@ -526,6 +555,7 @@ describe('news discovery', () => {
 describe('web discovery', () => {
   const baseQuery = {
     tenantId: 't',
+    run: TEST_RUN_CONTEXT,
     queryId: 'q1',
     text: DISCOVERY_QUERY_WITH_RESULTS,
     language: null,

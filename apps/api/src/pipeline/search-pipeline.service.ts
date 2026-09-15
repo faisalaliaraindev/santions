@@ -77,6 +77,7 @@ import {
   type PreciseDate,
   type SourceCoverageOutcome,
   type TenureLabel,
+  type TaxonomyVersion,
 } from '@erly/adverse-domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
@@ -261,7 +262,12 @@ export class SearchPipeline {
     }
 
     // ---- 3. Discovery ----------------------------------------------------------------------
-    const { leads, rungReached, discoveryOutcomes } = await this.discover(bounded.kept, input);
+    const { leads, rungReached, discoveryOutcomes } = await this.discover(bounded.kept, {
+      ...input,
+      // The loaded, pinned taxonomy rather than the version number the caller passed: a live
+      // connector authorises against the taxonomy object, not against an integer.
+      taxonomy,
+    });
     sourceOutcomes.push(...discoveryOutcomes);
 
     if (!(await input.heartbeat())) {
@@ -323,7 +329,15 @@ export class SearchPipeline {
    */
   private async discover(
     queries: readonly PlannedQuery[],
-    input: { readonly tenantId: string; readonly now: Date },
+    input: {
+      readonly tenantId: string;
+      readonly now: Date;
+      readonly searchId: string;
+      readonly subjectId: string;
+      readonly jurisdictions: readonly string[];
+      readonly languages: readonly string[];
+      readonly taxonomy: TaxonomyVersion;
+    },
   ): Promise<{
     leads: readonly SourcedLead[];
     rungReached: number | null;
@@ -381,6 +395,16 @@ export class SearchPipeline {
       newsQueries += 1;
       const result = await news.discover({
         tenantId: input.tenantId,
+        // The run's pinned scope travels with the query so a **live** connector can authorise
+        // its own poll through the same gate a document fetch goes through, rather than growing
+        // a second, weaker copy of it.
+        run: {
+          jobId: input.searchId,
+          subjectId: input.subjectId,
+          jurisdictions: input.jurisdictions,
+          languages: input.languages,
+          taxonomy: input.taxonomy,
+        },
         queryId: query.queryId,
         text: query.query,
         language: query.language,

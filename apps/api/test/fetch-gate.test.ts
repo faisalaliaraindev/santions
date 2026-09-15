@@ -66,6 +66,8 @@ const NEWS_SOURCE: ActiveSourceVersion = {
     decision: 'D17',
   },
   endpointUrl: 'https://news-example.cr/feed.xml',
+  endpointKind: 'FIXED_FEED',
+  queryParam: null,
   pollFloorMs: 15 * 60_000,
 };
 
