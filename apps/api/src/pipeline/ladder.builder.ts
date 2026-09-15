@@ -30,9 +30,13 @@ import type { Collection, Db } from 'mongodb';
 
 import type { CascadeRung } from '@erly/adverse-domain';
 
+import type { EvidenceFetchPort } from '../sources/evidence-fetch.port.js';
+import type { FetchGateService } from '../sources/fetch-gate.service.js';
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import type { NewsDiscoveryPort } from '../sources/news-discovery.port.js';
-import type { SourceOutcome } from '../sources/source-adapter.js';
+import { RssNewsDiscoveryAdapter } from '../sources/rss-news-discovery.adapter.js';
+import type { OperatingMode, SourceOutcome } from '../sources/source-adapter.js';
+import type { SourceVersionReader } from '../sources/source-version.service.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
 import type { WebDiscoveryPort } from '../sources/web-discovery.port.js';
 
@@ -61,13 +65,54 @@ interface ApprovedDiscoverySource {
  */
 const DEFAULT_ENGINE_MIX: readonly string[] = ['duckduckgo', 'wikipedia'];
 
+/**
+ * Connector types this builder can construct a **live** adapter for, per approved source.
+ *
+ * One entry today. Bing News RSS will be a second `NEWS_DISCOVERY_RSS` source and needs no code
+ * at all — it is the same connector at a different address, which is the whole point of D-043.
+ * GDELT is JSON and will need its own adapter and its own entry here.
+ */
+const LIVE_RSS_CONNECTOR = 'NEWS_DISCOVERY_RSS';
+
+/**
+ * What the builder needs to construct a live discovery adapter for an approved source.
+ *
+ * Absent in mock mode, and the absence is load-bearing: the ladder then uses only the adapters in
+ * the set, every one of which is a fixture that cannot be constructed in live mode at all
+ * (`MockModeWitness`). There is no arrangement in which a live feed is read by a mock process or
+ * a fixture is read by a live one.
+ */
+export interface LiveDiscoveryDeps {
+  readonly mode: OperatingMode;
+  readonly versions: SourceVersionReader;
+  readonly gate: FetchGateService;
+  /** Null when this process has no honest fetch adapter — no contact URL, or no source health. */
+  readonly evidenceFetch: EvidenceFetchPort | null;
+}
+
 export class LadderBuilder {
   private readonly logger = new Logger('Ladder');
   private readonly versions: Collection;
 
+  /**
+   * Adapters constructed for this process, keyed by source id.
+   *
+   * Cached across builds because an `RssNewsDiscoveryAdapter` is a stateless wrapper over the
+   * fetch port and the gate — constructing one per run would be harmless and wasteful. What is
+   * **not** cached is the registry read: a source retired since the last run drops out of the
+   * ladder even though its adapter is still sitting in this map, because the map is only ever
+   * consulted for a source the registry just returned.
+   */
+  private readonly liveAdapters = new Map<string, NewsDiscoveryPort>();
+
   constructor(
     db: Db,
     private readonly adapters: SourceAdapterSet,
+    /**
+     * Absent in mock mode. See `LiveDiscoveryDeps` — the absence is what keeps a live feed out
+     * of a mock process.
+     */
+    private readonly live: LiveDiscoveryDeps | null = null,
   ) {
     this.versions = db.collection('sourceVersions');
   }
@@ -157,12 +202,70 @@ export class LadderBuilder {
     return null;
   }
 
-  /** The news adapter serving this source, if this process has one. */
+  /**
+   * The news adapter serving this source, if this process has or can build one.
+   *
+   * Two ways it can exist, and the order matters. An adapter already in the set wins — that is
+   * how a mock process serves a fixture source, and a live process would never have one there.
+   * Otherwise, in **live mode only**, one is constructed for an approved `NEWS_DISCOVERY_RSS`
+   * source: the connector is registry-driven (D-043), so every RSS publisher is the same code at
+   * a different approved address.
+   */
   private newsFor(source: ApprovedDiscoverySource): NewsDiscoveryPort | null {
-    return (
-      this.adapters.newsDiscovery.find((port) => port.descriptor.sourceId === source.sourceId) ??
-      null
+    const prebuilt = this.adapters.newsDiscovery.find(
+      (port) => port.descriptor.sourceId === source.sourceId,
     );
+    if (prebuilt !== undefined) {
+      return prebuilt;
+    }
+    return this.liveRssFor(source);
+  }
+
+  /**
+   * Construct the live RSS connector for an approved source, or explain why not.
+   *
+   * Every refusal here is logged rather than silent, because the rung will then report as
+   * unsearched and an operator needs to be able to tell "nothing is approved for this rung" from
+   * "something is approved and this process cannot read it".
+   */
+  private liveRssFor(source: ApprovedDiscoverySource): NewsDiscoveryPort | null {
+    if (this.live === null || this.live.mode !== 'LIVE') {
+      return null;
+    }
+    if (source.connectorType !== LIVE_RSS_CONNECTOR) {
+      return null;
+    }
+
+    const existing = this.liveAdapters.get(source.sourceId);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    if (this.live.evidenceFetch === null) {
+      // No contact URL, or no source health. `buildSourceAdapters` already refuses to build the
+      // fetch adapter without either, and an RSS connector with nothing to fetch through would
+      // be a connector that cannot make a request — so the rung reports unsearched, honestly.
+      this.logger.warn(
+        `${source.sourceId} is approved at rung ${String(source.rung)} and this process has no ` +
+          `evidence-fetch adapter, so it cannot be read. FETCH_CONTACT_URL and source health are ` +
+          `both required (FR-06, D5). The rung will report as unsearched.`,
+      );
+      return null;
+    }
+
+    const adapter = new RssNewsDiscoveryAdapter({
+      sourceId: source.sourceId,
+      versions: this.live.versions,
+      gate: this.live.gate,
+      fetch: this.live.evidenceFetch,
+    });
+    this.liveAdapters.set(source.sourceId, adapter);
+    this.logger.log(
+      `Live RSS connector for ${source.sourceName} (${source.sourceId}) at rung ` +
+        `${String(source.rung)}. Every request it makes passes the same gate a document fetch ` +
+        `does, including the named first-contact approval (D-042).`,
+    );
+    return adapter;
   }
 
   /** The web adapter serving this source, if this process has one. */

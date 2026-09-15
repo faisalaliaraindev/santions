@@ -461,8 +461,23 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       // What sits on the FR-05 ladder, read from the registry on every run (D-045). Not cached:
       // a cached ladder keeps asking a source an administrator retired.
       provide: LadderBuilder,
-      useFactory: (db: Db, adapters: SourceAdapterSet) => new LadderBuilder(db, adapters),
-      inject: [MONGO_DB, SOURCE_ADAPTERS],
+      useFactory: (
+        db: Db,
+        adapters: SourceAdapterSet,
+        config: AppConfig,
+        versions: SourceVersionService,
+        gate: FetchGateService,
+      ) =>
+        new LadderBuilder(db, adapters, {
+          mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
+          versions,
+          gate,
+          // The one fetch path. A live RSS connector reads its feed through the same adapter a
+          // document fetch uses, so it inherits the SEC-02 screening, robots, both byte budgets,
+          // both breakers and the D17 stop conditions rather than growing a weaker copy.
+          evidenceFetch: adapters.evidenceFetch,
+        }),
+      inject: [MONGO_DB, SOURCE_ADAPTERS, APP_CONFIG, SourceVersionService, FetchGateService],
     },
     {
       // Walking it. Separate from the builder so the walk is testable against a ladder of stubs

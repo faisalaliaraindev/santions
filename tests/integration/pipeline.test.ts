@@ -256,7 +256,7 @@ beforeAll(async () => {
     // The FR-05 ladder, built from the same seeded registry the fetch gate reads. So this suite
     // walks the rungs the fixtures are actually approved at — and reports the rungs nothing is
     // approved for as unsearched, which is what the bootstrap really leaves behind.
-    new LadderBuilder(db, adapters),
+    new LadderBuilder(db, adapters, null),
     new CascadeService(sourceHealth),
   );
 
