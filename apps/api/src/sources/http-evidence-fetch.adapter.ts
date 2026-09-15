@@ -93,11 +93,17 @@ export const HTTP_EVIDENCE_FETCH_DESCRIPTOR: AdapterDescriptor = {
   // *parsers* of undocumented feeds, not to the transport underneath them.
   stabilityClass: 'DOCUMENTED_STABLE',
   mode: 'LIVE',
-  // The transport is not jurisdiction-bound — it fetches whatever an approved source version
-  // permitted, and the jurisdiction gate is `authorisation.jurisdictionEnabled`, decided
-  // upstream. This declares the one enabled jurisdiction (D-010) so that a coverage view
-  // grouping adapters by country does not show a transport claiming worldwide coverage.
-  jurisdictions: ['CR'],
+  // Empty, and that is the correct value rather than a missing one. A transport is **not**
+  // jurisdiction-bound: it fetches whatever an approved source version permitted, and the
+  // jurisdiction gate is `authorisation.jurisdictionEnabled`, decided upstream by
+  // `FetchGateService` from the run's scope, the source's approved countries and the pinned
+  // taxonomy. This used to declare `['CR']` so that a coverage view grouping adapters by country
+  // would not show a transport claiming worldwide coverage — which was the wrong fix for a real
+  // worry: it made the transport look like Costa Rican coverage, which is a stronger and falser
+  // claim than no claim at all. Under **D-044** the product is worldwide and the pretence is
+  // actively misleading. A coverage view must group by the **source's** countries, which every
+  // record carries, not by the transport's.
+  jurisdictions: [],
 };
 
 /**

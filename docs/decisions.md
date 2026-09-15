@@ -1350,3 +1350,66 @@ distinguishes SEC litigation releases from a Costa Rican gazette is a row somebo
 and every request to it goes through `screenUrl`, the recorded robots position, the live robots
 verdict, both breakers, the budget and the stop conditions, exactly like a request to a discovered
 link. What the registry grants is an address, not behaviour.
+
+## D-044 — The service is not Costa-Rica-only; scope is worldwide, one approved source at a time
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15 · **Supersedes the scope half of
+D-010** · **Decided by:** the source/policy admin (Faisal Ali), not by engineering
+
+D1 was closed on 2026-09-11 as **Costa Rica, es + en** and recorded as D-010. Phases D and E were
+built against it: the seed enables `CR`, the capability-coverage rows describe CR, the name-frequency
+gap is a CR gap, and D14 and D15 are both CR problems. On 2026-09-15 the policy owner revised it:
+**the product is worldwide.**
+
+This is recorded rather than argued. It is the decision of the person the register names as its
+owner, and it is the kind of decision the register exists to let them take.
+
+**What it changes, and what it deliberately does not.**
+
+**It does not weaken FR-05's permission rule.** "EU", "MENA", "SEA", "LATAM" and "GLOBAL" are not
+source permissions and `countryCodeSchema` still rejects every one of them explicitly. Worldwide
+means the _set of approved sources_ is not bounded to one country; it does not mean a source may
+claim a region. Each source still declares the countries it actually covers, and
+`assertJurisdictionCovered` still refuses a source asked about a country it does not hold records
+for. A British registry adapter is still not Costa Rican coverage, and it is still not Brazilian
+coverage either.
+
+**It does not weaken the per-source approval.** Every source still needs a named first-contact
+approval (**D-042**) before this service will speak to its publisher. Worldwide is more sources to
+approve, one at a time, not a blanket permission — and that is precisely why D-042 was generalised
+before this decision landed rather than after.
+
+**It does not bend FR-03.** A language is enabled only once it carries a measured recall figure from
+the evaluation set. Worldwide means many languages and **none of them is measured**, so the coverage
+statement keeps saying so on every run, in more languages than before. That is a real and growing
+limit on what the product may claim, and it is the one cost of this decision that gets worse rather
+than better with scale. G10 measures; until then, breadth of _sources_ is not breadth of _proven
+recall_, and the two must not be allowed to read as the same thing in a coverage statement.
+
+**What it makes easier, which is worth saying because it is the opposite of what a scope widening
+usually does.** D14 (no free automatable officer-level source in Costa Rica) and D15 (Costa Rican
+judgments likely published depersonalised, so there may be no name to match) are both **Costa
+Rica-specific**. They remain open and they remain the answer for CR subjects; they stop being the
+thing that bounds the whole product. Global discovery — GDELT is global by construction, Google News
+is addressable per edition — has neither problem.
+
+**What it leaves to be done, listed so it is not mistaken for done.**
+
+- The bootstrap seeds `SEED_COUNTRIES = ['CR']` and a taxonomy whose categories enable `CR`. Those
+  are configuration and are revised through the admin lifecycle, not through a deployment — but the
+  seed is what a fresh stack starts from and it should reflect the decision.
+- `capabilityCoverage` holds CR rows only. A jurisdiction with no row is not thereby supported:
+  `interpretEmptyResult` already refuses to read a missing capability as an empty result, so the
+  safe direction holds by construction. Rows for other jurisdictions are written as sources for
+  them are approved.
+- `HTTP_EVIDENCE_FETCH_DESCRIPTOR` declared `jurisdictions: ['CR']`, which was wrong under the old
+  decision too: a transport is not jurisdiction-bound, and the jurisdiction gate is
+  `authorisation.jurisdictionEnabled`, decided upstream by `FetchGateService`. Corrected here.
+- No name-frequency distribution is loaded for **any** country, not only Costa Rica. Under the old
+  scope that was one gap; under this one it is the general case, and the FR-08 top-decile penalty
+  fires nowhere. Unchanged in substance, larger in scope, and printed on every bootstrap.
+
+**Cost.** The honest one: worldwide breadth of sources with no measured recall in any language is a
+product that can search widely and cannot yet say how well. Every coverage statement has to carry
+that, and the temptation to let source count stand in for recall gets stronger the more sources are
+approved. The invariants (I1–I10) are what stop it, and they do not know about countries.
