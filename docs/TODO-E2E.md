@@ -1,183 +1,318 @@
-# TODO — to a complete system you can test end to end in Postman
+# TODO — production ready, and testable end to end in Postman
 
 Date: 2026-09-15
 
-A checklist. Tick top to bottom. Each group is usable on its own.
+A checklist. Work top to bottom. Each group is useful on its own, so you can stop at any group
+boundary and still have something that works.
 
-**Legend:** 🔴 blocker · 🟠 needed for real results · 🟡 needed before production
+**Legend:** 🔴 blocker · 🟠 needed for real results · 🔵 needed for production
 **Size:** S = under a day · M = a few days · L = a week or more
 
 ---
 
-## Group 0 — Make it callable from Postman (mock data)
+## What "production ready" means here
 
-Goal: you can run the whole API from Postman and get real responses with fake data.
+Three separate things, and the project reports them separately on purpose. All three must be true.
+
+|                          | Today       | Needed                                          |
+| :----------------------- | :---------- | :---------------------------------------------- |
+| **Local verified**       | Partial     | Every suite runs and passes on a clean checkout |
+| **Live source verified** | Not started | Real sources contacted, recall measured         |
+| **Production approved**  | Not started | Deployed, observed, backed up, signed off       |
+
+The project's own gates run to **G11**. This list maps onto them so it does not compete with
+`docs/delivery-plan.md`.
+
+| Group                    | Phase / gate |
+| :----------------------- | :----------- |
+| 0 — Postman today        | —            |
+| 1 — Real search          | E / **G6**   |
+| 2 — First live source    | H / G10      |
+| 3 — Real findings        | F / **G7**   |
+| 4 — Integration ready    | H / G9       |
+| 5 — Run it in production | H / G11      |
+| 6 — See what it is doing | H / G11      |
+| 7 — Prove it             | all gates    |
+| 8 — Legal before go-live | G10 / G11    |
+
+---
+
+## Group 0 — Postman working today, on mock data
+
+Goal: anyone can drive the whole API from Postman and get real responses with fake data.
 
 - [ ] 🔴 **S — A script that issues an API key.** `pnpm key:issue --tenant t-1 --env sandbox`,
       prints the key once. Today only `scripts/demo-api.mjs` can mint one, by importing the
-      service and talking to Mongo directly.
-      _Files:_ new `scripts/issue-api-key.mjs`, uses `apps/api/src/tenancy/api-key.service.ts`
+      service and talking to Mongo directly. There is no other way in.
+      _New:_ `scripts/issue-api-key.mjs` · _Uses:_ `apps/api/src/tenancy/api-key.service.ts`
 
-- [ ] **S — A Postman collection committed to the repo.** All 6 caller endpoints, with the API
-      key as an environment variable.
-      _Files:_ new `postman/erly-adverse-search.postman_collection.json`
+- [ ] **S — A Postman collection in the repo.** The six caller endpoints, with the key as an
+      environment variable and the search id captured from the 202 response.
+      _New:_ `postman/erly-adverse-search.postman_collection.json`
 
 - [ ] **S — A Postman environment file.** `baseUrl`, `apiKey`, `tenantId`.
-      _Files:_ new `postman/local.postman_environment.json`
+      _New:_ `postman/local.postman_environment.json`
 
-- [ ] **S — Write the steps into the README.** `local:up` → `local:bootstrap` → `dev:api` →
-      import → set key → send.
+- [ ] **S — Put the steps in the README.** `local:up` → `local:bootstrap` → `dev:api` → import
+      → set key → send.
 
-**Done when:** a new developer clones the repo and gets a search result in Postman in under
-10 minutes.
+**Done when:** a new developer clones the repo and gets a search result in Postman in under ten
+minutes.
 
 ---
 
-## Group 1 — Make a search actually search
+## Group 1 — Make a search actually search (G6)
 
 Goal: a search runs through real source logic instead of returning fixtures.
 
-- [ ] 🟠 **L — Build the cascade (rungs 0–7).** Walk the approved sources in order, log each
-      rung, descend on failure, stop at rung 7 with `NO_MATCHES_FOUND` + `INCOMPLETE`.
-      _Files:_ `apps/api/src/pipeline/search-pipeline.service.ts` (the `discover` method)
+- [ ] 🟠 **L — Build the cascade, rungs 0 to 7.** Walk the approved sources in order, log each
+      rung, descend on its own stated failure, and stop at rung 7 with `NO_MATCHES_FOUND` +
+      `INCOMPLETE` — never a clean result.
+      _File:_ `apps/api/src/pipeline/search-pipeline.service.ts`, the `discover` method
 
 - [ ] 🟠 **M — Let the adapter set hold many news sources.** `SourceAdapterSet.newsDiscovery` is
-      one nullable port. It needs to be a list, built from the active RSS sources in the registry.
-      _Files:_ `apps/api/src/sources/sources.registry.ts`
+      a single nullable port. It must become a list built from the active RSS sources in the
+      registry.
+      _File:_ `apps/api/src/sources/sources.registry.ts`
 
 - [ ] 🟠 **M — Wire `RssNewsDiscoveryAdapter` into the composition root.** Built and tested; not
       connected to anything yet.
-      _Files:_ `apps/api/src/sources/sources.registry.ts`, `apps/api/src/app.module.ts`
+      _Files:_ `sources.registry.ts`, `app.module.ts`
 
-- [ ] **M — Relevance filter before fetch (FR-06, nine signals).** Score a lead before opening a
-      socket. Rejected leads are stored with their reason and shown in coverage.
+- [ ] **M — Relevance filter before fetch.** The nine FR-06 signals, scored before a socket
+      opens. Rejected leads stored with their reason and visible in coverage.
 
-- [ ] **S — Prove plan generation against the real taxonomy.** The 8 query families, per enabled
+- [ ] **S — Prove plan generation against the real taxonomy.** Eight query families, per enabled
       category and language. A disabled category must produce no query at all.
 
 - [ ] **S — Operator view for domain health.** A domain the breaker suspends can only be released
-      through the service; no endpoint exposes it, so it is currently a dead end.
-      _Files:_ `apps/api/src/sources/domain-health.service.ts` (suspend/release exist)
+      through the service, and no endpoint exposes it. That is a dead end today.
+      _File:_ `apps/api/src/sources/domain-health.service.ts` — suspend and release exist
 
-**Done when:** a Postman search returns leads that came from parsing a feed, not from a fixture
-file — still against a local test feed, not the internet.
+**Done when:** a Postman search returns leads parsed from a feed, not read from a fixture file.
 
 ---
 
-## Group 2 — Go live, one source
+## Group 2 — First live source (G10)
 
-Goal: the service makes its first real request, on purpose.
+Goal: the service makes its first real request, deliberately.
 
 - [ ] 🟠 **S — Write the FI-20 integration test first.** Prove the halt and its audit entry commit
-      together in Mongo. Do this **before** anything is polled live.
-      _Files:_ new test under `tests/integration/`
+      together in Mongo. Before anything is polled live, not after.
+      _New:_ a test under `tests/integration/`
 
 - [ ] 🟠 **S — Propose, approve and activate the SEC source.** Through `/v1/admin`, four eyes.
-      The record is already written and schema-checked.
-      _Files:_ `apps/api/src/sources/registry/sec-litigation-releases.ts`
+      The record is written and schema-checked already.
+      _File:_ `apps/api/src/sources/registry/sec-litigation-releases.ts`
 
-- [ ] 🟠 **S — A one-shot script for the first robots read.** `GET https://www.sec.gov/robots.txt`,
-      records the result. Prepared by us, run by you.
-      _Files:_ new `scripts/first-contact.mjs`
+- [ ] 🟠 **S — One-shot script for the first robots read.** `GET https://www.sec.gov/robots.txt`.
+      Prepared by us, run by you.
+      _New:_ `scripts/first-contact.mjs`
 
-- [ ] 🟠 **S — Update `robotsPosition` from what robots.txt actually said.** Through the lifecycle.
-      Until this is done the fetch gate refuses the source, which is deliberate.
+- [ ] 🟠 **S — Update `robotsPosition` from what robots.txt actually said.** Through the
+      lifecycle. Until then the fetch gate refuses the source, which is deliberate.
 
 - [ ] **S — Turn on the 15-minute poll and watch it.** Confirm 304s. Confirm no trip-wire fires
       by accident.
 
-**Done when:** `mode` in the findings response says `LIVE` and one real source has answered.
+- [ ] 🔵 **M — Repeat for every other source you want.** Each one needs its own named approval.
+      Blocked on your source list.
+
+**Done when:** `mode` in the findings response says `LIVE` and a real source has answered.
 
 ---
 
-## Group 3 — Make the findings real
+## Group 3 — Make the findings real (G7)
 
 Goal: stop returning thin results.
 
-- [ ] 🟠 **M — Choose the extraction model.** Open decision **D7**. Benchmark against the labelled
-      set. Not an engineering-only call.
+- [ ] 🟠 **M — Choose the extraction model.** Open decision **D7**. Benchmark against the
+      labelled set.
 
-- [ ] 🟠 **L — Real extraction.** Today it is keyword matching. Until this lands, live results will
-      be thin and the coverage statement must keep saying so.
+- [ ] 🟠 **L — Real extraction.** Today it is keyword matching. Until this lands, live results
+      are thin, and the coverage statement must keep saying so.
 
-- [ ] **M — Wire FR-10 clustering.** Right now a syndicated copy of one story counts as a second
-      independent source. That inflates the evidence.
+- [ ] **M — Wire FR-10 clustering.** A syndicated copy of one story currently counts as a second
+      independent source. That inflates the evidence behind a finding.
 
-- [ ] 🟡 **M — Measure recall per language (FR-03).** No language is enabled until it has a measured
-      figure. Worldwide scope makes this bigger, not smaller.
+- [ ] 🔵 **M — Measure recall per language.** No language is enabled without a measured figure
+      (FR-03). Worldwide scope makes this bigger, not smaller.
 
-**Done when:** a finding carries a real category, stage and rationale that a reviewer can check.
+**Done when:** a finding carries a real category, stage and rationale a reviewer can check.
 
 ---
 
-## Group 4 — Ready for a real integration
+## Group 4 — Ready for a real integration (G9)
 
 Goal: HubSpot, SharePoint or anything else can connect safely. Detail in
 [`INTEGRATION-AUDIT.md`](./INTEGRATION-AUDIT.md).
 
-- [ ] 🔴 **S — API key endpoints.** `POST/GET/DELETE /v1/tenant/api-keys`. The service already does
-      create, rotate, revoke, list and audit. Only the HTTP door is missing.
-      _Files:_ `apps/api/src/tenancy/api-key.service.ts`, new controller
+- [ ] 🔴 **S — API key endpoints.** `POST` / `GET` / `DELETE /v1/tenant/api-keys`. Create,
+      rotate, revoke, list and audit are all written and tested. Only the HTTP door is missing.
+      _File:_ `apps/api/src/tenancy/api-key.service.ts` · _New:_ a controller
 
-- [ ] 🟡 **M — Rate limiting.** `RATE_LIMITED` exists as an error code and the OpenAPI document
-      lists 429. Nothing throws it. A looping caller is currently unlimited.
-      _Files:_ `packages/contracts/src/errors/errors.ts` has the code
+- [ ] 🔵 **M — Rate limiting.** `RATE_LIMITED` exists as an error code and the OpenAPI document
+      lists 429 on `POST /v1/searches`. **Nothing throws it.** A looping caller is unlimited.
 
-- [ ] 🟡 **M — Webhook on search completion.** The outbox exists and publishes to the internal
-      queue only. Polling works until then.
-      _Files:_ `apps/api/src/persistence/outbox.service.ts`
+- [ ] 🔵 **M — Webhook on search completion.** The outbox exists and publishes only to the
+      internal queue. Polling works until then.
+      _File:_ `apps/api/src/persistence/outbox.service.ts`
 
-- [ ] 🟡 **M — Report export.** Findings are JSON. A document is needed for a file store, and it
+- [ ] 🔵 **M — Report export.** Findings are JSON. A document is needed for a file store, and it
       must carry the coverage statement and the rationale, not just the hits.
 
-- [ ] 🟡 **S — Refuse `MOCK` downstream.** Any integration must hard-fail when `mode !== "LIVE"`.
+- [ ] 🔵 **S — Refuse `MOCK` downstream.** Any integration hard-fails when `mode !== "LIVE"`.
       A test, not a warning.
 
-**Done when:** a machine client can be given its own key, is rate limited, and cannot write test
-data into a real system.
+---
+
+## Group 5 — Run it in production (G11)
+
+Goal: it runs somewhere other than a laptop.
+
+**Nothing in this group exists today.** `infra/` contains a local docker-compose stack and
+nothing else.
+
+- [ ] 🔵 **L — Infrastructure as code.** Terraform or CDK for: the API service, the worker, Mongo,
+      SQS, S3, Meilisearch, the OIDC provider. No hand-made consoles.
+      _Today:_ `infra/local/docker-compose.yml` only
+
+- [ ] 🔵 **M — Deployment pipeline.** Build an image, run the gates, deploy, roll back.
+      CI runs format, lint, typecheck, unit, invariants, evaluation, coverage, dependency audit
+      and licence inventory. It does not build or deploy anything.
+      _File:_ `.github/workflows/ci.yml`
+
+- [ ] 🔵 **M — Secrets from a secret manager.** Configuration is read from environment variables
+      today. `FETCH_CONTACT_URL`, the Companies House key, the OIDC client secret and the session
+      secret must not live in a file.
+
+- [ ] 🔵 **S — TLS and ingress.** The API should not be on the public internet unless it has to
+      be.
+
+- [ ] 🔵 **M — Backups and a restore drill.** Mongo and the evidence store. A backup nobody has
+      restored is not a backup.
+
+- [ ] 🔵 **M — Runbooks.** What to do when: a source starts refusing us, the breaker suspends a
+      publisher, the queue backs up, a worker loses its lease, a publisher complains.
+
+- [ ] 🔵 **S — Worker scaling and lease tuning.** Under real load, not guessed.
+
+**Done when:** you can deploy a change, see it live, and roll it back.
 
 ---
 
-## Group 5 — Prove it
+## Group 6 — See what it is doing (G11)
+
+Goal: you find out about a problem before a customer does.
+
+**Nothing in this group exists today.** No metrics, no tracing, no alerting.
+
+- [ ] 🔵 **M — Metrics.** Searches started and finished, queue depth, worker lag, source breaker
+      state, budget spend per source, fetch failures by FR-06 class.
+
+- [ ] 🔵 **M — Tracing.** One search id traceable from the API call to the worker to each source
+      request.
+
+- [ ] 🔵 **S — Structured logging with redaction.** **Nothing redacts today.** This service
+      handles names of people being screened; a name in a log is that name copied to every place
+      logs go.
+
+- [ ] 🔵 **M — Alerts that matter.** A source halted. A breaker suspending a publisher. A feed
+      whose shape changed — that one is silent and drops recall to zero.
+
+- [ ] 🔵 **S — The scheduled contract test running on a schedule.** `contractProbe` is built.
+      Nothing runs it yet. It is the detection mechanism for the worst failure this product has.
+
+**Done when:** a feed shape change pages someone, instead of quietly returning clean results.
+
+---
+
+## Group 7 — Prove it
 
 - [ ] **S — Run the integration suite.** Needs `pnpm local:up && pnpm local:bootstrap`.
-      Never run this session.
+      Not run in this session.
 
-- [ ] **S — Run the security suite.** Same. Never run this session.
+- [ ] **S — Run the security suite.** Same.
 
-- [ ] **M — Implement `pnpm test:e2e`.** Exits non-zero on purpose today.
+- [ ] 🔵 **M — Run both in CI.** CI runs neither today, because neither has a stack.
 
-- [ ] **M — Implement `pnpm test:load`.** Same.
+- [ ] 🔵 **M — Implement `pnpm test:e2e`.** Exits non-zero on purpose today.
 
-- [ ] **S — Fix the stale status doc.** `implementation-status.md` says the integration and
-      security suites are unimplemented. `START-HERE.md` says they hold 206 and 106 tests.
+- [ ] 🔵 **M — Implement `pnpm test:load`.** Same. Needed before anyone promises a throughput
+      number.
 
-**Done when:** `pnpm verify:local` passes without any "unverified" lines.
+- [ ] **S — Fix the stale status doc.** `implementation-status.md` lists G0–G3 and says the
+      integration and security suites are unimplemented. `START-HERE.md` says G5 passed and the
+      suites hold 206 and 106 tests.
+
+- [ ] 🔵 **S — Penetration test.** Before real customer data.
+
+**Done when:** `pnpm verify:local` passes with no "unverified" lines, and CI runs every suite.
 
 ---
 
-## Shortest path to a demo
+## Group 8 — Legal and compliance before go-live
 
-If you only want to show it working end to end, in order:
+Not code. Still blocking.
 
-1. Group 0 — all of it. Half a day.
-2. Group 1 — the cascade and the two wiring items.
-3. Group 2 — all of it.
+- [ ] 🔵 **M — Erasure path.** A person asks to be deleted. Prove it works here, and anywhere the
+      data was copied.
 
-That gets you a Postman search that reaches a real website and comes back with real leads.
-Findings stay thin until Group 3.
+- [ ] 🔵 **S — Verify retention actually deletes.** 30 days by default, and a legal hold
+      overrides it. Test the sweep against real data, not fixtures.
+
+- [ ] 🔵 **S — Confirm every source's licence terms are recorded and unexpired.** The gate reads
+      these on every fetch.
+
+- [ ] 🔵 **M — Decide what a customer is told about coverage.** A search that missed half its
+      sources must never read as clean. That is a wording decision as much as a code one.
+
+- [ ] 🔵 **S — Sign-off on "production approved".** Named person, recorded — the same shape as
+      the source approvals.
+
+---
+
+## Shortest path, if you want it demoable first
+
+1. **Group 0** — all of it. Half a day. Postman works properly.
+2. **Group 1** — the cascade and the two wiring items.
+3. **Group 2** — all of it. One real source answers.
+
+That is a Postman search reaching a real website and returning real leads. Findings stay thin
+until Group 3, and it is **not production ready** until Groups 5 to 8 are done.
+
+---
+
+## Rough shape of the work
+
+| Group                 | Size                          |
+| :-------------------- | :---------------------------- |
+| 0 — Postman today     | ~1 day                        |
+| 1 — Real search       | 1–2 weeks                     |
+| 2 — First live source | 2–3 days                      |
+| 3 — Real findings     | 2–4 weeks                     |
+| 4 — Integration ready | 1–2 weeks                     |
+| 5 — Run in production | 2–4 weeks                     |
+| 6 — Observability     | 1–2 weeks                     |
+| 7 — Prove it          | 1–2 weeks                     |
+| 8 — Legal             | parallel, not engineering-led |
+
+These are shapes, not commitments. Group 3 is the one most likely to be wrong, because model
+choice and measured recall are not schedulable.
 
 ---
 
 ## Not on this list, on purpose
 
-These are decisions, not tasks. Someone other than a developer has to answer them.
+Decisions, not tasks. Someone other than a developer answers them.
 
-| #   | Question                                    | Who                    |
-| :-- | :------------------------------------------ | :--------------------- |
-| 1   | The source list — names and feed URLs       | You                    |
-| 2   | Which extraction model (D7)                 | Engineering + product  |
-| 3   | Whether findings may appear in a CRM at all | Compliance             |
-| 4   | How long reports live outside this system   | Compliance             |
-| 5   | How robots exceptions get approved (D6)     | Source admin           |
-| 6   | The Costa Rican evidence base (D15)         | Product + source admin |
+| #   | Question                                              | Who                    |
+| :-- | :---------------------------------------------------- | :--------------------- |
+| 1   | The source list — names and feed URLs                 | You                    |
+| 2   | Which extraction model (D7)                           | Engineering + product  |
+| 3   | Whether findings may appear in a CRM at all           | Compliance             |
+| 4   | How long reports live outside this system             | Compliance             |
+| 5   | How robots exceptions get approved (D6)               | Source admin           |
+| 6   | The Costa Rican evidence base (D15)                   | Product + source admin |
+| 7   | Reviewer capacity the thresholds are set against (D5) | Product + compliance   |
+| 8   | Whether numeric confidence is ever shown (D9)         | Product                |
