@@ -36,10 +36,12 @@ against extraction it could be surprised by.
 
 ---
 
-## 3. Two blockers found while expanding this brief
+## 3. Three blockers, and the first one blocks the live Postman path
 
-Both were found by reading the code, and both would otherwise be discovered several hours into
-the phase with work already built on the wrong assumption.
+All three were found by reading the code, and each would otherwise be discovered hours into the
+phase with work already built on the wrong assumption. **3.3 was found last and matters most**:
+it is the single thing standing between this project and a live end-to-end search from Postman,
+so it is P0 and it is read first even though it is numbered last.
 
 ### 3.1 D7 says "benchmarked on the labelled set". The labelled set has no document text.
 
@@ -91,15 +93,70 @@ symptom: a clean `NO_MATCHES_FOUND` that looks like an absence of news.
 
 **This is F1, and F1 must therefore come first** — before any model work. See the order below.
 
+### 3.3 Live mode has no extractor, so a live run rejects every document — **P0**
+
+`apps/api/src/sources/sources.registry.ts:209` returns `extractionModel: null` for live mode, and
+`search-pipeline.service.ts:477` rejects the document when the extractor is null.
+
+A live run therefore does everything right — discovers real leads, filters them, passes the fetch
+gate, opens a real socket, commits real evidence — and then rejects **every document** at
+`EXTRACTION`, ending `SUCCEEDED / NO_MATCHES_FOUND / INCOMPLETE`.
+
+To anyone reading the result that is indistinguishable from "the source had nothing on this
+person", and the coverage statement says the source was searched, because it was. **This is the
+worst shape a failure can take in this product.**
+
+Discovery is _not_ affected: `ladder.builder.ts:271` does construct live `RssNewsDiscoveryAdapter`
+and `GdeltDiscoveryAdapter` instances per activated source. Extraction is the only null.
+
+**D-048 decides what to do.** In short: a **non-mock, rule-based** `ExtractionModelPort` for live
+mode, `modelId: null` and `promptVersion: null` because that is the truthful value; the mock stays
+`mode: 'MOCK'` / `jurisdictions: ['CR']` so a fixture can never serve a live run (T55); and a
+missing extractor becomes a loud configuration fault in the run warnings and the coverage
+statement, never a finding count of zero. Read D-048 before building it — it also records what
+this costs, which is real.
+
+---
+
+## 3bis. What else the first live Postman run needs, in priority order
+
+Two of these are code and two are yours. Neither of yours is large, but the last one will read as
+a bug if nobody has said it out loud.
+
+| P      | What                                                                                                                   | Whose                              |
+| :----- | :--------------------------------------------------------------------------------------------------------------------- | :--------------------------------- |
+| **P0** | The live rule-based extractor (§3.3, D-048)                                                                            | Engineering                        |
+| **P0** | F1 normalisation and charset (§3.2) — SEC serves real HTML, and today the pipeline hands markup to the extractor       | Engineering                        |
+| **P1** | `pnpm first-contact`, then update `robotsPosition` on what robots.txt actually said, then propose → approve → activate | **Source admin** — needs four eyes |
+| **P1** | Search a subject who is actually in the SEC feed                                                                       | **Whoever runs the demo**          |
+
+**Why P1's last row matters.** The SEC record is `endpointKind: 'FIXED_FEED'`, `queryParam: null`.
+It is the litigation-releases list, not a search endpoint. The name **never reaches the SEC** — the
+feed is polled whole and matched locally (`rss-news-discovery.adapter.ts:302`). Search a Costa
+Rican name against it and you get a correct, well-reasoned `NO_MATCHES_FOUND`. For a first live
+demo that shows a finding, take a defendant's name from the feed as it stands that day.
+
+If you want a name search that genuinely reaches a publisher, that is a `QUERY_FEED` — cascade
+rung 2 or 4 — and per D-046 it needs no code, only a verified endpoint and a named first-contact
+approval.
+
+**What the first live run will honestly report:** coverage `INCOMPLETE`, most rungs unsearched,
+one live source, US and English only, every fixture source refused. That is the system being
+truthful rather than broken, and it is worth expecting so it does not read as a regression.
+
 ---
 
 ## 4. Execution order
 
-The numbering is F1–F7. The order to work them is **F1 → F3 → F2 → F4 → F5 → F6 → F7**, and the
-swap of F3 ahead of F2 is deliberate.
+The numbering is F1–F7. The order to work them is **§3.3 → F1 → F3 → F2 → F4 → F5 → F6 → F7**.
+
+Two departures from the numbering, both deliberate: the **live extractor comes before everything**
+because it is what unblocks a live Postman run, and **F3 (validation) comes before F2 (the model)**
+because rules written after a model get written around whatever that model produced.
 
 | #   | Step                                                                    | Why here                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | :-- | :---------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | **§3.3** the live rule-based extractor (D-048)                          | **P0 — the live Postman path is blocked on exactly this.** Without it a live run rejects every document at `EXTRACTION` and reports a clean zero. Small: a non-mock rule-based adapter, English keywords, `modelId: null`.                                                                                                                                                                                                                                           |
 | 1   | **F1** normalisation, charset, PDF, OCR; the four date fields           | Everything downstream indexes into its output. Doing it after F2 means re-labelling every span in the benchmark corpus.                                                                                                                                                                                                                                                                                                                                              |
 | 2   | **F3** the eight FR-07 validation rules                                 | **Build the validator before the model.** The rules are what make a model's output checkable, and writing them second means writing them against whatever the model happened to produce. Written first, they are the model's acceptance criteria. Note: **no FR-07 validation module exists anywhere in the repo today** — `grep validateAssertion` returns nothing. This is a from-scratch step, not a wiring step. It belongs in `packages/domain` (pure, no I/O). |
 | 3   | **F2** `ExtractionModelPort` against a locally served open-weight model | Blocked on 3.1 above. Closes **D7**.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -198,6 +255,18 @@ been supplied yet. Do not fold them into the adverse-media pipeline to make them
 ---
 
 ## 9. Checklist
+
+**The live Postman path (do these first):**
+
+- [ ] **§3.3** Live rule-based `ExtractionModelPort`, `modelId: null`, non-mock (**D-048**)
+- [ ] **§3.3** A missing extractor reports as a configuration fault in warnings and coverage,
+      never as a finding count of zero
+- [ ] **F1** Normalisation with an offset map, and charset from the declared encoding
+- [ ] `pnpm first-contact`, `robotsPosition` updated on what it said, source proposed → approved
+      → activated _(source admin, four eyes)_
+- [ ] A live search from Postman for a subject actually present in the SEC feed
+
+**The rest of Phase F:**
 
 - [ ] **F1** Normalisation with an offset map; charset from the declared encoding; PDF; OCR; the
       four date fields with declared precision

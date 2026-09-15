@@ -9,7 +9,26 @@ of previous sessions. It is deliberately short.
 
 > **Phase F — Extraction, classification and the full pipeline (gate G7)**
 >
-> 🔧 **Starting now: the extraction model.** Phase E's discovery and fetch path is built and
+> 🔧 **Starting now: the live extractor — the one thing blocking a live search from Postman.**
+>
+> **Read [`phase-f.md`](./phase-f.md) §3.3 before anything else.** `sources.registry.ts:209`
+> returns `extractionModel: null` in live mode, and the pipeline rejects a document when the
+> extractor is null. So a live run discovers real leads, filters them, passes the fetch gate,
+> opens a real socket, commits real evidence — and then rejects **every document** at
+> `EXTRACTION`, reporting `NO_MATCHES_FOUND`. To a reader that is indistinguishable from "the
+> source had nothing on this person". **D-048** decides what to do about it. Discovery is fine;
+> `ladder.builder.ts:271` builds live connectors per activated source.
+>
+> **Priority order for a live Postman e2e** (detail in `phase-f.md` §3bis):
+>
+> | P      | What                                                                                                        | Whose                       |
+> | :----- | :---------------------------------------------------------------------------------------------------------- | :-------------------------- |
+> | **P0** | The live rule-based extractor (D-048)                                                                       | Engineering                 |
+> | **P0** | F1 normalisation and charset — SEC serves real HTML and the pipeline hands markup to the extractor today    | Engineering                 |
+> | **P1** | `pnpm first-contact` → update `robotsPosition` on what it said → propose/approve/activate                   | **Source admin, four eyes** |
+> | **P1** | Search a subject actually present in the SEC feed — it is a `FIXED_FEED`, so the name never reaches the SEC | Whoever runs the demo       |
+>
+> **The wider phase: the extraction model.** Phase E's discovery and fetch path is built and
 > green; the pipeline runs end to end in mock mode and over real HTTP. What it does _not_ have is
 > extraction it could be surprised by — `MockExtractionModel` is rule-based and keyword-driven, so
 > it only ever finds what its own table already knows. That is the largest thing between here and

@@ -27,6 +27,110 @@ Say what you did about it.
 
 ---
 
+## 2026-09-15 (session close) — **Start here: the live extractor is the one thing blocking a live Postman search**
+
+**Read this, then [`phase-f.md`](./phase-f.md) §3.3, then start work. Nothing else is needed to
+begin.**
+
+**Did.** No code. This session finished the FR-06 relevance filter (D-047), expanded Phase F into
+a real brief, then traced the live path end to end to answer "what do we need for a Postman e2e
+against real sources". That trace found the blocker below. Documents updated: `phase-f.md`,
+`START-HERE.md`, `implementation-status.md`, `open-decisions.md`, `postman/README.md`,
+`decisions.md` (**D-048**).
+
+**State of the tree.** Clean, committed, green:
+
+```
+lint · typecheck · format     clean
+unit          829      invariants     29      evaluation     12
+security      106      integration   207      API e2e        10
+```
+
+`pnpm verify:local` still fails by design — the browser e2e suite is unimplemented and exits
+non-zero rather than passing vacuously. **No live source has been contacted by this project.**
+
+---
+
+### The blocker
+
+`sources.registry.ts:209` returns `extractionModel: null` in live mode.
+`search-pipeline.service.ts:477` rejects the document when the extractor is null.
+
+So a live run today does everything right — discovers real leads, filters them through FR-06,
+passes the fetch gate, opens a real socket, commits real evidence — and then rejects **every
+document** at `EXTRACTION`, ending `SUCCEEDED / NO_MATCHES_FOUND / INCOMPLETE`.
+
+**To anyone reading that result it is indistinguishable from "the source had nothing on this
+person"**, and the coverage statement says the source was searched, because it was. That is the
+worst shape a failure can take in this product.
+
+The null was not wrong when written — it was honest, and returning the **mock** in live mode would
+have been far worse (T55). The defect is that an honest null produces a dishonest-looking result.
+
+**Discovery is fine.** `ladder.builder.ts:271` builds live `RssNewsDiscoveryAdapter` and
+`GdeltDiscoveryAdapter` instances per activated source. Extraction is the only null.
+
+**D-048 decides it.** Read it before building: a non-mock rule-based adapter with `modelId: null`
+and `promptVersion: null`; the mock stays `mode: 'MOCK'` / `jurisdictions: ['CR']` so a fixture can
+never serve a live run; and a missing extractor becomes a loud configuration fault in warnings and
+coverage, never a finding count of zero. D-048 also states what rule-based extraction costs, which
+is real, and why "rule-based" must not become permanent by default.
+
+---
+
+### Priority order for a live Postman e2e
+
+| P      | What                                                          | Whose            | Notes                                                                                                                                          |
+| :----- | :------------------------------------------------------------ | :--------------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0** | Live rule-based `ExtractionModelPort`                         | Engineering      | D-048. Unblocks everything below. Small.                                                                                                       |
+| **P0** | F1 normalisation + charset                                    | Engineering      | phase-f.md §3.2. SEC serves real HTML; today the pipeline hands **markup** to the extractor, and `TextDecoder()` ignores the declared charset. |
+| **P1** | `first-contact` → `robotsPosition` → propose/approve/activate | **Source admin** | Four eyes; proposer ≠ approver; reason mandatory (SEC-06).                                                                                     |
+| **P1** | Search a subject actually in the SEC feed                     | Demo runner      | See below.                                                                                                                                     |
+| **P2** | One `QUERY_FEED` source (rung 2 or 4)                         | Source admin     | Only if you want name search to reach a publisher. **No code** (D-046) — a verified endpoint and a named approval.                             |
+
+**Not on the critical path:** D7 model selection, the extraction benchmark corpus, FR-10
+clustering, F5–F7. Clustering matters for band correctness — a syndicated copy still counts as a
+second independent source on axis D — but with one live source there is nothing to cluster.
+
+### The thing that will look like a bug and is not
+
+**The SEC feed is not searchable by name.** The record is `endpointKind: 'FIXED_FEED'`,
+`queryParam: null` — the litigation-releases list, not a search endpoint. The name never reaches
+the SEC; the feed is polled whole and matched locally
+(`rss-news-discovery.adapter.ts:302`). Search a Costa Rican name against it and you get a correct,
+well-reasoned `NO_MATCHES_FOUND`. **For a first live demo that shows a finding, take a defendant's
+name from the feed as it stands that day.**
+
+And coverage will report `INCOMPLETE` — one live source, US and English only, every fixture source
+refused, most rungs unsearched. That is truthful, not broken. A live stack reporting `COMPLETE`
+here would be the thing to worry about.
+
+### Two more blockers, further out (both in phase-f.md §3)
+
+- **D7 cannot be closed as written.** It says "benchmarked on the labelled set"; the labelled set
+  has **no document bodies**. A labelled extraction corpus has to be built first — options and a
+  recommendation in §3.1. D-048 is what stops this blocking the live path.
+- **Build the FR-07 validator before the model** (F3 before F2). Rules written after a model get
+  written around whatever it produced. **No FR-07 validation module exists anywhere in the repo** —
+  `grep validateAssertion` returns nothing. From-scratch, in `packages/domain`, pure.
+
+**Next session should:** run the health check in `START-HERE.md`, read D-048, then build the live
+rule-based `ExtractionModelPort`. Then F1.
+
+**Waiting on the user, not on code:**
+
+1. Verified endpoints **and named first-contact approvals** for rungs 2, 3 and 4.
+2. The source list as `name | endpoint URL | countries | languages | kind`.
+3. SEC live activation — `pnpm first-contact` is written and has **never been run**.
+4. The two Costa Rican sanctions spreadsheets. **List matching, not adverse media** — open
+   decision **D4**, due at this gate. No paths supplied yet.
+
+**Decisions touched:** **D-048 recorded.** **D7** re-raised with its real blocker and marked off
+the critical path. D9 and D4 open and due at G7. D15 still the nearer blocker for live Costa Rican
+sources.
+
+---
+
 ## 2026-09-15 (end of day) — **Session close: Phase E paused, extraction is next**
 
 **Read this one first if you are starting cold, then read

@@ -1634,3 +1634,67 @@ fetched than a calibrated filter would fetch, against publishers' rate ceilings.
 right direction to err while no corpus exists — over-fetching costs requests, and over-refusing
 costs findings nobody will ever know were missed. FR-16's labelled dataset is what changes this,
 and the method name is what makes the change visible when it comes.
+
+## D-048 — Live mode must never silently have no extractor, and the first live extraction is rule-based
+
+**Status:** Accepted · **Decided at:** Phase F planning, 2026-09-15 · **Supersedes nothing; constrains D7**
+
+### What was found
+
+`sources.registry.ts` returns `extractionModel: null` for live mode, and
+`search-pipeline.service.ts` treats a null extractor by rejecting the document:
+
+> "No fetch or extraction adapter is configured in this mode, so the document was …"
+
+So a live run does everything correctly — discovers real leads, filters them, passes the fetch
+gate, opens a real socket, commits real evidence — and then rejects **every** document at
+`EXTRACTION`. The run ends `SUCCEEDED / NO_MATCHES_FOUND / INCOMPLETE`.
+
+That is the worst shape a failure can take in this product. It is indistinguishable, to anyone
+reading the result, from "the source had nothing on this person" — and the coverage statement
+would say the source was searched, because it _was_. The rejected leads carry the real reason,
+but a reader who looks at the finding count sees a clean negative.
+
+The null was not wrong when it was written. It was honest: no live extractor existed, and
+returning the **mock** in live mode would have been far worse (T55 — a fixture must never serve
+a live run). The defect is that the honest null produces a dishonest-looking _result_.
+
+### Three decisions follow
+
+**1. A live run with no extractor must fail loudly, not emptily.** The same rule the GDELT parser
+follows (D-046): `UNPARSABLE` and `UNRECOGNISED` are distinct from `articles: []`, because only
+the last means "nothing about this person". A missing extractor is a **configuration fault**, not
+a search result. It belongs in the run's warnings and in the coverage statement as an unsearched
+capability — never as a finding count of zero.
+
+**2. The first live extractor is rule-based, and says so.** Not the D7 open-weight model. D7
+cannot be closed yet — it requires a benchmark, and the labelled set has no document bodies to
+benchmark against (phase-f.md §3.1). Blocking the entire live path on a decision that is itself
+blocked on a corpus nobody has built would mean no live e2e for weeks.
+
+So: a **non-mock, rule-based** `ExtractionModelPort` for live mode, with `modelId: null` and
+`promptVersion: null` — which is the truthful value for an extraction no model participated in,
+exactly as the mock's header already argues. It is not the mock: the mock is `mode: 'MOCK'` and
+`jurisdictions: ['CR']`, and both must stay that way so a fixture can never serve a live run.
+
+**3. "Rule-based" must not become permanent by default.** This is the failure mode START-HERE
+rule 6 names — an open decision acquiring a silent default. The mitigations are that the
+extractor's version string says what it is, every assertion it emits carries `modelId: null`
+where a reader will see it, and D7 stays open with its real blocker (the corpus) recorded rather
+than the symptom.
+
+### What this costs, stated plainly
+
+A keyword-and-span rule extractor finds what its table already knows and nothing else. Recall
+against real prose will be poor, and unmeasured — there is no corpus, so no figure can be quoted.
+It is the same honesty problem as the unreviewed Spanish lexicon (D-033): an unreviewed term does
+not fail, it returns nothing.
+
+Against that: the alternative is a live path that cannot produce a single finding, and every other
+part of it — SEC-02 screening, robots, the breakers, the stop conditions, the relevance filter,
+evidence commitment — stays unexercised against a real publisher until it exists. Those are the
+parts where a defect is expensive, and the only way to find their defects is to run them.
+
+**The extraction quality must therefore never be reported as a measurement.** FR-03's rule applies
+by analogy: no recall figure exists, so none is quoted, and the coverage statement says the
+extraction was rule-based and unbenchmarked.

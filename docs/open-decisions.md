@@ -14,7 +14,7 @@ force, it is stated as such and the code reflects that it is provisional.
 | D4      | The exact boundary between adverse media and list matching for designations                                                            | Product + compliance                  | G7                                | Open                                                                                                                                         |
 | D5      | The reviewer capacity assumption that thresholds are set against                                                                       | Product + compliance                  | G7                                | Open                                                                                                                                         |
 | D6      | How robots exceptions for official sources are approved and recorded                                                                   | Source admin                          | G6                                | Open — **raised with specifics 2026-09-14**, in the direct path                                                                              |
-| D7      | Which open-weight extraction model, benchmarked on the labelled set                                                                    | Engineering                           | G7                                | Open                                                                                                                                         |
+| D7      | Which open-weight extraction model, benchmarked on the labelled set                                                                    | Engineering                           | G7                                | Open — **blocked, and not on the critical path for the first live run** (see below, 2026-09-15)                                              |
 | D8      | Retention per source and jurisdiction for evidence text                                                                                | Compliance                            | G5                                | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)                                                                             |
 | D9      | Whether numeric confidence figures are ever shown (default: no)                                                                        | Product                               | G7                                | Open — default no, enforced                                                                                                                  |
 | D10     | The minimum identity data the integrating application must supply                                                                      | Product + Zquence                     | G3                                | **CLOSED 2026-09-11** — a name (see D-011)                                                                                                   |
@@ -33,6 +33,30 @@ force, it is stated as such and the code reflects that it is provisional.
 
 The seeded decisions (D1-D10) appear here once they are raised with specifics; the rest were
 surfaced by the implementation itself.
+
+### D7 — Which open-weight extraction model
+
+**Raised with specifics at the start of Phase F, 2026-09-15.** Two things changed about it.
+
+**It cannot be closed as written.** D7 says "benchmarked on the labelled set".
+`packages/evaluation/src/dataset/seed.ts` holds 16 cases carrying document **metadata**
+(`documentId`, `tier`, `issuingAuthorityId`) and the **axis inputs** a pipeline would produce.
+It carries **no document bodies**. That is correct for what it was built for — D-005 made it the
+seam that lets `runAllInvariants` run against real pipeline output without touching the harness —
+but you cannot compare extraction models on a corpus with nothing to extract from.
+
+**So D7 has an unscheduled prerequisite: a labelled extraction corpus.** Three options with a
+recommendation are in `docs/execution/phase-f.md` §3.1. It is a real decision and belongs in
+`docs/decisions.md` when it is made.
+
+**And it is no longer blocking the live path.** D-048 decided that the first live extractor is
+**rule-based**, with `modelId: null` because that is the truthful value, so a live end-to-end
+search does not wait on a model choice that is itself waiting on a corpus. D7 stays open, with
+its real blocker recorded rather than its symptom.
+
+**The risk to watch is the one START-HERE rule 6 names:** "rule-based" becoming permanent by
+default. D-048 records the mitigations and states the cost — recall against real prose will be
+poor and unmeasured, and must never be reported as a measurement.
 
 ### D6 — How robots exceptions for official sources are approved and recorded
 

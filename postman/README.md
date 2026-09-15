@@ -150,6 +150,58 @@ service will honestly report as not found.
 
 ---
 
+## Testing against real sources (live mode) — read before you try
+
+Live mode is `pnpm dev:live`. It refuses to start without `FETCH_CONTACT_URL` and prints what
+changes. **It is not ready for an end-to-end search yet**, and the reasons are specific.
+
+### What blocks a live run today
+
+**Live mode has no extractor.** `sources.registry.ts` returns `extractionModel: null` in live
+mode, and the pipeline rejects a document when the extractor is null. A live run will discover
+real leads, filter them, pass the fetch gate, open a real socket and commit real evidence — and
+then reject **every document** at `EXTRACTION`, returning `SUCCEEDED / NO_MATCHES_FOUND /
+INCOMPLETE`.
+
+If you run a live search before that is fixed, **a zero result does not mean the source had
+nothing.** Open `rejectedLeads` and read the stage: `EXTRACTION` with a message about no adapter
+being configured is this, not an absence of news. Decided in `docs/decisions.md` **D-048**;
+tracked as P0 in `docs/execution/phase-f.md` §3.3.
+
+**The pipeline hands raw HTML to the extractor.** No normalisation and no charset handling. SEC
+pages are real HTML, so spans would point into markup, and a page served as ISO-8859-1 would
+decode to mojibake. This is Phase F step F1.
+
+### Two things that are not bugs, and will look like bugs
+
+**1. The SEC feed is not searchable by name.** The record is `endpointKind: "FIXED_FEED"` with
+`queryParam: null` — it is the litigation-releases list, not a search endpoint. The name you type
+**never reaches the SEC**: the feed is polled whole and matched locally. Search a Costa Rican name
+against it and you get a correct, well-reasoned `NO_MATCHES_FOUND`.
+
+**For a first live demo that actually shows a finding, take a defendant's name from the SEC
+litigation-releases feed as it stands that day.**
+
+If you want a name search that genuinely reaches a publisher, that needs a `QUERY_FEED` — cascade
+rung 2 or 4 (Google/Bing News RSS). Per D-046 that needs **no code**, only a verified endpoint and
+a named first-contact approval.
+
+**2. Coverage will say `INCOMPLETE`, and should.** One live source, US and English only, every
+fixture source refused in live mode, most rungs unsearched. That is the system being truthful, not
+broken. A live stack that reported `COMPLETE` here would be the thing to worry about.
+
+### The order of operations, when it is ready
+
+1. `pnpm first-contact` — one `GET https://www.sec.gov/robots.txt`. Requires
+   `--yes-contact-the-sec`. **This is the first deliberate live request this project has ever
+   made.**
+2. Update `robotsPosition` on the source record to reflect **what robots.txt actually said** —
+   not what you expected it to say. It ships as `NOT_ESTABLISHED`, which the fetch gate refuses,
+   and that ordering is deliberate.
+3. Propose → approve → activate the source through the admin folder. **This needs four eyes**: the
+   proposer and the approver cannot be the same person, and the reason field is mandatory (SEC-06).
+4. Run a search for a subject you have confirmed is in the feed.
+
 ## Keeping the collection honest
 
 The OpenAPI document is generated from the contract schemas and a test fails if it drifts:
