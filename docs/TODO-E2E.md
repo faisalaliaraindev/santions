@@ -87,19 +87,20 @@ minutes. ✅
 
 Goal: a search runs through real source logic instead of returning fixtures.
 
-- [ ] 🟠 **L — Build the cascade, rungs 0 to 7.** Walk the approved sources in order, log each
+- [x] **Build the cascade, rungs 0 to 7.** Done 2026-09-15 (**D-045**). Walk the approved sources in order, log each
       rung, descend on its own stated failure, and stop at rung 7 with `NO_MATCHES_FOUND` +
       `INCOMPLETE` — never a clean result.
       _File:_ `apps/api/src/pipeline/search-pipeline.service.ts`, the `discover` method
 
-- [ ] 🟠 **M — Let the adapter set hold many news sources.** `SourceAdapterSet.newsDiscovery` is
+- [x] **Let the adapter set hold many news sources.** `SourceAdapterSet.newsDiscovery` is
       a single nullable port. It must become a list built from the active RSS sources in the
       registry.
       _File:_ `apps/api/src/sources/sources.registry.ts`
 
-- [ ] 🟠 **M — Wire `RssNewsDiscoveryAdapter` into the composition root.** Built and tested; not
-      connected to anything yet.
-      _Files:_ `sources.registry.ts`, `app.module.ts`
+- [x] **Wire `RssNewsDiscoveryAdapter` into the composition root.** `LadderBuilder` constructs one
+      per approved `NEWS_DISCOVERY_RSS` source — it was already reading the registry to decide
+      rungs, so this is the same read answering one more question.
+      _File:_ `apps/api/src/pipeline/ladder.builder.ts`
 
 - [ ] **M — Relevance filter before fetch.** The nine FR-06 signals, scored before a socket
       opens. Rejected leads stored with their reason and visible in coverage.
@@ -127,9 +128,12 @@ Goal: the service makes its first real request, deliberately.
       The record is written and schema-checked already.
       _File:_ `apps/api/src/sources/registry/sec-litigation-releases.ts`
 
-- [ ] 🟠 **S — One-shot script for the first robots read.** `GET https://www.sec.gov/robots.txt`.
-      Prepared by us, run by you.
-      _New:_ `scripts/first-contact.mjs`
+- [x] **One-shot script for the first robots read.** `pnpm first-contact` — prints exactly what it
+      will do and sends nothing without `--yes-contact-the-sec`. Uses the real transport with the
+      real screening lookup, so if the address screening or the user agent were wrong, that shows
+      up on the first request rather than the hundredth. Writes the result to
+      `docs/sources/sec-robots-evidence.json` as D6 evidence. **Prepared; not run.**
+      _File:_ `scripts/first-contact.mjs`
 
 - [ ] 🟠 **S — Update `robotsPosition` from what robots.txt actually said.** Through the
       lifecycle. Until then the fetch gate refuses the source, which is deliberate.

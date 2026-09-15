@@ -86,22 +86,23 @@ is test data.
 
 ## Commands
 
-| Command                                               | What it does                                                             |
-| :---------------------------------------------------- | :----------------------------------------------------------------------- |
-| `pnpm local:up`                                       | Start dependencies; waits for each service's own healthcheck             |
-| `pnpm local:down`                                     | Stop dependencies, **keeping** persisted volumes                         |
-| `pnpm local:reset`                                    | Delete local volumes, behind an explicit typed confirmation              |
-| `pnpm local:bootstrap`                                | Seed the selected local environment                                      |
-| `pnpm dev:api` / `pnpm dev:worker`                    | Run the API and the worker. Both are needed for a search to finish       |
-| `pnpm key:issue`                                      | Mint a machine API key. Prints the secret once (D-007: provider-managed) |
-| `pnpm demo:api`                                       | End-to-end walkthrough over the real HTTP API, mock sources              |
-| `pnpm lint` / `format` / `typecheck`                  | Quality gates                                                            |
-| `pnpm test:unit`                                      | Domain unit tests                                                        |
-| `pnpm test:invariants`                                | **The I1-I10 release gate.** Runs with no I/O dependency.                |
-| `pnpm test:evaluation`                                | FR-16 metrics on the held-out split                                      |
-| `pnpm test:integration` / `security` / `e2e` / `load` | _Not implemented_ — exit non-zero                                        |
-| `pnpm verify:local`                                   | Aggregates mandatory non-live checks; fails on skipped required suites   |
-| `pnpm lexicon:audit`                                  | Fails if any query term maps to a protected characteristic               |
+| Command                                               | What it does                                                                           |
+| :---------------------------------------------------- | :------------------------------------------------------------------------------------- |
+| `pnpm local:up`                                       | Start dependencies; waits for each service's own healthcheck                           |
+| `pnpm local:down`                                     | Stop dependencies, **keeping** persisted volumes                                       |
+| `pnpm local:reset`                                    | Delete local volumes, behind an explicit typed confirmation                            |
+| `pnpm local:bootstrap`                                | Seed the selected local environment                                                    |
+| `pnpm dev:api` / `pnpm dev:worker`                    | Run the API and the worker. Both are needed for a search to finish                     |
+| `pnpm key:issue`                                      | Mint a machine API key. Prints the secret once (D-007: provider-managed)               |
+| `pnpm first-contact`                                  | The first deliberate live request (D17). Sends nothing without `--yes-contact-the-sec` |
+| `pnpm demo:api`                                       | End-to-end walkthrough over the real HTTP API, mock sources                            |
+| `pnpm lint` / `format` / `typecheck`                  | Quality gates                                                                          |
+| `pnpm test:unit`                                      | Domain unit tests                                                                      |
+| `pnpm test:invariants`                                | **The I1-I10 release gate.** Runs with no I/O dependency.                              |
+| `pnpm test:evaluation`                                | FR-16 metrics on the held-out split                                                    |
+| `pnpm test:integration` / `security` / `e2e` / `load` | _Not implemented_ — exit non-zero                                                      |
+| `pnpm verify:local`                                   | Aggregates mandatory non-live checks; fails on skipped required suites                 |
+| `pnpm lexicon:audit`                                  | Fails if any query term maps to a protected characteristic                             |
 
 Live-mode commands (`test:contract:live`, `measure:coverage`, `verify:aws`) do not exist yet.
 They will require configured access and owner authorisation. **Live mode defaults off.**
