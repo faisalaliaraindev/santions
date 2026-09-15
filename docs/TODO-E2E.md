@@ -260,25 +260,32 @@ Goal: you find out about a problem before a customer does.
 
 ## Group 7 — Prove it
 
-- [ ] **S — Run the integration suite.** Needs `pnpm local:up && pnpm local:bootstrap`.
-      Not run in this session.
+- [x] **Run the integration suite.** 206 passing, 2026-09-15.
 
-- [ ] **S — Run the security suite.** Same.
+- [x] **Run the security suite.** 106 passing, 2026-09-15.
+
+- [x] **An API end-to-end suite.** `pnpm test:e2e:api` — 10 tests. In through the HTTP door and
+      out through it, with the real outbox, the real SQS queue and a real worker in between.
+      Nothing before it proved the pieces were joined.
+      _File:_ `tests/e2e/api-lifecycle.test.ts`
 
 - [ ] 🔵 **M — Run both in CI.** CI runs neither today, because neither has a stack.
 
-- [ ] 🔵 **M — Implement `pnpm test:e2e`.** Exits non-zero on purpose today.
+- [ ] 🔵 **M — Implement `pnpm test:e2e`** — the **browser** suite, gate G8, mostly in the
+      frontend repo. Still exits non-zero on purpose. The API suite above does not and must not
+      stand in for it: that would be a gate going green without being met.
 
 - [ ] 🔵 **M — Implement `pnpm test:load`.** Same. Needed before anyone promises a throughput
       number.
 
-- [ ] **S — Fix the stale status doc.** `implementation-status.md` lists G0–G3 and says the
-      integration and security suites are unimplemented. `START-HERE.md` says G5 passed and the
-      suites hold 206 and 106 tests.
+- [x] **Fix the stale status doc.** `implementation-status.md` claimed all four extra suites were
+      unimplemented long after two of them were written. Corrected with the real numbers.
 
 - [ ] 🔵 **S — Penetration test.** Before real customer data.
 
 **Done when:** `pnpm verify:local` passes with no "unverified" lines, and CI runs every suite.
+As of 2026-09-15 it reports **one** unverified line — the browser end-to-end suite — and passes
+everything else.
 
 ---
 

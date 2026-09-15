@@ -31,7 +31,12 @@ const SUITES = [
   { name: 'evaluation metrics', script: 'test:evaluation', required: true, implemented: true },
   { name: 'integration', script: 'test:integration', required: true, implemented: true },
   { name: 'security', script: 'test:security', required: true, implemented: true },
-  { name: 'end-to-end', script: 'test:e2e', required: true, implemented: false },
+  { name: 'end-to-end (API)', script: 'test:e2e:api', required: true, implemented: true },
+  // The **browser** end-to-end suite, gate G8, mostly in `erly-sanction-service-frontend`.
+  // Deliberately still unimplemented: the API suite above goes in through the HTTP door and out
+  // through it, which is a real end-to-end and is not the same claim. Letting it satisfy this
+  // entry would be this file's own failure mode — a gate going green without being met.
+  { name: 'end-to-end (browser)', script: 'test:e2e', required: true, implemented: false },
 ];
 
 function run(script) {

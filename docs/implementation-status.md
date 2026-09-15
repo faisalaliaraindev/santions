@@ -9,11 +9,11 @@ evidence exists — a command another engineer can run and a result they can rea
 
 The plan requires these three to be reported separately (section 1.3).
 
-| Label                | Status                                              | Evidence                                                                                      |
-| :------------------- | :-------------------------------------------------- | :-------------------------------------------------------------------------------------------- |
-| Local verified       | **Partial** — G0, G1 and G2 complete; G3 partial    | `pnpm test:invariants`, `pnpm test:unit`, `pnpm test:evaluation` all pass on a clean checkout |
-| Live source verified | **Not started** — no live source has been contacted | None. No live call has been made.                                                             |
-| Production approved  | **Not started**                                     | None.                                                                                         |
+| Label                | Status                                              | Evidence                                                                                                                                                                                                  |
+| :------------------- | :-------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local verified       | **Partial** — everything but the browser e2e suite  | `verify:local` 2026-09-15: lint, typecheck, unit (754), invariants (29), evaluation (12), integration (206), security (106), API end-to-end (10) all pass. Only `test:e2e` (browser, G8) is unimplemented |
+| Live source verified | **Not started** — no live source has been contacted | None. No live call has been made.                                                                                                                                                                         |
+| Production approved  | **Not started**                                     | None.                                                                                                                                                                                                     |
 
 The sequenced plan we are executing against is `docs/delivery-plan.md`.
 
@@ -120,5 +120,10 @@ Recorded because they are the kind that stay hidden until they cause a wrong res
   (D12 / D-002). Closed with its limits stated — 100,000 subjects not 10⁷, no concurrency test,
   the `documents` index untested, and the non-Latin path unmeasured because no real
   `TransliterationPort` exists yet. The re-open triggers are in `docs/decisions.md` D-002.
-- **`pnpm test:e2e`, `test:integration`, `test:security` and `test:load` have no
-  implementations.** They exit non-zero rather than passing vacuously.
+- **`pnpm test:load` has no implementation**, and `pnpm test:e2e` — the **browser** suite, gate
+  G8 — has none either. Both exit non-zero rather than passing vacuously.
+  **Corrected 2026-09-15:** `test:integration` (206 tests) and `test:security` (106 tests) do
+  exist and pass, and `test:e2e:api` (10 tests) was added — a search from an HTTP request to an
+  HTTP answer, through the real queue and a real worker. This file claimed all four were missing
+  long after two of them were written; the claim was the stale thing, not the suites.
+  `verify:local` now passes everything except the browser end-to-end suite.

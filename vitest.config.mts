@@ -36,6 +36,13 @@ export default defineConfig({
       {
         test: { name: 'security', include: ['tests/security/**/*.test.ts'], environment: 'node' },
       },
+      {
+        // The **API** end-to-end suite: in through the HTTP door, out through it, with the real
+        // queue and a real worker in between. The browser end-to-end suite is a different thing
+        // and belongs to gate G8 — see `tests/e2e/api-lifecycle.test.ts` for why the two are not
+        // allowed to stand in for each other.
+        test: { name: 'e2e-api', include: ['tests/e2e/**/*.test.ts'], environment: 'node' },
+      },
     ],
     coverage: {
       provider: 'v8',
