@@ -259,6 +259,42 @@ groups by the **source's** countries.
 `CR` only, `capabilityCoverage` holds CR rows only, and no name-frequency distribution is loaded for
 any country (which was already true, and is now the general case rather than one gap).
 
+### Third addendum, same session — the RSS discovery connector
+
+`RssNewsDiscoveryAdapter` is built and tested (25 tests, no socket opened). It is the **RSS
+connector**, not a per-publisher one: the address, countries, languages, budgets, stop conditions
+and first-contact approval all come from the active source version, read fresh on every call
+(**D-043**). Adding a publisher is an approval, not a deployment.
+
+**It has no HTTP path of its own.** Every byte comes through `EvidenceFetchPort`, so it inherits
+the transport, the SEC-02 lookup screening, robots with `UNKNOWN` refusing, both byte budgets, both
+breakers and the stop conditions. The only thing it adds is authorisation of its own poll, via the
+new `FetchGateService.authoriseEndpoint`, which runs every gate a document fetch runs.
+
+Three things in it worth not undoing:
+
+- **`FIXED_FEED` vs `QUERY_FEED` is recorded, not inferred**, because the difference is the _rate_:
+  a fixed feed costs one request per poll however many searches are running; a query feed costs one
+  per planned query, which for a bounded plan is dozens.
+- **The query is one search parameter, never a string splice.** The registry records the
+  parameter's _name_; the connector parses the recorded endpoint, sets that parameter and
+  serialises. A hostile query string cannot introduce a path, a host, a scheme or a second
+  parameter — there is a test that tries.
+- **A parse failure is `FAILED`, never `NO_RESULTS`.** A shape change yields zero items with
+  nothing thrown, and reporting it as "no news about this person" is the worst failure this product
+  has. `contractProbe` runs the same parser through the same gate and calls zero items unstable.
+
+Supporting changes worth knowing about: `FetchAuthorisation.relevanceScore` is now **nullable** —
+a feed poll has judged nothing, and a 1 chosen to satisfy the type would be a judgement recorded in
+the record that exists to be audited. `DiscoveryQuery` now carries the run's pinned scope (`run`),
+required of mocks too, because an optional gate context is a gate somebody forgets.
+
+**Not wired into `buildSourceAdapters` yet, and that is the next step rather than an oversight.**
+`SourceAdapterSet.newsDiscovery` is a single nullable port and `search-pipeline.service.ts` reads it
+at rung 2. The cascade has to enumerate the _active RSS sources_ in the registry and walk rungs 0–7
+over them, which is the refactor step 3 actually is. The connector is the substrate for it and is
+deliberately finished first, tested, and committed on its own.
+
 ### The blocker the next session starts on
 
 **The user will supply the source list.** They asked to give it rather than have it researched, in
