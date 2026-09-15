@@ -109,6 +109,7 @@ export type FetchGateRefusal =
   | 'ROBOTS_POSITION_NOT_ESTABLISHED'
   | 'ROBOTS_EXCEPTION_NOT_APPROVABLE'
   | 'FIXTURE_SOURCE_IN_LIVE_MODE'
+  | 'NO_FIRST_CONTACT_APPROVAL'
   | 'NO_EGRESS_IDENTITY';
 
 /**
@@ -128,6 +129,7 @@ export function isSourceLevelRefusal(refusal: FetchGateRefusal): boolean {
     case 'ROBOTS_POSITION_NOT_ESTABLISHED':
     case 'ROBOTS_EXCEPTION_NOT_APPROVABLE':
     case 'FIXTURE_SOURCE_IN_LIVE_MODE':
+    case 'NO_FIRST_CONTACT_APPROVAL':
     case 'NO_EGRESS_IDENTITY':
       return true;
     case 'JURISDICTION_NOT_IN_RUN_SCOPE':
@@ -252,6 +254,32 @@ export class FetchGateService {
         'FIXTURE_SOURCE_IN_LIVE_MODE',
         `${version.sourceName} is a FIXTURE_MOCK connector and this is a live process. Fixture ` +
           `data must never be servable as a live result (T55).`,
+        version,
+      );
+    }
+
+    // **D-042 — no live request to a publisher nobody accepted contact with.**
+    //
+    // D17 asked who approved the first deliberate live request and was answered for one source.
+    // This generalises that answer rather than leaving it a one-off: every source needs a named
+    // person recorded on its approved version before this service will speak to its publisher.
+    //
+    // It is deliberately separate from the version's own approval. Approving a registry entry
+    // says the configuration is right — the domains, the countries, the budgets. This says
+    // somebody accepted that we would begin making requests to a third party who did not ask to
+    // hear from us, which is a different thing to be responsible for, and the difference is
+    // invisible if one signature covers both.
+    //
+    // Mock mode is exempt because no publisher is involved; the fixture gate above has already
+    // established that a fixture cannot be live.
+    if (!isFixture && version.firstContactApproval === null) {
+      return this.refuse(
+        'NO_FIRST_CONTACT_APPROVAL',
+        `${version.sourceName} has no recorded first-contact approval, so no named person has ` +
+          `accepted that this service would begin making requests to this publisher. The source ` +
+          `is configured and approved as a registry entry and is still not reachable — that ` +
+          `separation is deliberate (D17, D-042). Record ` +
+          `accessPolicy.firstContactApproval on the version through the approval lifecycle.`,
         version,
       );
     }

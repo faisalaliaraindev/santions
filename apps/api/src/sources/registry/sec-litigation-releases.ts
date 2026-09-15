@@ -105,6 +105,7 @@ export const SEC_STOP_CONDITIONS: StopConditionPolicy = {
 const SEC_ACCESS_POLICY: SourceAccessPolicy = {
   requestCeilingPerSecond: SEC_REQUEST_CEILING_PER_SECOND,
   pollFloorSeconds: SEC_POLL_FLOOR_MS / 1000,
+  endpointUrl: SEC_LITIGATION_RELEASES_FEED_URL,
   conditionalGet: true,
   userAgentRequired: true,
   policyUrl: 'https://www.sec.gov/about/webmaster-frequently-asked-questions',

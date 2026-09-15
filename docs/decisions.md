@@ -1288,3 +1288,65 @@ calling a source and cannot say why.
 recorded stop condition halts a working source. The "can only ever stop" invariant bounds the
 damage to over-refusal, which is visible in a coverage statement, and D5's four-eyes release is
 what stops an over-eager halt being waved away by the person who caused it.
+
+## D-042 — Every live source needs a named first-contact approval, not just the first one
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15 · **Generalises:** D17
+
+D17 asked who approved the first deliberate live request and was answered for one source. Left
+there, it would have been a ceremony performed once: the second source, and the twentieth, would
+have gone live because somebody added a registry entry and nobody was asked anything.
+
+So the rule is general. `FetchGateService` refuses any live fetch to a source whose active
+approved version carries no `accessPolicy.firstContactApproval` — a named person, their role, the
+date, and the decision it closes. The refusal is **source-level**, so it reaches the coverage
+statement rather than sitting on one lead.
+
+**Why it is separate from the version's own approval, when the version already goes through four
+eyes.** Approving a registry entry says the _configuration_ is right: these domains, these
+countries, this budget, this licence terms version. Accepting first contact says something else —
+that this service will begin making requests to a third party who did not ask to hear from it, and
+that a named person will answer for that. Those are different things to be responsible for, and
+one signature covering both makes the second one invisible. The separation also gives an operator
+a safe intermediate state that did not exist before: a source can be fully configured, reviewed and
+approved, and still unreachable, which is exactly what you want while a publisher's terms are being
+read.
+
+**The consequence, stated so it is not discovered as a bug.** Adding a source to the registry is
+no longer sufficient to make it reachable. A correctly configured, four-eyes-approved source with
+no first-contact approval produces `NO_FIRST_CONTACT_APPROVAL` on every lead and a coverage gap
+naming it. That is the intended behaviour and the refusal says what to do about it.
+
+**Read strictly.** `SourceVersionService` resolves an approval with _any_ field missing to null
+rather than to a partial one. A half-filled approval the gate accepted would be a live request made
+under a name nobody actually wrote down, which is the failure D17 exists to prevent wearing a
+record's clothes — the same reasoning D6 gives for refusing an unnamed robots exception.
+
+**Mock mode is exempt**, because no publisher is involved: the fixture gate above it has already
+established that a `FIXTURE_MOCK` connector cannot be live (T55).
+
+**Cost.** A second approval step per source, and a failure mode that looks like a misconfiguration
+to somebody who has not read this. Against that: the alternative is that the twentieth publisher
+this service contacts was contacted because a form was filled in.
+
+## D-043 — A source's endpoint is registry content, not connector code
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15
+
+`accessPolicy.endpointUrl` records the exact URL a polling connector reads. It could have lived in
+the connector, and putting it there would have been the obvious thing.
+
+**Two reasons it is registry content instead.** A URL compiled into a connector is a request nobody
+approved — it is not in the record an approver signed, it is not in the record an audit reads, and
+changing it is a deployment rather than an approval. And it makes connectors per-source: the same
+RSS parse then exists three times because three publishers have three addresses, and the third copy
+is the one that eventually skips a gate.
+
+With the address in the registry, **one** RSS connector serves every RSS source, and what
+distinguishes SEC litigation releases from a Costa Rican gazette is a row somebody approved.
+
+**This does not reopen the "no executable instruction in the registry" rule** (see the
+`sourceContentSchema` header: no selector, no script, no template). A URL is validated as a URL,
+and every request to it goes through `screenUrl`, the recorded robots position, the live robots
+verdict, both breakers, the budget and the stop conditions, exactly like a request to a discovered
+link. What the registry grants is an address, not behaviour.

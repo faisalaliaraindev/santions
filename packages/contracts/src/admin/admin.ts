@@ -196,6 +196,19 @@ export const sourceAccessPolicySchema = z
     /** The minimum interval between polls of this source, in seconds. The floor, not the rate. */
     pollFloorSeconds: z.number().int().positive().max(86_400).nullable(),
     /**
+     * The exact URL a polling connector reads — a feed, an index, a search endpoint.
+     *
+     * **Registry content, not connector code.** A URL compiled into a connector is a request
+     * nobody approved, and it makes the connector per-source: the same RSS parser then exists
+     * three times because three publishers have three addresses. Here, one connector serves every
+     * RSS source and each source's address is part of what an approver signed.
+     *
+     * Still not an executable instruction (see the schema header): it is a URL, validated as one,
+     * and every request to it goes through `screenUrl`, the robots check and both breakers like
+     * any other. Null for a source that is only ever reached by following a discovered link.
+     */
+    endpointUrl: z.string().url().max(500).nullable(),
+    /**
      * Whether polls must carry `If-None-Match` / `If-Modified-Since`.
      *
      * Not politeness theatre: a conditional GET that hits returns 304 with no body, so the

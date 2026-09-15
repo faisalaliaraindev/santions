@@ -197,6 +197,42 @@ to it, in order:
 Extraction is still a keyword placeholder (Phase F), so the first live results will be thin. Say so
 in the coverage statement rather than letting thin read as clean.
 
+### Addendum, same session — D-042 and D-043
+
+The user's stated goal is a **live adverse search driven from Postman, against all sources**, not
+only the one D17 approved. Taken as direction, with one thing generalised rather than assumed.
+
+**D-042 — every live source needs a named first-contact approval, not just the first one.** D17
+answered "who approved this?" for one source. Left there it would have been a ceremony performed
+once, and the twentieth publisher this service contacted would have been contacted because somebody
+filled in a form. So `FetchGateService` now refuses any live fetch to a source whose approved
+version carries no `accessPolicy.firstContactApproval` — a named person, their role, the date, and
+the decision. It is a **source-level** refusal, so it reaches the coverage statement. Read strictly:
+any missing field resolves the whole approval to null, because a half-filled approval the gate
+accepted would be a live request made under a name nobody wrote down.
+
+The consequence is deliberate and will look like a misconfiguration to somebody who has not read
+D-042: **adding a source to the registry is no longer enough to make it reachable.** A correctly
+configured, four-eyes-approved source with no first-contact approval refuses every lead and says
+why. That is what lets every source be configured now and approved one at a time.
+
+**D-043 — a source's endpoint is registry content** (`accessPolicy.endpointUrl`), not connector
+code. One RSS connector then serves every RSS source, and what distinguishes the SEC from a Costa
+Rican gazette is a row somebody approved rather than a URL somebody compiled in. It does not reopen
+the "no executable instruction in the registry" rule: a URL is validated as a URL and every request
+to it goes through the same gates as a discovered link.
+
+**Verified after the addendum:** lint clean, typecheck clean, format clean, **729 unit**, 29
+invariants, 12 evaluation. `pnpm openapi:generate` re-run.
+
+**What is deliberately NOT in this commit, and why.** Registry records for Google News RSS, Bing
+News RSS and Costa Rican publishers. Their endpoint shapes have **not been verified** — no request
+has been made to any of them, and writing a guessed feed URL into a source version would be putting
+a fabricated fact into the record an approver signs, which is the thing this project refuses to do
+everywhere else. The SEC's two feed URLs were verified by desk research on 2026-09-15 and are the
+only addresses recorded. The next session should ask the user to name the CR publishers they want
+and establish each endpoint before writing its record.
+
 ### Decisions touched
 
 - **D17 — CLOSED 2026-09-15.** SEC litigation-releases RSS; approved by Faisal Ali, source admin;

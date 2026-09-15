@@ -57,6 +57,16 @@ const NEWS_SOURCE: ActiveSourceVersion = {
   licenceExpiresAt: null,
   cascadeRung: 2,
   authorityTier: 3,
+  // A named person accepted contact with this publisher (D-042). Without it the gate refuses
+  // every live fetch to the source, however well configured it is — see the D-042 tests below.
+  firstContactApproval: {
+    approvedBy: 'A. Approver',
+    role: 'Source admin',
+    approvedOn: '2026-09-14',
+    decision: 'D17',
+  },
+  endpointUrl: 'https://news-example.cr/feed.xml',
+  pollFloorMs: 15 * 60_000,
 };
 
 const FIXTURE_SOURCE: ActiveSourceVersion = {
@@ -509,5 +519,41 @@ describe('the gate is the only issuer', () => {
     walk(root);
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('D-042 — no live request to a publisher nobody accepted contact with', () => {
+  // `SourceVersionService` reads the approval strictly: any missing field resolves the whole
+  // approval to null rather than to a partial one, because a half-filled approval the gate
+  // accepted would be a live request made under a name nobody actually wrote down. So null is
+  // the only shape the gate ever sees for "not properly approved", and it is what is tested.
+  const UNAPPROVED: ActiveSourceVersion = { ...NEWS_SOURCE, firstContactApproval: null };
+
+  it('refuses a source that is fully configured and approved but has no first-contact approval', async () => {
+    // The separation this rule exists for: approving a registry entry says the configuration is
+    // right; accepting first contact says somebody will answer for the requests. One signature
+    // covering both makes the second invisible.
+    const decision = await gateFor(UNAPPROVED).authorise(inputFor());
+
+    expect(decision.authorised).toBe(false);
+    if (decision.authorised) {
+      return;
+    }
+    expect(decision.refusal).toBe('NO_FIRST_CONTACT_APPROVAL');
+    expect(decision.detail).toContain('no named person');
+  });
+
+  it('treats it as a source-level refusal, so it reaches the coverage statement', () => {
+    // Every lead from this source is affected, not one URL. A reviewer reading a narrow result
+    // has to learn that a whole source was excluded and why.
+    expect(isSourceLevelRefusal('NO_FIRST_CONTACT_APPROVAL')).toBe(true);
+  });
+
+  it('does not apply to a fixture source in mock mode, because no publisher is involved', async () => {
+    const fixture: ActiveSourceVersion = { ...FIXTURE_SOURCE, firstContactApproval: null };
+    const decision = await gateFor(fixture, { mode: 'MOCK' }).authorise(
+      inputFor({ sourceId: fixture.sourceId }),
+    );
+    expect(decision.authorised).toBe(true);
   });
 });

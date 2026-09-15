@@ -2101,6 +2101,12 @@
                 "maximum": 86400,
                 "nullable": true
               },
+              "endpointUrl": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 500,
+                "nullable": true
+              },
               "conditionalGet": { "type": "boolean" },
               "userAgentRequired": { "type": "boolean" },
               "policyUrl": {
@@ -2154,6 +2160,7 @@
             "required": [
               "requestCeilingPerSecond",
               "pollFloorSeconds",
+              "endpointUrl",
               "conditionalGet",
               "userAgentRequired",
               "policyUrl",

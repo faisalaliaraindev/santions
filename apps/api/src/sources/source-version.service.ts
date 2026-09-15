@@ -30,6 +30,22 @@ import type { Collection, Db } from 'mongodb';
 export type RegisteredRobotsPosition = 'HONOURED' | 'EXCEPTION_APPROVED' | 'NOT_ESTABLISHED';
 
 /**
+ * Who accepted that this service would begin making requests to a publisher (D17, D-042).
+ *
+ * Not the same as the version's approver. Approving a registry entry says the configuration is
+ * right; this says a named person accepted first contact with a third party who did not ask to
+ * hear from us.
+ */
+export interface FirstContactApproval {
+  readonly approvedBy: string;
+  readonly role: string;
+  /** ISO 8601 date. */
+  readonly approvedOn: string;
+  /** The open decision this approval closes — `D17` for the first one. */
+  readonly decision: string;
+}
+
+/**
  * What an approved source version says, as the fetch gate reads it.
  *
  * Every field here is one `source-content.ts` lists as load-bearing, and every one of them is
@@ -53,6 +69,24 @@ export interface ActiveSourceVersion {
   readonly licenceExpiresAt: string | null;
   readonly cascadeRung: number;
   readonly authorityTier: number;
+  /**
+   * The named approval for the **first live request** to this publisher, or null.
+   *
+   * Null is the honest default and it is what every source carries until somebody signs it. The
+   * gate refuses a live fetch without one (**D-042**), so a source can be fully configured,
+   * approved as a registry entry, and still unreachable until a person accepts contact with the
+   * publisher behind it.
+   */
+  readonly firstContactApproval: FirstContactApproval | null;
+  /**
+   * The feed or endpoint this source is polled at, where its connector needs one.
+   *
+   * Read from `accessPolicy.endpointUrl`. Null for a source that is fetched only by following
+   * links, and the discovery connector refuses such a source rather than inventing a URL for it.
+   */
+  readonly endpointUrl: string | null;
+  /** The publisher's stated minimum interval between polls, in milliseconds. Null when none. */
+  readonly pollFloorMs: number | null;
 }
 
 /**
@@ -111,6 +145,9 @@ export class SourceVersionService implements SourceVersionReader {
       licenceExpiresAt: stringOrNull(content['licenceExpiresAt']),
       cascadeRung: numberOr(content['cascadeRung'], 0),
       authorityTier: numberOr(content['authorityTier'], 5),
+      firstContactApproval: readFirstContactApproval(content['accessPolicy']),
+      endpointUrl: readEndpointUrl(content['accessPolicy']),
+      pollFloorMs: readPollFloorMs(content['accessPolicy']),
     };
   }
 }
@@ -127,4 +164,51 @@ function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+/**
+ * The first-contact approval, read strictly.
+ *
+ * **Every field must be present and non-empty, or the answer is null.** This is the one place in
+ * this file where a partial record must not degrade into a usable one: a half-filled approval
+ * that the gate accepted would be a live request made under a name nobody actually wrote down,
+ * which is precisely what D17 exists to prevent. A malformed approval is no approval.
+ */
+function readFirstContactApproval(value: unknown): FirstContactApproval | null {
+  const policy = asRecord(value);
+  const approval = policy === null ? null : asRecord(policy['firstContactApproval']);
+  if (approval === null) {
+    return null;
+  }
+
+  const approvedBy = stringOrNull(approval['approvedBy']);
+  const role = stringOrNull(approval['role']);
+  const approvedOn = stringOrNull(approval['approvedOn']);
+  const decision = stringOrNull(approval['decision']);
+  if (approvedBy === null || role === null || approvedOn === null || decision === null) {
+    return null;
+  }
+  return { approvedBy, role, approvedOn, decision };
+}
+
+function readEndpointUrl(value: unknown): string | null {
+  const policy = asRecord(value);
+  return policy === null ? null : stringOrNull(policy['endpointUrl']);
+}
+
+function readPollFloorMs(value: unknown): number | null {
+  const policy = asRecord(value);
+  if (policy === null) {
+    return null;
+  }
+  const seconds = policy['pollFloorSeconds'];
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+    ? Math.round(seconds * 1000)
+    : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
