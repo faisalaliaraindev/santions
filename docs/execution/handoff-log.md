@@ -27,6 +27,113 @@ Say what you did about it.
 
 ---
 
+## 2026-09-15 (late) — **Group 0 of the E2E plan**: the API is callable, and two defects the docs were hiding
+
+**Context.** The earlier part of this session built the XML parser, both breakers, the D17 stop
+conditions and the RSS connector. This part made the service **actually usable by a person**, and
+then ran it to find out whether that was true.
+
+---
+
+### The gap was not capability
+
+`ApiKeyService` already did create, verify, rotate, revoke, list and audit, all tested. There was
+simply **no way to reach it** without writing a throwaway script against Mongo — which is what
+`demo-api.mjs` does, and what anyone wanting to try the API had to copy.
+
+**`pnpm key:issue`** fills that. It is a **script and not an endpoint on purpose**:
+`POST /v1/tenant/api-keys` returns 501 because **D-007** defers the commercial self-service layer
+and records that keys are provider-managed this phase. A script an operator runs is what
+provider-managed means; building the endpoint would have quietly closed a decision nobody has
+taken. It imports the **compiled** service rather than reimplementing the hashing, so the key it
+mints is the key the API accepts, and it carries the same local-only guard as `local:bootstrap`.
+
+Also added: a Postman collection and environment, `postman/README.md`, and a "Calling the API"
+section in the root README.
+
+### Then it was run, and it did not work
+
+Both defects are the kind that only surface when you run the thing.
+
+**1. `dev:api` and `dev:worker` could not start at all.** They ran `node dist/main.js` directly and
+nothing loaded `.env`, so the boot-time configuration check refused — correctly — for want of five
+variables. Only `pnpm dev` loaded the file, and it started the API alone. The path documented in
+the README and in `postman/README.md` was broken, and the failure read as a configuration mistake
+by the reader rather than a missing step in the script.
+
+The refusal stays; it is right. A service that starts with a missing session secret generates one,
+and a generated session secret is a session that survives a restart by accident. What was wrong was
+that nothing supplied the values. Both now go through `scripts/dev.mjs`, and **`pnpm dev` runs the
+API and the worker together** — which also keeps the "search sits at QUEUED because nothing is
+consuming" state visible instead of mysterious.
+
+**2. `key:issue` issued keys with no scopes.** The comment claimed empty meant "whatever the roles
+allow". It means **nothing**: scopes narrow a machine key below its roles and never widen it. The
+key created a subject and was then refused the search with `MISSING_SCOPE`. Scopes are now derived
+from the roles, printed on issue, and narrowable with `--scope`. The vocabulary
+(`search:read`, `search:write`, `admin:read`, `admin:write`) was read off `@RequireScope` across
+the controllers rather than invented.
+
+### Verified — against a real stack, not asserted
+
+```
+pnpm local:up && pnpm local:bootstrap     stack healthy, seeded
+pnpm dev                                  API + worker both start
+pnpm key:issue                            key issued, scopes printed
+POST /v1/subjects                         201
+POST /v1/searches                         202
+GET  /v1/searches/{id}                    QUEUED → SUCCEEDED
+GET  /v1/searches/{id}/findings           2 findings, 1 rejected lead
+```
+
+The findings carried bands (`SUPPORTED`), categories (`FRAUD_FINANCIAL_CRIME`), procedural stages
+(`CHARGE_INDICTMENT`) and publishers. `mode: MOCK` throughout. The startup user-agent assertion
+added earlier in this session logs on every boot.
+
+Non-live gate unchanged: lint clean, typecheck clean, format clean, **754 unit**, 29 invariants,
+12 evaluation.
+
+### Found, documented rather than fixed
+
+**The first run returned `NO_MATCHES_FOUND`, and the service was right.** The Windows shell mangled
+`María` into `Mar?a` in the request body; it folded to `mar a` and matched no fixture. Postman
+sends UTF-8 correctly so the collection is fine, but it is now in the troubleshooting table,
+because it generalises: **a name that loses its accents in transit is a name the service will
+honestly report as not found**, and that looks like a matching bug when it is an encoding one a
+layer up.
+
+**The first search also returned `SUCCEEDED` + `NO_MATCHES_FOUND` + `INCOMPLETE`** — the exact
+combination every document warns about. The `noMatchStatement` said what was searched, that both
+languages are unmeasured, and that the Spanish term list is unreviewed. It behaved as designed.
+
+### Left half-done
+
+- **Group 1 is the next work and is untouched**: the seven-rung cascade, making
+  `SourceAdapterSet.newsDiscovery` a list, and wiring `RssNewsDiscoveryAdapter` into the
+  composition root. The connector is built and tested and **nothing calls it**.
+- **The integration and security suites were still not run.** The stack was up this session, so
+  this was possible and was not done. Do it first next session — it is two commands.
+- **`docs/implementation-status.md` is still stale** (lists G0–G3, says the integration and
+  security suites are unimplemented). The README's stale parts were fixed; that file was not.
+
+### Next session should
+
+1. Run `pnpm test:integration` and `pnpm test:security` with the stack up. Two commands, and they
+   are the largest untested surface in the repo.
+2. Build the cascade (Group 1). The parser, both breakers, the stop conditions and the RSS
+   connector are all in place and unwired; the cascade is what joins them to the pipeline.
+3. Then Group 2 — the first live request, which is one `GET /robots.txt`.
+
+### Decisions touched
+
+None closed. **D-007** was read and honoured rather than worked around: key issuance is a script
+because that decision says keys are provider-managed in this phase.
+
+New docs, for a reader who is not an engineer: `docs/SIMPLE-STATUS.md`, `docs/SIMPLE-FLOW.md`,
+`docs/TODO-E2E.md`, `docs/INTEGRATION-AUDIT.md`, `postman/README.md`.
+
+---
+
 ## 2026-09-15 — **Phase E step 3 (part 1)**: the XML parser, the per-domain breaker, the D17 stop conditions, and the trip-wires
 
 **Context.** Step 2 built the fetch gate and opened **D17** — which source is contacted first,
