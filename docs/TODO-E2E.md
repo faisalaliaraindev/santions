@@ -63,6 +63,21 @@ Goal: anyone can drive the whole API from Postman and get real responses with fa
       go wrong.
       _Files:_ `postman/README.md`, and a "Calling the API" section in the root `README.md`
 
+**Verified against a real stack on 2026-09-15**, not assumed: `local:up` → `local:bootstrap` →
+`dev:api` + `dev:worker` → `key:issue` → subject → search → findings. The run returned
+**2 findings and 1 rejected lead**, with bands, categories, procedural stages and publishers.
+
+Two defects were found by running it, and both are fixed:
+
+- **`dev:api` and `dev:worker` could not start.** They ran `node dist/main.js` directly, and
+  nothing loaded `.env` — so the boot-time configuration check refused, correctly, for want of
+  five variables. The documented path was broken and the failure read as the reader's mistake.
+  Both now go through `scripts/dev.mjs`, which loads `.env`; `pnpm dev` runs both together.
+- **`key:issue` issued keys with no scopes.** Scopes narrow a machine key _below_ its roles and
+  never widen it, so an empty list is **nothing**, not everything: the key could create a subject
+  and was then refused the search with `MISSING_SCOPE`. Scopes are now derived from the roles and
+  printed, with `--scope` to narrow further.
+
 **Done when:** a new developer clones the repo and gets a search result in Postman in under ten
 minutes. ✅
 

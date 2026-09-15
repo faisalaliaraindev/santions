@@ -42,6 +42,11 @@ pnpm key:issue --list --tenant tenant-alpha
 pnpm key:issue --revoke <keyId> --reason "rotated"
 ```
 
+**Scopes are derived from the roles**, and the script prints them. Scopes narrow a machine key
+_below_ its roles and never widen it, so a key with no scopes is refused on every scope-gated
+route — `POST /v1/searches` needs `search:write`, the admin routes need `admin:read` /
+`admin:write`. Pass `--scope` only when you want a key that can do less than its role allows.
+
 > `POST /v1/tenant/api-keys` exists and returns **501**. That is not a bug. Decision **D-007**
 > defers the commercial self-service layer, so keys are provider-managed in this phase, and a
 > script an operator runs is what provider-managed means.
@@ -117,7 +122,22 @@ fired, in order). A band on its own cannot be reviewed, only believed.
 | Search stays `QUEUED`       | The worker is not running. `pnpm dev:worker`                      |
 | 503 on `/health/ready`      | Stack not bootstrapped. `pnpm local:up && pnpm local:bootstrap`   |
 | 501 on a reserved path      | Deliberate. See D-007                                             |
+| `MISSING_SCOPE` in the log  | The key was issued with narrower `--scope` than the route needs   |
+| Accented name finds nothing | The request body was not sent as UTF-8 — see the note below       |
 | Connection refused          | API not started. `pnpm dev:api`                                   |
+
+### Accented names and encoding
+
+The seeded fixtures respond to **María Fernanda Solís Rojas**. Postman sends UTF-8 correctly, so
+the collection works as shipped.
+
+If you reproduce a request with `curl` from a Windows shell, the accents can be mangled in
+transit — `María` arrives as `Mar?a`, folds to `mar a`, and matches no fixture. The search then
+returns `NO_MATCHES_FOUND`, which looks like a bug in matching and is really an encoding problem
+one layer up. Send the body from a file with `--data-binary @body.json` if you need to.
+
+That is worth knowing beyond the fixtures: a name that loses its accents in transit is a name the
+service will honestly report as not found.
 
 ---
 

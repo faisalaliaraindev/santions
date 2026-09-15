@@ -76,6 +76,48 @@ const ROLE_HELP = {
   platform_admin: 'platform administration',
 };
 
+/**
+ * Every scope the API actually gates on.
+ *
+ * Found by reading `@RequireScope` across the controllers rather than invented here. A scope this
+ * list does not contain is a scope no route checks, so issuing one would be issuing a permission
+ * that does nothing — which is worse than refusing it, because it reads as granted.
+ */
+const SCOPES = ['search:read', 'search:write', 'admin:read', 'admin:write'];
+
+/**
+ * The scopes a set of roles should get by default.
+ *
+ * **Scopes narrow a machine key below its roles; they never widen it.** So the safe default is
+ * the scopes the roles could actually use — not everything, and emphatically not nothing. A key
+ * with no scopes is refused on every scope-gated route, which is what this script did before and
+ * what made a working API look broken.
+ *
+ * Deliberately not "all four scopes for every key": a `viewer` key that carried `search:write`
+ * would be a read-only credential that can start work.
+ */
+function scopesForRoles(roles) {
+  const scopes = new Set();
+  for (const role of roles) {
+    // Anything that can read results can read searches.
+    scopes.add('search:read');
+    if (role === 'analyst') {
+      scopes.add('search:write');
+    }
+    if (['source_admin', 'taxonomy_admin', 'tenant_admin', 'auditor'].includes(role)) {
+      scopes.add('admin:read');
+    }
+    if (['source_admin', 'taxonomy_admin', 'tenant_admin'].includes(role)) {
+      scopes.add('admin:write');
+    }
+    if (['platform_operator', 'platform_admin'].includes(role)) {
+      scopes.add('admin:read');
+      scopes.add('admin:write');
+    }
+  }
+  return [...scopes];
+}
+
 /** Minimal .env loader — the same six variables every other script here reads. */
 function loadEnv() {
   try {
@@ -110,6 +152,7 @@ Options
   --tenant <id>      Tenant the key belongs to        (default: tenant-alpha)
   --env <name>       sandbox | live                   (default: sandbox)
   --role <name>      Role to grant, repeatable        (default: analyst)
+  --scope <name>     Narrow the scopes, repeatable    (default: derived from roles)
   --label <text>     What this key is for             (default: generated)
   --expires <days>   Expire after N days              (default: never)
   --list             List this tenant's keys, no secrets
@@ -121,6 +164,10 @@ Roles
 ${Object.entries(ROLE_HELP)
   .map(([role, help]) => `  ${role.padEnd(18)} ${help}`)
   .join('\n')}
+
+Scopes
+  Scopes narrow a machine key below its roles and never widen it. By default a key gets
+  the scopes its roles could use: ${SCOPES.join(', ')}.
 
 The secret prints once. Only its hash is stored; there is no way to read it back.
 `);
@@ -232,15 +279,40 @@ async function main() {
         ? String(arg('label'))
         : `issued by key:issue ${new Date().toISOString()}`;
 
+    // Explicit `--scope` wins; otherwise derive from the roles. Repeatable, like `--role`.
+    const explicitScopes = process.argv.reduce((acc, value, index) => {
+      if (value === '--scope') {
+        const scope = process.argv[index + 1];
+        if (typeof scope === 'string' && !scope.startsWith('--')) {
+          acc.push(scope);
+        }
+      }
+      return acc;
+    }, []);
+    const scopes = explicitScopes.length > 0 ? explicitScopes : scopesForRoles(roles);
+
+    const unknownScopes = scopes.filter((scope) => !SCOPES.includes(scope));
+    if (unknownScopes.length > 0) {
+      throw new Error(
+        `Unknown scope(s): ${unknownScopes.join(', ')}.
+Known scopes: ${SCOPES.join(', ')}`,
+      );
+    }
+
     const issued = await service.create({
       tenantId,
       environment,
       label,
       roles,
-      // Scopes narrow a key *within* its roles. Empty means "whatever the roles allow", which is
-      // the right default for a key a person is about to paste into Postman: narrowing it here
-      // would produce confusing 403s that look like a bug in the API.
-      scopes: [],
+      // Scopes narrow a machine key *below* its roles; they never widen it. Empty is not
+      // "everything the roles allow" — it is **nothing**, and a key issued with no scopes gets
+      // `MISSING_SCOPE` on every scope-gated route. That is the correct behaviour and it was
+      // this script that was wrong: it shipped with `scopes: []` and produced a key that could
+      // create a subject and then be refused the search, which reads as a bug in the API.
+      //
+      // So the default is derived from the roles: a key gets the scopes its roles could use, and
+      // nothing beyond them. `--scope` narrows it further for a key that should only read.
+      scopes,
       createdBy: 'script:key:issue',
       expiresAt,
     });
@@ -249,6 +321,7 @@ async function main() {
     log.info(`tenant       ${tenantId}`);
     log.info(`environment  ${environment}`);
     log.info(`roles        ${roles.join(', ')}`);
+    log.info(`scopes       ${scopes.join(', ')}`);
     log.info(`keyId        ${issued.keyId}`);
     log.info(`expires      ${expiresAt === null ? 'never' : expiresAt.toISOString()}`);
     console.log('');

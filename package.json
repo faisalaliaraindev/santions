@@ -32,8 +32,8 @@
     "demo:api": "pnpm build && node scripts/demo-api.mjs",
     "demo:zquence": "echo \"[pending G9] zquence demo not implemented\" && exit 1",
     "lexicon:audit": "vitest run --project unit packages/domain/test/taxonomy/lexicon-audit.test.ts",
-    "dev:api": "pnpm build && node apps/api/dist/main.js",
-    "dev:worker": "pnpm build && node apps/api/dist/worker-main.js",
+    "dev:api": "node scripts/dev.mjs --only api",
+    "dev:worker": "node scripts/dev.mjs --only worker",
     "bench:search-index": "pnpm build && node scripts/workload/search-index.mjs"
   },
   "devDependencies": {
