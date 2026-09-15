@@ -233,6 +233,54 @@ everywhere else. The SEC's two feed URLs were verified by desk research on 2026-
 only addresses recorded. The next session should ask the user to name the CR publishers they want
 and establish each endpoint before writing its record.
 
+### Second addendum, same session — D-044, the scope is worldwide
+
+The policy owner revised **D1** (closed 2026-09-11 as Costa Rica, es + en) to **worldwide**. Recorded
+as **D-044**, with what it does and does not change spelled out there. The short version for a cold
+reader:
+
+- FR-05's permission rule is unchanged: "EU", "LATAM", "GLOBAL" are still not source permissions,
+  and every source still declares the countries it actually covers.
+- **D-042 is unchanged and is the mechanism that makes worldwide safe**: more sources to approve,
+  one named approval at a time, not a blanket permission. It was generalised _before_ this decision
+  landed rather than after, which is why the widening costs nothing in safety.
+- **FR-03 is unchanged and this is the real cost.** No language has a measured recall figure, so the
+  coverage statement must now say so in more languages than before, and the temptation to let source
+  count stand in for recall gets stronger with every source approved. G10 measures.
+- **D14 and D15 stop bounding the product.** Both are Costa Rica-specific. They remain the answer
+  for CR subjects and are no longer the ceiling on everything.
+
+Corrected while there: `HTTP_EVIDENCE_FETCH_DESCRIPTOR` declared `jurisdictions: ['CR']`. Wrong under
+the old decision too — a transport is not jurisdiction-bound, and naming a country made it look like
+Costa Rican coverage, which is a stronger and falser claim than no claim. Now empty; a coverage view
+groups by the **source's** countries.
+
+**Left undone by D-044 and listed in it so it is not mistaken for done:** the bootstrap still seeds
+`CR` only, `capabilityCoverage` holds CR rows only, and no name-frequency distribution is loaded for
+any country (which was already true, and is now the general case rather than one gap).
+
+### The blocker the next session starts on
+
+**The user will supply the source list.** They asked to give it rather than have it researched, in
+this shape:
+
+```
+source name | feed or endpoint URL | countries | languages | kind (news / gazette / court / regulator)
+```
+
+Nothing further should be written into the registry until it arrives: a guessed feed URL in a source
+version is a fabricated fact in the record an approver signs, and the two SEC feed URLs are the only
+addresses this project has established.
+
+**The connector was deliberately not started without it**, and the reason is not caution. The
+`NewsDiscoveryPort` shape is one adapter per source, and `SourceAdapterSet.newsDiscovery` is a single
+nullable port that `search-pipeline.service.ts` reads at rung 2. Turning that into the real
+seven-rung cascade over _many_ approved sources is the refactor step 3 actually is — and its shape
+depends on whether the supplied sources are RSS, JSON (GDELT-style), or search endpoints (SearXNG),
+because those are three connectors and not one. Building an RSS-only cascade before seeing the list
+risks building the wrong seam and then widening it under pressure, which is how the weaker of two
+HTTP paths gets created.
+
 ### Decisions touched
 
 - **D17 — CLOSED 2026-09-15.** SEC litigation-releases RSS; approved by Faisal Ali, source admin;
