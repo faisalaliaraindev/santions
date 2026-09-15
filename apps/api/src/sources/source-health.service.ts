@@ -39,31 +39,46 @@ import type { Collection, Db } from 'mongodb';
 
 import {
   accessCoverageOutcome,
-  classifyFailure,
   decideSourceAccess,
   engageKillSwitch,
   newSourceHealth,
-  observeFailure,
   observeSuccess,
   releaseKillSwitch,
   rollBudgets,
   sinceSuspendedNote,
   spendAccess,
+  applyObservedFailure,
+  NO_STOP_CONDITIONS,
   type FailureSignal,
   type SourceAccessDecision,
   type SourceBudgets,
   type SourceCoverageOutcome,
   type SourceHealth,
+  type StopConditionPolicy,
 } from '@erly/adverse-domain';
 
 import { ApiException } from '../common/api-exception.js';
 import { AuditService } from '../persistence/audit.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';
 
+import { PLATFORM_AUDIT_TENANT_ID, SYSTEM_ACTOR } from './platform-audit.js';
+
 /** The stored shape. `_id` is the `sourceId`, so there is one document per source by construction. */
 interface SourceHealthRecord extends Omit<SourceHealth, 'sourceId'> {
   readonly _id: string;
   readonly updatedAt: Date;
+  /**
+   * Consecutive server errors, for the D17 stop conditions.
+   *
+   * Deliberately **not** on the `SourceHealth` domain document. FR-06's breaker counts
+   * qualifying failures of every class, and this counts one narrow thing a *recorded per-source
+   * policy* asks about — a publisher's site failing repeatedly. Putting it on the domain
+   * document would make it look like part of the breaker, and the next person would wire it
+   * into a decision the FR-06 table already makes differently.
+   *
+   * Absent on documents written before stop conditions existed, and read as zero.
+   */
+  readonly consecutiveServerErrors?: number;
 }
 
 /**
@@ -80,6 +95,13 @@ interface VersionFacts {
   readonly licenceExpiresAt: string | null;
   readonly sourceName: string;
   readonly cascadeRung: number;
+  /**
+   * The escalations the approver recorded on this version (D17), or none.
+   *
+   * Read fresh on every failure, like the budgets and for the same reason: a stop condition
+   * added by an administrator this morning must apply to the run that is in flight now.
+   */
+  readonly stopConditions: StopConditionPolicy;
 }
 
 export interface AccessCheck {
@@ -171,7 +193,22 @@ export class SourceHealthService {
     };
   }
 
-  /** Fold in a failure, classifying the observed signal through the FR-06 table on the way. */
+  /**
+   * Fold in a failure, classifying the observed signal through the FR-06 table on the way, and
+   * apply whatever **stop conditions** the source's approved version records (D17).
+   *
+   * The two are evaluated together and in that order, because a stop condition is an escalation
+   * of the classification rather than a replacement for it: the FR-06 class is what the breaker,
+   * the retry policy and the coverage record read, and the stop condition only decides whether
+   * this source also stops entirely. `evaluateStopConditions` can return "halt" or "nothing to
+   * add" and has no third answer, so nothing here can make a refused request permitted.
+   *
+   * A halt is implemented by engaging the kill switch. That is not a shortcut — it is the
+   * mechanism D5 already built for exactly this shape: effective immediately, effective mid-run
+   * because access is rechecked at the point of use, reason mandatory and carried into the
+   * coverage statement, and **four eyes to release**, which is what "requires fresh approval"
+   * has to mean if it is to mean anything.
+   */
   async recordFailure(input: {
     readonly sourceId: string;
     readonly signal: FailureSignal;
@@ -179,17 +216,66 @@ export class SourceHealthService {
   }): Promise<SourceHealth> {
     const facts = await this.versionFacts(input.sourceId);
     const current = await this.load(input.sourceId, facts, input.now);
-    const failureClass = classifyFailure(input.signal).failureClass;
-    const next = observeFailure({ health: current, failureClass, now: input.now });
+
+    // One pure composition, shared with the trip-wire harness, so the test and the service run
+    // the same code rather than two implementations that agree until they do not.
+    const applied = applyObservedFailure({
+      health: current,
+      signal: input.signal,
+      conditions: facts.stopConditions,
+      consecutiveServerErrors: await this.serverErrorStreak(input.sourceId),
+      now: input.now,
+      haltedBy: SYSTEM_ACTOR,
+    });
+    const next = applied.health;
 
     if (next.breaker === 'OPEN' && current.breaker !== 'OPEN') {
       this.logger.warn(
-        `${input.sourceId}: circuit breaker opened after ${failureClass}. ` +
+        `${input.sourceId}: circuit breaker opened after ${applied.failureClass}. ` +
           `Requests are held; every run that wanted this source reports a coverage gap.`,
       );
     }
-    await this.save(next, input.now);
-    return next;
+
+    if (!applied.halted) {
+      await this.save(next, input.now, undefined, applied.consecutiveServerErrors);
+      return next;
+    }
+
+    this.logger.error(
+      `${input.sourceId}: HALTED by stop condition ${applied.verdict.reason ?? 'HALT'}. ` +
+        `${applied.verdict.detail} No further request is made to this source.`,
+    );
+
+    return this.transactions.run(
+      async (session) => {
+        await this.save(next, input.now, session, applied.consecutiveServerErrors);
+        await this.audit.append(
+          {
+            // A halt has no tenant: nobody asked for it. See `platform-audit.ts`.
+            tenantId: PLATFORM_AUDIT_TENANT_ID,
+            actor: { type: 'SYSTEM', subject: SYSTEM_ACTOR, clientId: null },
+            action: 'source:stop_condition_halt',
+            target: { type: 'SourceHealth', id: input.sourceId, version: facts.version },
+            reason: next.killSwitch?.reason ?? applied.verdict.detail,
+            correlationId: null,
+            result: 'DENIED',
+            now: input.now,
+          },
+          session,
+        );
+        return next;
+      },
+      { name: 'sourceHealth.stopCondition' },
+    );
+  }
+
+  /** The stored consecutive-server-error streak, or zero for a source never observed failing. */
+  private async serverErrorStreak(sourceId: string): Promise<number> {
+    const record = await this.health.findOne(
+      { _id: sourceId },
+      { projection: { consecutiveServerErrors: 1 } },
+    );
+    return record?.consecutiveServerErrors ?? 0;
   }
 
   async recordSuccess(input: {
@@ -199,7 +285,10 @@ export class SourceHealthService {
     const facts = await this.versionFacts(input.sourceId);
     const current = await this.load(input.sourceId, facts, input.now);
     const next = observeSuccess({ health: current, now: input.now });
-    await this.save(next, input.now);
+    // The streak resets here as well as in `recordFailure`: a success is what ends a run of
+    // server errors, and a counter that only ever reset on a *different kind* of failure would
+    // eventually halt a source that recovered between outages.
+    await this.save(next, input.now, undefined, 0);
     return next;
   }
 
@@ -388,11 +477,18 @@ export class SourceHealthService {
     health: SourceHealth,
     now: Date,
     session?: Parameters<AuditService['append']>[1],
+    consecutiveServerErrors?: number,
   ): Promise<void> {
     const { sourceId, ...rest } = health;
     await this.health.updateOne(
       { _id: sourceId },
-      { $set: { ...rest, updatedAt: now } },
+      {
+        $set: {
+          ...rest,
+          updatedAt: now,
+          ...(consecutiveServerErrors === undefined ? {} : { consecutiveServerErrors }),
+        },
+      },
       { upsert: true, ...(session === undefined ? {} : { session }) },
     );
   }
@@ -417,6 +513,7 @@ export class SourceHealthService {
         licenceExpiresAt: null,
         sourceName: sourceId,
         cascadeRung: 0,
+        stopConditions: NO_STOP_CONDITIONS,
       };
     }
 
@@ -433,8 +530,48 @@ export class SourceHealthService {
       licenceExpiresAt: stringOrNull(content['licenceExpiresAt']),
       sourceName: stringOrNull(content['sourceName']) ?? sourceId,
       cascadeRung: numberOrNull(content['cascadeRung']) ?? 0,
+      stopConditions: readStopConditions(content['accessPolicy']),
     };
   }
+}
+
+/**
+ * The stop conditions an approver recorded, read defensively from the version's content.
+ *
+ * Defensive because this is registry data that predates the field: a version approved before
+ * stop conditions existed has no `accessPolicy` at all, and the honest reading of its absence is
+ * "no escalation", not "unknown". Every field that cannot be read falls back to the *less*
+ * restrictive value, which is the safe direction here and only here — a stop condition invented
+ * out of a malformed record would halt a working source on a value nobody approved, and FR-06's
+ * table still governs the failure either way.
+ */
+function readStopConditions(value: unknown): StopConditionPolicy {
+  const policy = asRecord(value);
+  const conditions = policy === null ? null : asRecord(policy['stopConditions']);
+  if (conditions === null) {
+    return NO_STOP_CONDITIONS;
+  }
+
+  const statuses = Array.isArray(conditions['haltOnStatuses'])
+    ? conditions['haltOnStatuses'].filter(
+        (entry): entry is number => typeof entry === 'number' && Number.isFinite(entry),
+      )
+    : [];
+  const cooldownSeconds = numberOrNull(conditions['rateLimitCooldownSeconds']) ?? 0;
+
+  return {
+    haltOnStatuses: statuses,
+    haltOnRateLimit: conditions['haltOnRateLimit'] === true,
+    rateLimitCooldownMs: Math.round(cooldownSeconds * 1000),
+    serverErrorStreakToHalt: numberOrNull(conditions['serverErrorStreakToHalt']),
+    requiresFreshApprovalOnHalt: conditions['requiresFreshApprovalOnHalt'] === true,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function numberOrNull(value: unknown): number | null {

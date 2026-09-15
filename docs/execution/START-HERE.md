@@ -9,21 +9,28 @@ of previous sessions. It is deliberately short.
 
 > **Phase E — Query planning, discovery cascade and fetch (gate G6)**
 >
-> 🔧 **Current work: the live-source path. Steps 1 and 2 of eight are done.**
-> `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and tested, and
-> `FetchGateService` now **derives** every `FetchAuthorisation` field. The fabricated record in
-> `search-pipeline.service.ts` is gone: it used to assert `urlPolicyPassed: true` and
-> `ssrfValidated: true` without either having been run, and `egressIdentityId: 'mock-egress-1'`
-> into attribution. The gate is the only issuer, enforced by a scan test (**D-036**).
-> **The next concrete action is step 3: the discovery connectors and the seven-rung cascade** —
-> and the first thing it decides is the XML parser dependency, explicitly, because a parser that
-> resolves entities is an XXE hole pointed at a third party's feed.
+> 🔧 **Current work: the live-source path. Steps 1 and 2 of eight are done, and step 3 has its
+> foundations.** `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and
+> tested, and `FetchGateService` **derives** every `FetchAuthorisation` field (**D-036**).
 >
-> **A new decision is open and it blocks a live call: D17 — the first deliberate live request.**
-> Which source, under whose named approval, at what rate, on what stop condition. Nothing is
-> technically blocking a live request any more; what is blocking it is that nobody has decided
-> it. See `../open-decisions.md`. **D15 was re-raised on 2026-09-14** — untouched since it was
-> raised, and step 3's rung tiers encode its answer.
+> **D17 closed on 2026-09-15**, so this project now has a decided first live source: the **SEC
+> litigation-releases RSS feed**, approved by name (Faisal Ali, source admin), one conditional GET
+> every fifteen minutes against a recorded 10 req/s ceiling, on four stop conditions that are each
+> **proved to fire** by `apps/api/test/fetch-tripwires.test.ts`.
+>
+> **No live source has been contacted by this project. That is still true.** The source version is
+> written and schema-checked (`apps/api/src/sources/registry/sec-litigation-releases.ts`) and has
+> **not** been proposed, approved or activated — and it carries `robotsPosition: NOT_ESTABLISHED`,
+> which the fetch gate refuses, so the feed cannot be polled until a first `GET /robots.txt` has
+> actually happened and the position has been updated on what it said. That ordering is deliberate.
+>
+> **What step 3 built so far, and what it did not.** The XML parser is decided, built and tested —
+> `fast-xml-parser@4.5.7` pinned exactly, behind a DOCTYPE gate this project owns rather than a
+> parser option (**D-039**, and **D18** is newly open about v5). The **per-domain breaker** exists
+> beside the per-source one, because a discovery source is one agreement and a hundred publishers
+> (**D-040**). **Stop conditions** escalate FR-06 per source and can only ever stop (**D-041**).
+> **The rungs and the connectors themselves are not built** — that is exactly where step 3 resumes,
+> and it is the next concrete action.
 >
 > Brief: [`phase-e.md`](./phase-e.md) — **expanded into a full brief on 2026-09-14**. It carries
 > an execution order that deliberately differs from the `E1`–`E6` step numbering, and says why.
@@ -33,9 +40,9 @@ of previous sessions. It is deliberately short.
 > is what defeats DNS rebinding, and screening before a `fetch` call would not. Wire bytes and
 > decompressed bytes are separate budgets, because they defend against different attacks. Robots
 > `UNKNOWN` **refuses**: an outage at the publisher is not consent. And **a gate refusal is never
-> recorded against source health** (**D-035**) — a robots disallow classifies as `HARD_BLOCK`,
-> which suspends, so recording one would suspend a working news feed because a single article it
-> linked to was disallowed.
+> recorded against source health** (**D-035**). Rights are checked **before** the domain gate and
+> without spending, so an operator's kill switch is what a refusal reports rather than a
+> publisher's cooldown — found by the trip-wire harness, not by reasoning.
 >
 > **`pnpm demo:api` and the whole test suite still run without any live call.** The real
 > transport is constructed only by the live composition root, and every test in the fetch suite
@@ -77,6 +84,10 @@ of previous sessions. It is deliberately short.
 > coverage**); D3 the FR-02 association graph, where a `PARTIAL` identity grade attaches nothing;
 > D4 the traversal bounds as policy-version configuration pinned to the run; D5 source health;
 > D6 the lexicon and its activation audit. Decisions D-018 through D-033.
+>
+> **D15 remains open and untouched**, and it is now the nearer blocker: the cascade's rung tiers —
+> step 3's remaining work — encode its answer. D17 closing does **not** cover it, because a Costa
+> Rican judicial portal is a different publisher and needs its own named approval.
 >
 > **Two decisions are due at G6 and both are open.** Check
 > [`../open-decisions.md`](../open-decisions.md) rather than a phase brief for what is actually
@@ -135,7 +146,7 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **644 passed, 29 passed, 12 passed**.
+Expected today: clean, clean, **726 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
 **206 integration** tests and `pnpm test:security` **106 security** tests.

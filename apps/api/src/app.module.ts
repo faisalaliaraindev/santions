@@ -59,6 +59,7 @@ import {
   SOURCE_ADAPTERS,
   type SourceAdapterSet,
 } from './sources/sources.registry.js';
+import { DomainHealthService } from './sources/domain-health.service.js';
 import { SourceHealthService } from './sources/source-health.service.js';
 import { TransactionRunner } from './persistence/transaction.runner.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
@@ -210,6 +211,16 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [MONGO_DB, AuditService, TransactionRunner],
     },
     {
+      // The per-domain half of FR-06's reliability controls (D-040). Separate from source
+      // health because a discovery source is one agreement and a hundred publishers: when one
+      // of those publishers refuses us, the fact belongs to the publisher, and the per-source
+      // breaker has nowhere to put it that is not a lie about the feed.
+      provide: DomainHealthService,
+      useFactory: (db: Db, audit: AuditService, transactions: TransactionRunner) =>
+        new DomainHealthService(db, audit, transactions),
+      inject: [MONGO_DB, AuditService, TransactionRunner],
+    },
+    {
       provide: TransactionRunner,
       useFactory: (client: MongoClient) => new TransactionRunner(client),
       inject: [MONGO_CLIENT],
@@ -273,7 +284,11 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       // the mode rule — a mock is unreachable in live mode — is a single rule, and six
       // factories would be six places to get it right. See `sources/sources.registry.ts`.
       provide: SOURCE_ADAPTERS,
-      useFactory: (config: AppConfig, sourceHealth: SourceHealthService): SourceAdapterSet =>
+      useFactory: (
+        config: AppConfig,
+        sourceHealth: SourceHealthService,
+        domainHealth: DomainHealthService,
+      ): SourceAdapterSet =>
         buildSourceAdapters({
           mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
           companiesHouseApiKey: config.sources.companiesHouseApiKey,
@@ -282,8 +297,11 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           // is what makes the D5 kill switch effective mid-run (T36). Without it the adapter is
           // not constructed at all.
           sourceAccess: sourceHealth,
+          // And the per-domain breaker, on the same rule: without it the adapter cannot notice
+          // a publisher refusing it, so it is not constructed either (D-040).
+          domainAccess: domainHealth,
         }),
-      inject: [APP_CONFIG, SourceHealthService],
+      inject: [APP_CONFIG, SourceHealthService, DomainHealthService],
     },
     {
       provide: IndexerService,
@@ -592,6 +610,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         adminRecords: VersionedRecordService,
         capabilities: CapabilityCoverageService,
         sourceHealth: SourceHealthService,
+        domainHealth: DomainHealthService,
+        config: AppConfig,
       ) =>
         new StartupService(
           sessions,
@@ -610,6 +630,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
           adminRecords,
           capabilities,
           sourceHealth,
+          domainHealth,
+          config,
         ),
       inject: [
         SessionService,
@@ -628,6 +650,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         VersionedRecordService,
         CapabilityCoverageService,
         SourceHealthService,
+        DomainHealthService,
+        APP_CONFIG,
       ],
     },
 

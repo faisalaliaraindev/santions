@@ -27,6 +27,192 @@ Say what you did about it.
 
 ---
 
+## 2026-09-15 — **Phase E step 3 (part 1)**: the XML parser, the per-domain breaker, the D17 stop conditions, and the trip-wires
+
+**Context.** Step 2 built the fetch gate and opened **D17** — which source is contacted first,
+under whose approval, at what rate, on what stop condition. This session closed D17, built the
+three things it needed underneath it, and proved each stop condition fires. **No live request has
+been made. That claim is still true.**
+
+**Read this first if you are picking up cold:** the next concrete action is at the bottom.
+
+---
+
+### What was decided, and what that cost
+
+Three decisions, written up in full in `docs/decisions.md`:
+
+**D-039 — `fast-xml-parser@4.5.7`, pinned exactly, behind a DOCTYPE gate this project owns.** The
+two RSS rungs need a parser and a parser pointed at a stranger's document is an XXE hole and a
+billion-laughs hole. Both attacks **require a DTD**, so the defence is not a parser option: before
+the library is called, `apps/api/src/sources/parse/xml.ts` scans the document and refuses **any**
+markup declaration. The scan is a scanner and not `includes('<!DOCTYPE')`, because a feed that
+quotes HTML inside CDATA legitimately contains that string and refusing it would drop real
+articles. Nine tests assert the gate **without touching the library**, which is the point — a
+defence resting on `processEntities: false` stops meaning anything the day an upgrade changes what
+the flag does.
+
+**Not v5.** Verified 2026-09-15 against the registry: 4.5.7 declares one runtime dependency
+(`strnum`), 5.11.1 declares six, five of them created in 2026 with thin adoption, one
+(`@nodable/entities`) pointing at a GitHub org whose repo name does not match the package. Same
+maintainer, so a modularisation and not an injection — but worth looking at before it is taken.
+That is now **open decision D18**. The lockfile diff was checked: exactly two packages added,
+`fast-xml-parser@4.5.7` and `strnum@1.1.2`.
+
+**D-040 — two breakers.** FR-06 asks for per source **and** per domain; D5 built per-source only.
+The gap is real: a discovery source hands us links to a hundred publishers it does not speak for,
+and when one of them refuses us, recording it against the feed suspends a working feed while
+recording it nowhere keeps us calling a host that has said no. `domainHealth` is now a second
+shared document keyed on the **registrable domain**. Suspension is sticky (released by an
+operator); degradation expires on the publisher's own clock; a success closes the breaker and
+deliberately does not clear a cooldown.
+
+**D-041 — stop conditions, which closed D17.** `accessPolicy.stopConditions` on the approved
+source version, applied by `SourceHealthService.recordFailure`. The invariant: **a stop condition
+can only ever stop** — never permits what FR-06 refused, never lowers a class. A halt is the D5
+kill switch, because it is already effective immediately, effective mid-run, reason-mandatory, and
+**four eyes to release**, which is what "requires fresh approval" has to mean.
+
+---
+
+### Did
+
+- `pnpm --filter @erly/adverse-api add -E fast-xml-parser@4.5.7`. Lockfile verified: two packages.
+- **`apps/api/src/sources/parse/xml.ts`** — the one XML module. `findMarkupDeclaration` (the gate),
+  `parseXmlDocument`, `decodeXml` (honours a declared `ISO-8859-1`, which CR and ES publishers
+  still serve — decoding one as UTF-8 silently costs recall on accented names), and `parseFeed`
+  for RSS 2.0 and Atom 1.0. An unrecognised root returns `UNRECOGNISED`, **never an empty feed**,
+  because "zero items" and "I did not understand this" are the two facts T84 exists to keep apart.
+- **`packages/domain/src/reliability/registrable-domain.ts`** — the breaker key. A rule, not the
+  Public Suffix List (a weekly-changing data file whose npm distributions this project has not
+  reviewed). Where the rule is wrong it is wrong **broader** than the truth, which costs coverage
+  visibly rather than letting us call a publisher who refused us.
+- **`packages/domain/src/reliability/domain-health.ts`** — the per-domain breaker, pure, reading
+  FR-06's table through the same two predicates `source-health.ts` uses. Nothing restated.
+- **`packages/domain/src/reliability/stop-conditions.ts`** — `evaluateStopConditions` and
+  `applyObservedFailure`. The second is the composition `SourceHealthService.recordFailure` runs
+  **and** the trip-wire harness runs, deliberately: a harness that re-composed those four steps
+  would pass whenever the two implementations agreed, including when both were wrong.
+- **`apps/api/src/sources/domain-health.service.ts`** — persistence for the above, plus manual
+  suspend (one person) and release (four eyes when a person engaged it).
+- **`apps/api/src/sources/platform-audit.ts`** — `__platform__`, the reserved audit trail for
+  cross-tenant records. An automatic halt has no tenant; writing it into whichever customer's run
+  observed it would put a cross-tenant fact in one customer's chain, and dropping it would leave a
+  service that stopped calling a source and cannot say why.
+- **`packages/contracts` — `sourceAccessPolicySchema`**, optional on source content: the ceiling,
+  the poll floor, conditional GET, the user-agent requirement, the policy summary in the approver's
+  own words, the stop conditions, and `firstContactApproval`. `pnpm openapi:generate` re-run.
+- **`apps/api/src/sources/registry/sec-litigation-releases.ts`** — the D17 source version content,
+  written down so the record an approver signs can be read in a diff. **It is a proposal, not an
+  activation.**
+- **`assertOutboundUserAgent`** in `egress-identity.ts`, called by `StartupService` **before any
+  index**: a live process with no honest user agent now refuses to boot, rather than starting and
+  reporting fetching as quietly unavailable.
+- Wired the domain breaker into `HttpEvidenceFetchAdapter` and made `buildSourceAdapters` refuse to
+  construct the live adapter without it, on the same rule as the contact URL.
+
+### Verified — the numbers, not "tests pass"
+
+```
+pnpm lint          clean
+pnpm typecheck     clean
+pnpm test:unit     726 passed (39 files)   — was 644 (33)
+pnpm test:invariants   29 passed
+pnpm test:evaluation   12 passed
+```
+
+New tests: 82 — 22 XML parse, 17 domain health, 14 stop conditions, 10 registrable domain, 10
+trip-wires, 9 SEC source config.
+
+**`pnpm test:integration` and `pnpm test:security` were NOT run** — they need the stack up
+(`pnpm local:up && pnpm local:bootstrap`) and it was not started this session. They are the suites
+that would exercise `DomainHealthService` and the halt path **against Mongo**, which is the gap
+below.
+
+### Found
+
+**1. A real ordering bug, found by the trip-wire harness rather than by reasoning.** The first
+wiring put the domain gate ahead of the source rights check. A 403 halted the source correctly —
+and the _next_ request then reported "sec.gov is in a cooldown", hiding the halt an operator would
+be asked about. Fixed: a **non-spending** rights check now runs first, then the publisher, then
+robots, then the spending check. D5's ordering principle (rights, then health, then economics)
+holds across both breakers, not only inside one. This is why the harness was worth building before
+the connectors and not after.
+
+**2. The plan asked for trip-wires "against a controlled / self-hosted target". That is impossible
+by design, and the design is right.** A self-hosted target lives at `127.0.0.1` or a private
+address, and the fetch path refuses both twice over: `screenUrl` permits https on port 443 alone
+and rejects loopback literals, and `screeningLookup` refuses any host that _resolves_ privately,
+inside the connection's own lookup (D-034). The only target the real transport can reach is a real
+third party — which is the thing the trip-wires exist to make safe. So the controlled target is an
+injected `HttpTransport`, and the honesty rests on where the seam is: everything above the socket
+is the real adapter, the real order of operations, the real FR-06 classification, and the same pure
+composition the live service runs. The harness header says all of this, including what it does
+**not** prove.
+
+**3. `isServerError` and FR-06 disagree about 500, and FR-06 is left alone.** `classifyFailure`
+treats 502/503/504 as `TRANSIENT_NETWORK` and 500 falls through to the non-retrying
+`CONTENT_ERROR` default. The stop-condition streak counts 500 as a server error anyway, because a
+publisher returning 500 repeatedly is a publisher whose site is down whatever we retry. Not
+reconciled, deliberately — changing the FR-06 table to make a streak counter tidier is the wrong
+direction of fix.
+
+### Left half-done
+
+- **Step 3's actual subject — the rungs and the connectors — is not started.** The parser exists
+  and nothing calls it. Rungs 0–7, Google News RSS, Bing News RSS, GDELT and SearXNG are all still
+  to write. This session built the three things step 3 needed underneath it, and D17 needed closing
+  before any of them could be pointed anywhere.
+- **The halt path is not tested against Mongo.** `applyObservedFailure` is proved pure and proved
+  through the adapter; that `SourceHealthService` persists the kill switch and the platform audit
+  entry in one transaction is **FI-20** and belongs in `tests/integration/`. Write it before the
+  first live poll, not after.
+- **There is no operator view over `domainHealth`.** A domain the FR-06 table suspends can only be
+  released through the service, and no controller exposes it. That is a dead end for an operator
+  and it needs a route. `DomainHealthService.suspend`/`release` exist and are ready for one.
+- **The SEC source version is not in the registry.** It is a TypeScript record checked against the
+  schema. Proposing, approving and activating it is the source admin's act through
+  `/v1/admin`, and it deliberately carries `robotsPosition: NOT_ESTABLISHED` — which the fetch gate
+  refuses — so the feed cannot be polled until the robots read has happened and the position has
+  been updated on what it actually said.
+
+### Next session should
+
+**The user's stated goal is a live adverse search driven from Postman.** The shortest honest path
+to it, in order:
+
+1. **Build the discovery connector for the SEC RSS feed** and rungs 0–7 of the FR-05 cascade
+   (step 3 proper). The parser, both breakers and the stop conditions are in place; what is
+   missing is the thing that turns a feed into `Lead`s and the cascade that logs each rung and
+   descends on its own stated failure. Reaching rung 7 with nothing produces `NO_MATCHES_FOUND`
+   with `INCOMPLETE` coverage, never a clean result.
+2. **Write the FI-20 integration test** (the halt persists, with its audit entry, in one
+   transaction) before anything is polled live.
+3. **Then Phase B of the live plan, which is one request**: propose → approve → activate the SEC
+   source version, then `GET https://www.sec.gov/robots.txt`. Record the result as the **D6**
+   evidence for this source and update `robotsPosition` through the lifecycle on what it says.
+   Enable the 15-minute conditional-GET poll and watch the first cycles: confirm 304s and that no
+   trip-wire fires spuriously.
+
+Extraction is still a keyword placeholder (Phase F), so the first live results will be thin. Say so
+in the coverage statement rather than letting thin read as clean.
+
+### Decisions touched
+
+- **D17 — CLOSED 2026-09-15.** SEC litigation-releases RSS; approved by Faisal Ali, source admin;
+  one conditional GET per 15 minutes against a recorded 10 req/s ceiling; four stop conditions,
+  each proved to fire. Closing it licenses **one source under one approval** — every other source,
+  including every Costa Rican one, is a separate first contact.
+- **D-039, D-040, D-041** added to `docs/decisions.md`.
+- **D18 opened** — whether to adopt `fast-xml-parser` v5, after its dependency chain is looked at.
+- **D6** is unblocked in the sense that reading a publisher's robots is now permitted for the SEC,
+  which is the evidence-gathering step it needed; the approval/record **mechanism** is still open
+  and is still not engineering's.
+- **D15** is no longer blocked on "nobody has decided we may contact anyone", but it is **not**
+  covered by D17's approval: a CR judicial portal is a different publisher. Still untouched.
+
+---
+
 ## 2026-09-14 (late) — **Phase E step 2**: the fetch gate, one honest egress identity, and D17 opened
 
 **Context.** Step 1 built the real fetch adapter. This session built the thing that is allowed to

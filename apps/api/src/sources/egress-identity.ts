@@ -93,3 +93,55 @@ export function buildEgressIdentity(options: EgressIdentityOptions): EgressIdent
     health: 'healthy',
   };
 }
+
+/**
+ * Assert, at startup, that this process cannot make an anonymous outbound request.
+ *
+ * The adapter already refuses to be constructed without a contact URL, and
+ * `buildSourceAdapters` already returns `null` instead of one. Both of those fail **late and
+ * quietly**: the process starts, serves traffic, and reports fetching as unavailable — which
+ * reads to an operator as "nothing has been configured yet" rather than as "this deployment is
+ * misconfigured and is silently doing no work".
+ *
+ * So a live process asserts the user agent here instead, and refuses to start without one. FR-06
+ * requires the user agent to identify the service honestly with a contact URL; a deployment that
+ * cannot satisfy that must stop at boot, where somebody is watching, rather than at the first
+ * search, where nobody is.
+ *
+ * Checks the **derived** string rather than the configuration value, because the string is what
+ * goes on the wire: an assertion on the input would pass for a contact URL that produced an
+ * empty or contactless user agent through some later edit of `buildEgressIdentity`.
+ *
+ * Mock mode is exempt and is not merely skipped: it is asserted too, against the fixture
+ * identity, so that the rule is proved on every boot rather than only on the boots that matter.
+ */
+export function assertOutboundUserAgent(options: EgressIdentityOptions): string {
+  const identity = buildEgressIdentity(options);
+  if (identity === null) {
+    throw new Error(
+      'Refusing to start in live mode without FETCH_CONTACT_URL. FR-06 requires every ' +
+        'outbound request to carry a user agent that identifies this service and gives a ' +
+        'publisher somewhere to write. There is deliberately no default: a default would be a ' +
+        'URL nobody reads on a host nobody owns.',
+    );
+  }
+
+  const userAgent = identity.userAgent.trim();
+  if (userAgent === '' || !userAgent.startsWith(EGRESS_SERVICE_NAME)) {
+    throw new Error(
+      `Refusing to start: the outbound user agent "${identity.userAgent}" does not name this ` +
+        `service. A request a publisher cannot attribute is one they cannot ask us to stop.`,
+    );
+  }
+
+  const contactUrl = options.contactUrl?.trim() ?? '';
+  if (options.mode === 'LIVE' && (contactUrl === '' || !userAgent.includes(contactUrl))) {
+    throw new Error(
+      `Refusing to start: the outbound user agent "${identity.userAgent}" does not carry the ` +
+        `configured contact URL. FR-06 requires the contact to be on the wire, not only in ` +
+        `configuration.`,
+    );
+  }
+
+  return userAgent;
+}

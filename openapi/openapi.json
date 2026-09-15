@@ -2083,6 +2083,86 @@
           "contentFormat": {
             "type": "string",
             "enum": ["HTML", "PDF", "JSON", "XML_FEED", "MIXED"]
+          },
+          "accessPolicy": {
+            "type": "object",
+            "properties": {
+              "requestCeilingPerSecond": {
+                "type": "number",
+                "exclusiveMinimum": true,
+                "minimum": 0,
+                "maximum": 10000,
+                "nullable": true
+              },
+              "pollFloorSeconds": {
+                "type": "integer",
+                "exclusiveMinimum": true,
+                "minimum": 0,
+                "maximum": 86400,
+                "nullable": true
+              },
+              "conditionalGet": { "type": "boolean" },
+              "userAgentRequired": { "type": "boolean" },
+              "policyUrl": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 500,
+                "nullable": true
+              },
+              "policySummary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "stopConditions": {
+                "type": "object",
+                "properties": {
+                  "haltOnStatuses": {
+                    "type": "array",
+                    "items": { "type": "integer", "minimum": 100, "maximum": 599 },
+                    "maxItems": 10
+                  },
+                  "haltOnRateLimit": { "type": "boolean" },
+                  "rateLimitCooldownSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+                  "serverErrorStreakToHalt": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "maximum": 100,
+                    "nullable": true
+                  },
+                  "requiresFreshApprovalOnHalt": { "type": "boolean" }
+                },
+                "required": [
+                  "haltOnStatuses",
+                  "haltOnRateLimit",
+                  "rateLimitCooldownSeconds",
+                  "serverErrorStreakToHalt",
+                  "requiresFreshApprovalOnHalt"
+                ],
+                "additionalProperties": false
+              },
+              "firstContactApproval": {
+                "type": "object",
+                "properties": {
+                  "approvedBy": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "role": { "type": "string", "minLength": 1, "maxLength": 120 },
+                  "approvedOn": { "type": "string", "minLength": 10, "maxLength": 40 },
+                  "decision": { "type": "string", "minLength": 1, "maxLength": 40 }
+                },
+                "required": ["approvedBy", "role", "approvedOn", "decision"],
+                "additionalProperties": false,
+                "nullable": true
+              }
+            },
+            "required": [
+              "requestCeilingPerSecond",
+              "pollFloorSeconds",
+              "conditionalGet",
+              "userAgentRequired",
+              "policyUrl",
+              "policySummary",
+              "stopConditions",
+              "firstContactApproval"
+            ],
+            "additionalProperties": false,
+            "nullable": true
           }
         },
         "required": [

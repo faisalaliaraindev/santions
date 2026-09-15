@@ -124,8 +124,43 @@ export interface SourceAccessPort {
   recordSuccess(input: { readonly sourceId: string; readonly now: Date }): Promise<unknown>;
 }
 
+/**
+ * The slice of `DomainHealthService` this adapter uses — the **per-domain** breaker (D-040).
+ *
+ * Separate from `SourceAccessPort` because the two answer different questions and must both
+ * answer yes. The source port guards the agreement an approver signed; this one guards the
+ * publisher the URL actually points at, which for a discovery source is a different party
+ * entirely — a news feed is one source and a hundred publishers.
+ *
+ * Declared here rather than in the service, following `SourceAccessPort`: the adapter states the
+ * narrowest thing it needs, and the service satisfies it.
+ */
+export interface DomainAccessPort {
+  checkDomain(input: { readonly url: string; readonly now: Date }): Promise<{
+    readonly domain: string | null;
+    readonly decision: { readonly allowed: boolean; readonly detail: string } | null;
+  }>;
+  recordDomainFailure(input: {
+    readonly url: string;
+    readonly signal: FailureSignal;
+    readonly detail: string;
+    readonly now: Date;
+  }): Promise<void>;
+  recordDomainSuccess(input: { readonly url: string; readonly now: Date }): Promise<void>;
+}
+
 export interface HttpEvidenceFetchOptions {
   readonly access: SourceAccessPort;
+  /**
+   * The per-domain breaker. Optional in the type, **required in the live composition root**.
+   *
+   * Optional here so that a unit test asserting one narrow thing about the source breaker does
+   * not have to stand up a second one; required in `buildSourceAdapters`, which refuses to
+   * construct a live adapter without it for the same reason it refuses one without a contact
+   * URL. An absent domain breaker is not a degraded one — it is a fetcher that cannot notice a
+   * publisher refusing it.
+   */
+  readonly domains?: DomainAccessPort;
   /**
    * The contact URL the user agent carries. **Required, with no default.**
    *
@@ -164,6 +199,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
 
   private readonly logger = new Logger('HttpEvidenceFetch');
   private readonly access: SourceAccessPort;
+  private readonly domains: DomainAccessPort | null;
   private readonly transport: HttpTransport;
   private readonly clock: Clock;
   private readonly userAgent: string;
@@ -181,6 +217,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
       );
     }
     this.access = options.access;
+    this.domains = options.domains ?? null;
     this.transport = options.transport ?? new NodeHttpsTransport();
     this.clock = options.clock ?? ((): Date => new Date());
     this.userAgent = `${options.serviceName ?? 'ErlyAdverseSearch'}/1.0 (+${options.contactUrl})`;
@@ -240,6 +277,24 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
         );
       }
       const parsed = new URL(currentUrl);
+
+      // Rights first, and **without spending**, because of what a refusal has to say. D5's
+      // ordering principle is rights, then health, then economics — a source an operator
+      // suspended one second ago must report *that*, not "the publisher is in a cooldown".
+      // Found by the trip-wire harness: with the domain gate first, a 403 halted the source and
+      // the next request then reported a domain cooldown, hiding the halt an operator would be
+      // asked about. Non-spending, so asking the question costs the publisher nothing.
+      const rights = await this.access.checkAccess({ sourceId, now: this.clock(), spend: false });
+      if (!rights.decision.allowed) {
+        return this.refuse(request, { policyRefusal: true }, rights.decision.detail);
+      }
+
+      // Then the publisher. Before robots, because fetching robots.txt is itself a request to
+      // this publisher: a domain that has refused us must not be asked for its robots.txt.
+      const domain = await this.domainDecision(request, currentUrl);
+      if (domain !== null) {
+        return domain;
+      }
 
       const robots = await this.robotsDecision(request, parsed, deadline);
       if (robots !== null) {
@@ -347,6 +402,28 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     );
   }
 
+  /**
+   * The per-domain gate for one hop. Returns an outcome when the fetch must not proceed.
+   *
+   * A refusal here is **our** decision not to ask, exactly like a robots refusal, so it goes
+   * through `refuse` and never touches source health. What it records is that a publisher who
+   * has already refused us is not asked again — which is the fact the per-domain breaker exists
+   * to hold, and which the per-source breaker structurally cannot (D-040).
+   */
+  private async domainDecision(
+    request: FetchRequest,
+    url: string,
+  ): Promise<SourceOutcome<FetchResult> | null> {
+    if (this.domains === null) {
+      return null;
+    }
+    const { decision } = await this.domains.checkDomain({ url, now: this.clock() });
+    if (decision === null || decision.allowed) {
+      return null;
+    }
+    return this.refuse(request, { policyRefusal: true }, decision.detail);
+  }
+
   /** Fetch and cache robots.txt for a host. `spend` counts it — it is a real request. */
   private async robotsFor(
     url: URL,
@@ -401,6 +478,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
       // A conditional hit is a successful fetch with no body, not an empty document. Conflating
       // them would let a caller store an empty version over a good one.
       await this.access.recordSuccess({ sourceId: request.attribution.sourceId, now });
+      await this.domains?.recordDomainSuccess({ url: finalUrl, now });
       return ok(this.provenanceFor(request), now, {
         url: request.url,
         finalUrl,
@@ -452,6 +530,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     }
 
     await this.access.recordSuccess({ sourceId: request.attribution.sourceId, now });
+    await this.domains?.recordDomainSuccess({ url: finalUrl, now });
     return ok(this.provenanceFor(request), now, {
       url: request.url,
       finalUrl,
@@ -520,6 +599,15 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     await this.access.recordFailure({
       sourceId: request.attribution.sourceId,
       signal,
+      now: this.clock(),
+    });
+    // The same fact, recorded against the publisher as well as against the agreement. A 429
+    // from one host is a fact about that host; a feed that linked to it is not at fault, and
+    // the source breaker alone would either blame the feed or lose the observation entirely.
+    await this.domains?.recordDomainFailure({
+      url: request.url,
+      signal,
+      detail,
       now: this.clock(),
     });
     return failed(this.provenanceFor(request), this.clock(), signal, detail);

@@ -27,7 +27,11 @@
 import { Logger } from '@nestjs/common';
 
 import { CompaniesHouseAdapter } from './companies-house.adapter.js';
-import { HttpEvidenceFetchAdapter, type SourceAccessPort } from './http-evidence-fetch.adapter.js';
+import {
+  HttpEvidenceFetchAdapter,
+  type DomainAccessPort,
+  type SourceAccessPort,
+} from './http-evidence-fetch.adapter.js';
 import type { CompanyRegistryPort } from './company-registry.port.js';
 import type { EvidenceFetchPort } from './evidence-fetch.port.js';
 import type { ExtractionModelPort } from './extraction-model.port.js';
@@ -85,6 +89,16 @@ export interface SourceRegistryOptions {
    * the adapter testable against a stub.
    */
   readonly sourceAccess?: SourceAccessPort | undefined;
+  /**
+   * The per-domain breaker (D-040), consulted before every hop and fed every server-produced
+   * failure.
+   *
+   * Required in live mode on the same rule as `sourceAccess`, and for a reason the source
+   * breaker cannot cover: a discovery source hands us links to publishers it does not speak for,
+   * and without this the adapter would keep calling a publisher who has already refused it. An
+   * absent domain breaker is not a degraded one.
+   */
+  readonly domainAccess?: DomainAccessPort | undefined;
 }
 
 export const SOURCE_ADAPTERS = 'SOURCE_ADAPTERS';
@@ -136,10 +150,13 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
   // consulted immediately before every external call — an adapter without them is an unthrottled
   // fetcher pointed at a publisher, which is exactly what D5 was built first to prevent).
   const evidenceFetch =
-    options.fetchContactUrl === null || options.sourceAccess === undefined
+    options.fetchContactUrl === null ||
+    options.sourceAccess === undefined ||
+    options.domainAccess === undefined
       ? null
       : new HttpEvidenceFetchAdapter({
           access: options.sourceAccess,
+          domains: options.domainAccess,
           contactUrl: options.fetchContactUrl,
         });
 
@@ -149,8 +166,12 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
         (options.fetchContactUrl === null
           ? 'FETCH_CONTACT_URL is unset, and FR-06 requires the user agent to identify this ' +
             'service honestly with a contact URL. Fetching is unavailable rather than anonymous.'
-          : 'source health was not supplied, and nothing fetches without the breaker, the ' +
-            'budgets and the kill switch in front of it.'),
+          : options.sourceAccess === undefined
+            ? 'source health was not supplied, and nothing fetches without the breaker, the ' +
+              'budgets and the kill switch in front of it.'
+            : 'domain health was not supplied, and nothing fetches without the per-domain ' +
+              'breaker in front of it — a fetcher that cannot notice a publisher refusing it ' +
+              'keeps calling them (D-040).'),
     );
   } else {
     logger.log(

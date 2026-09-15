@@ -45,6 +45,9 @@ export * from './capability/capability.js';
 
 export * from './reliability/failure-classification.js';
 export * from './reliability/source-health.js';
+export * from './reliability/registrable-domain.js';
+export * from './reliability/domain-health.js';
+export * from './reliability/stop-conditions.js';
 
 export * from './fetch/url-policy.js';
 export * from './fetch/robots.js';

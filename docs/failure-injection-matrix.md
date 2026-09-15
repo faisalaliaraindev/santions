@@ -78,6 +78,8 @@ that mentions a receipt also names the identity that holds when the receipt is g
 | **FI-17** | Source registry read → snapshot committed                   | A snapshot citing a version that has changed                 | Snapshot pins what the run planned; health is re-read at each use                         | —           | D5    |
 | **FI-18** | Source suspended → in-flight run already dispatched work    | Work in flight against a source we stopped                   | Access rechecked at every point of use; the gap is recorded                               | one call    | D5    |
 | **FI-19** | Fetch authorised → the socket opens                         | A request made under an approval that has since been retired | The authorisation is issued per lead and names the version; health is re-read at the call | one request | E2    |
+| **FI-20** | A source halts on a stop condition → the halt is persisted  | A source that should be halted and is not                    | The failure is folded into health first; the halt and its audit entry commit together     | one request | E3    |
+| **FI-21** | A publisher is suspended → the domain document is written   | A publisher that should be suspended and is not              | Re-derived from the next failure, which is the same failure; the first record is kept     | one request | E3    |
 
 "✅" means it exists and holds today. The rest are specified here and built in the step named.
 
@@ -415,6 +417,54 @@ indistinguishable from one made under the new version.
 refusal is a property of the source rather than of one URL — a `SKIPPED` coverage outcome naming
 it (D-036). `SKIPPED`, not `FAILED`: the source answered nothing because we chose not to ask it,
 and reporting an outage at a publisher that is working is its own kind of false statement.
+
+### FI-20 — A source halts → the halt is persisted
+
+The boundary Phase E step 3 adds, and it is the one a stop condition creates. A publisher returns
+a 403; `SourceHealthService.recordFailure` classifies it, folds it into health, evaluates the
+recorded stop conditions (D-041), and — when they say halt — engages the kill switch **and** writes
+an audit entry to the reserved platform trail. Between deciding to halt and the write landing, the
+process can die.
+
+**Orphan:** none written; the risk runs the other way. What can exist after a crash is a source
+that **should** be halted and is not, because the decision was made in memory and never persisted.
+The next request would then be permitted, at a publisher who has already refused us.
+
+**Reconciler: the halt and its audit entry commit in one transaction, and the failure is folded
+into health first.** The ordering is the decision. `applyObservedFailure` records the failure on
+the health document _before_ engaging the switch, so a crash between the two leaves a source whose
+stored state says it failed — its breaker counting, its last failure class recorded — rather than
+one that looks untouched. The next failure re-evaluates the same stop condition against the same
+signal and halts again; halting is idempotent, because `engageKillSwitch` keeps the first record.
+
+**Window: one request.** A source that should have halted can receive one more request before the
+halt is re-derived. It cannot be zero without holding a lock across an external call, and the
+budget and the breaker both bound what that one request can cost.
+
+**What the user sees:** once the halt lands, every run that wanted the source gets a `SUSPENDED`
+coverage outcome carrying the kill switch's reason verbatim — which is written for a reviewer and
+names the stop condition and the status that fired it. Never a clean result, and never a silent
+skip.
+
+### FI-21 — A publisher is suspended → the domain document is written
+
+The per-domain half of the same boundary (D-040). A hard block from one host suspends that
+**publisher**, in a document keyed on the registrable domain and shared across tenants.
+
+**Orphan:** none written. As with FI-20, the risk is a suspension decided and not persisted, and
+the next request reaching a host that has refused us.
+
+**Reconciler: none, and none is needed.** The suspension is re-derived from the next failure,
+which will be the same failure, because a hard block does not resolve itself. `observeDomainFailure`
+keeps the first suspension record when it fires again, so a re-derived suspension does not overwrite
+the timestamp an operator was alerted about.
+
+**Window: one request**, bounded by the source budget and the source breaker sitting in front of it.
+
+**What the user sees:** a rejected lead naming the domain and the suspension, and — where it cost
+the run a source rather than one URL — a coverage outcome. A domain suspension is **never** reported
+as the source failing: the feed that linked to the host is working, and saying otherwise would send
+somebody to investigate at the wrong end.
 
 ### FI-16 — Notification delivered → delivery recorded
 

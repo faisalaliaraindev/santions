@@ -1167,3 +1167,124 @@ host, a status code, a robots path, a byte count.
 **Cost.** Fifteen call sites had to write a sentence, and the sentences are as good as whoever
 wrote them. An optional field would have avoided that and would have been absent everywhere it
 mattered.
+
+## D-039 — `fast-xml-parser` 4.5.7, pinned, behind a DOCTYPE gate this project owns
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15
+
+The two RSS rungs of the FR-05 cascade need an XML parser and the project had none. A parser is
+not a neutral dependency here: it is pointed at a document a third party controls, where a
+resolved entity reads local files (XXE) and a nested one allocates gigabytes from forty bytes
+(billion laughs).
+
+**The defence is not a parser option.** Both attacks require a DTD — an XXE payload needs
+`<!ENTITY ... SYSTEM ...>`, a laughs payload needs nested `<!ENTITY>` — and there is nowhere else
+in an XML document to put either. So `apps/api/src/sources/parse/xml.ts` scans the document before
+the parser is called and refuses **any** markup declaration. That rule is ours, it is proved by a
+test that never touches the library, and it survives an upgrade that changes what a flag means. A
+defence resting on `processEntities: false` does not.
+
+The scan is a scanner and not a substring search, because the two hard cases fail in opposite
+directions: `includes('<!DOCTYPE')` false-positives on a feed that quotes HTML inside CDATA, which
+would drop real articles, and a regular expression written to avoid that false-negatives on
+anything its author did not anticipate — and a false negative here is the whole attack.
+
+**4.5.7 exactly, not 5.x.** Verified 2026-09-15: 4.5.7 declares one runtime dependency (`strnum`);
+5.11.1 declares six (`strnum`, `is-unsafe`, `xml-naming`, `fast-xml-builder`, `@nodable/entities`,
+`path-expression-matcher`). All six share the package's real maintainer, so this is a
+modularisation rather than an injected hostile dependency — but five were created in 2026 with
+thin adoption, and `@nodable/entities` points at a GitHub org whose repository name does not match
+the package. That thread is worth closing before the dependency is taken, and nothing needs v5.
+
+**Entity processing stays on**, deliberately, and is safe only because of the gate: with no DTD
+the only entities a document can contain are the five XML predefines and numeric character
+references, each expanding to one character. Turning it off would leave `&amp;` sitting inside
+every headline, which is a wrong title rather than a safe one.
+
+**Cost.** A pinned dependency is one somebody has to deliberately advance, and 4.x will eventually
+stop receiving fixes. The scan also refuses a legitimate feed that ships a DOCTYPE — some do — and
+that feed is reported as a `CONTENT_ERROR` coverage gap rather than parsed. Both are accepted: the
+first is a diary entry, the second is visible and is the safe direction.
+
+## D-040 — Two breakers: one for the agreement, one for the publisher
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15
+
+FR-06 asks for a breaker **per source and per domain**. D5 built per-source only, honestly,
+because that was what the registry could express. The gap is specific and it is not cosmetic: a
+discovery source hands us links to a hundred publishers it does not speak for. When one of those
+publishers starts refusing us, recording the fact against the feed suspends a working feed, and
+recording it nowhere keeps us calling a host that has already said no.
+
+So `domainHealth` joins `sourceHealth` as a second shared, mutable document, keyed on the
+**registrable domain**. `sourceHealth` answers "is this agreement usable?" — licence, budget, kill
+switch, version status. `domainHealth` answers "is this publisher willing to hear from us?" Both
+must allow a request. Neither invents a taxonomy: both read FR-06's table through the same two
+predicates, imported rather than restated.
+
+**Suspension is sticky; degradation expires.** A `DEGRADE` is a wait, and it ends on the
+publisher's own clock where they sent a `Retry-After`. A `SUSPEND` is a refusal, paired in FR-06
+with `alertOperator`, and nothing about time passing answers the question it raises — so it is
+released by an operator, exactly as a source kill switch is. A success closes the breaker and
+deliberately does **not** clear a cooldown: one request slipping through a cooldown does not
+withdraw the cooldown.
+
+**The key is a rule, not the Public Suffix List.** The PSL is a weekly-changing data file whose
+npm distributions are a supply chain this project has not reviewed. `registrableDomain` strips to
+two labels, or three where the second level is one a two-letter country code publishes under
+(`co.uk`, `go.cr`, `com.mx`). Where the rule is wrong it is wrong **broader** than the truth, so
+two publishers share a breaker and one holds the other back — a visible coverage cost. The
+opposite error would let us keep calling a publisher who has already refused, and that cost is
+paid by somebody who did not ask to hear from us.
+
+**Ordering, found by the trip-wire harness rather than by reasoning.** The first wiring put the
+domain gate ahead of the source rights check, and a 403 that halted the source then reported "the
+publisher is in a cooldown" on the next request — hiding the halt an operator would be asked
+about. Rights now go first, in a **non-spending** check, then the publisher, then robots, then the
+spending check. D5's ordering principle — rights, then health, then economics — holds across both
+breakers, not only inside one.
+
+**Cost.** A second document, a second collection, and a second thing to look at when a fetch is
+refused. The alternative was one breaker that is wrong about one of the two things it is asked.
+
+## D-041 — Stop conditions escalate FR-06 per source, and can only ever stop
+
+**Status:** Accepted · **Decided at:** Phase E step 3, 2026-09-15 · **Closes:** D17
+
+D17 had to record four things about the first source contacted live: which, under whose approval,
+at what rate, and on what stop condition. The first three are registry fields. The fourth was not
+expressible at all, and the reason it needs to be is specific: FR-06's general answer to a 403 is
+"soft block, cool the identity, retry once from another identity", and the SEC's published policy
+says a 403 means the user agent is wrong. Retrying it is repeating the thing they asked us not to
+do.
+
+So `accessPolicy.stopConditions` sits on the approved source version — beside the licence terms,
+carried through the same four-eyes lifecycle, read fresh at the point of use — and
+`evaluateStopConditions` applies it. **The invariant that makes a second rule about one failure
+safe is that a stop condition can only ever stop:** it never permits a request FR-06 refused,
+never lowers a class, never shortens a backoff. It returns "halt" or "nothing to add", and the
+FR-06 classification travels with either, because the classification is what the coverage record
+and both breakers read. A test asserts that over every signal shape.
+
+**A halt is the kill switch, not a new mechanism.** D5 already built something effective
+immediately, effective mid-run because access is rechecked at the point of use, with a mandatory
+reason that reaches the coverage statement, and **four eyes to release**. That last property is
+what "requires fresh approval" has to mean if it is to mean anything, so a halt engages the kill
+switch with `engagedBy: system` and a reason written for whoever will be asked to release it.
+
+**The composition lives in the domain package**, not in the service. `applyObservedFailure`
+classifies, folds into health, evaluates the conditions and engages the switch, in that order —
+health **before** the halt, so releasing a halt does not release a source whose stored state says
+nothing ever went wrong. It is in the pure package so the trip-wire harness and the live service
+run the same code; a harness that re-composed those four steps would pass whenever the two
+implementations agreed, including when both were wrong.
+
+**Automatic halts are audited under a reserved platform trail** (`__platform__`), because they
+have no tenant: nobody asked for them. Writing one into whichever customer's run observed it would
+put a cross-tenant fact in one customer's trail; dropping it would leave a service that stopped
+calling a source and cannot say why.
+
+**Cost.** A per-source escalation is a second place to look when a source stops, and a badly
+recorded stop condition halts a working source. The "can only ever stop" invariant bounds the
+damage to over-refusal, which is visible in a coverage statement, and D5's four-eyes release is
+what stops an over-eager halt being waved away by the person who caused it.

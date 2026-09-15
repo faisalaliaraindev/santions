@@ -1,6 +1,10 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 
+import { Inject } from '@nestjs/common';
+
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
+import type { AppConfig } from './config/config.js';
+import { APP_CONFIG } from './tokens.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { SessionService } from './auth/session.service.js';
 import { AuditService, LocalAuditCheckpointWriter } from './persistence/audit.service.js';
@@ -12,6 +16,8 @@ import { StageExecutionService } from './persistence/stage-execution.service.js'
 import { IndexerService } from './search-index/indexer.service.js';
 import { ApiKeyService } from './tenancy/api-key.service.js';
 import { SearchesService } from './searches/searches.service.js';
+import { DomainHealthService } from './sources/domain-health.service.js';
+import { assertOutboundUserAgent } from './sources/egress-identity.js';
 import { SourceHealthService } from './sources/source-health.service.js';
 import { NameFrequencyService } from './subjects/name-frequency.service.js';
 import { SubjectsService } from './subjects/subjects.service.js';
@@ -52,9 +58,21 @@ export class StartupService implements OnModuleInit {
     private readonly adminRecords: VersionedRecordService,
     private readonly capabilities: CapabilityCoverageService,
     private readonly sourceHealth: SourceHealthService,
+    private readonly domainHealth: DomainHealthService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    // Before any index, because this one can refuse the boot. FR-06 requires the outbound user
+    // agent to identify this service honestly with a contact URL, and a process that cannot
+    // build one must stop here — where somebody is watching — rather than at the first search,
+    // where the only symptom is a capability quietly reported as unavailable.
+    const userAgent = assertOutboundUserAgent({
+      mode: this.config.mode === 'mock' ? 'MOCK' : 'LIVE',
+      contactUrl: this.config.sources.fetchContactUrl,
+    });
+    this.logger.log(`Outbound user agent: ${userAgent}`);
+
     await Promise.all([
       this.sessions.ensureIndexes(),
       this.apiKeys.ensureIndexes(),
@@ -72,6 +90,7 @@ export class StartupService implements OnModuleInit {
       this.adminRecords.ensureIndexes(),
       this.capabilities.ensureIndexes(),
       this.sourceHealth.ensureIndexes(),
+      this.domainHealth.ensureIndexes(),
     ]);
     this.logger.log('Indexes ensured.');
   }

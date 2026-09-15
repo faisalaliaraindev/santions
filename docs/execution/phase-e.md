@@ -236,7 +236,11 @@ isolated worker with request interception and no shared profile. **No default re
 - [x] Step 2 — `SourceOutcome.FAILED` carries a required human `detail` (**D-038**), so a robots refusal reads as what it was rather than as "could not be retrieved (HARD_BLOCK)"
 - [x] Step 2 — the relevance score is derived and labelled `PRELIMINARY_NAME_PRESENCE_v1`, and **does not gate** (**D-037**); the FR-06 signal set and its threshold are step 4
 - [ ] Step 2 remainder — the per-lead relevance **threshold**, the nine FR-06 signals, and the egress **pool** (identities, sticky rotation, `ProxyPort`) are steps 4 and 7, unchanged
-- [ ] Step 3 — rungs 0–7 with per-rung logging; Google News RSS, Bing News RSS, GDELT and SearXNG connectors; the XML parser dependency decided and recorded
+- [~] Step 3 — **the XML parser dependency is decided, built and tested** (`fast-xml-parser@4.5.7`
+  pinned, behind a DOCTYPE gate this project owns, **D-039**); the **per-domain breaker** is built
+  and wired (**D-040**); the **D17 stop conditions** are recorded on the source version, applied by
+  `SourceHealthService.recordFailure`, and proved by the trip-wire harness (**D-041**). **The rungs
+  and the connectors themselves are not built** — that is where step 3 resumes
 - [ ] Step 4 — relevance scored on FR-06's signals before the gate; rejected candidates stored as leads with reasons and visible in coverage
 - [ ] Step 5 — the eight families generated from the real taxonomy, graph and subject; F1 and F4 provably survive truncation; a disabled category provably produces no query
 - [ ] Step 6 — a scheduled contract test per undocumented source, keyed off `parserVersion`
@@ -254,10 +258,20 @@ isolated worker with request interception and no shared profile. **No default re
 - [x] **T88** — a blocked source renders as a coverage gap, never a clean result (`result-state.test.ts`, done in G0)
 - [ ] **T89** — a breaker opening mid-run removes the rung for its cooldown and reports a gap
 - [ ] **T90** — Playwright escalation is deterministic, logged and cached per domain; no default rendering
+- [x] **D17 closed 2026-09-15** — SEC litigation-releases RSS, approved by name (Faisal Ali, source
+      admin), one conditional GET per 15 minutes against a recorded 10 req/s ceiling, four stop
+      conditions proved to fire. **No live request has been made**: the source version is written and
+      schema-checked but not yet proposed, approved or activated
+- [x] Step 3 — the trip-wire harness passes: 403 halts and needs fresh approval, 429 halts after the
+      cooldown it asked for, a 5xx streak halts, an oversize body is a bounded rejection that halts
+      nothing, a DOCTYPE is refused before parsing, the daily cap holds, and the kill switch stops a
+      run in flight. **Not against a self-hosted target** — SEC-02 makes one unreachable by design;
+      see the harness header
+- [x] Startup refuses to boot without an honest outbound user agent (`assertOutboundUserAgent`)
 - [ ] **D6 closed** — how robots exceptions are approved and recorded (raised 2026-09-14; the adapter honours whatever it decides)
 - [ ] **D15 closed** — the Costa Rican primary-source evidence base; the cascade's rung tiers encode the answer
-- [ ] `pnpm openapi:generate` re-run and committed
-- [ ] `docs/failure-injection-matrix.md` extended for the fetch boundaries
+- [x] `pnpm openapi:generate` re-run and committed (the source schema gained `accessPolicy`)
+- [~] `docs/failure-injection-matrix.md` extended for the fetch boundaries — FI-19, FI-20, FI-21 added
 - [ ] `docs/implementation-status.md` moves G6; `START-HERE.md` pointer moved; handoff written
 
 ## Do not
@@ -297,7 +311,10 @@ D6 and D15 need, because reading a publisher's robots.txt is itself an outbound 
 **D15 was re-raised on 2026-09-14**: untouched since it was raised, and step 3's rung tiers encode
 its answer.
 
-**Still expected to open:** the XML parser dependency (step 3).
+**Opened and closed in step 3:** the XML parser dependency (**D-039**), the per-domain breaker
+(**D-040**) and the stop conditions that closed **D17** (**D-041**). **Newly open: D18** — whether to
+adopt `fast-xml-parser` v5 once its six 2026-created runtime dependencies have been looked at. Nothing
+needs v5, and 4.5.7 is pinned exactly.
 
 ## Known risks
 
@@ -317,6 +334,8 @@ Three things are deliberately left to the step that does them:
 
 - the exact relevance scoring weights (step 4), which should be set against the FR-16 labelled
   corpus rather than chosen in advance;
-- the per-domain breaker's relationship to the per-source one (FR-06 asks for **both**; D5 built
-  per-source only), which depends on what the cascade observes in practice;
-- which source receives the first deliberate live request, and under what approval.
+- ~~the per-domain breaker's relationship to the per-source one~~ — **settled in step 3 (D-040)**:
+  two documents, two questions, both must allow a request, and rights outrank a publisher cooldown
+  in what a refusal reports;
+- ~~which source receives the first deliberate live request, and under what approval~~ — **settled
+  by D17, closed 2026-09-15**.

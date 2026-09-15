@@ -166,6 +166,87 @@ export const dataProfileSchema = z
   .strict();
 
 /**
+ * What a publisher's own access policy says, recorded on the version an approver signed.
+ *
+ * **Why this is registry content and not configuration.** A publisher's fair-access terms are a
+ * property of the publisher, they are what an approver actually read before approving, and they
+ * are what a complaint would be checked against. A rate ceiling living in an environment
+ * variable is a rate nobody approved; a poll interval living in code is one nobody can audit.
+ * Both belong on the immutable version, beside the licence terms, and both are read at the
+ * point of use.
+ *
+ * Optional, because most sources publish nothing of the sort and inventing an access policy for
+ * them would put a statement in the registry that no publisher ever made. Absent means FR-06's
+ * own defaults stand and no stop condition escalates them.
+ *
+ * Opened by **D17** — the first deliberate live request — which had to record four things about
+ * one source: which source, under whose approval, at what rate, and on what stop condition.
+ * Three of those are fields here; the fourth is `firstContactApproval`.
+ */
+export const sourceAccessPolicySchema = z
+  .object({
+    /**
+     * The publisher's stated request ceiling, per second. **Recorded, never a target.**
+     *
+     * The SEC publishes ten per second per IP. Our actual usage of that source is one
+     * conditional GET every fifteen minutes, which is roughly a thousandth of it. The ceiling is
+     * here so that a person can see the distance between what is permitted and what is done.
+     */
+    requestCeilingPerSecond: z.number().positive().max(10_000).nullable(),
+    /** The minimum interval between polls of this source, in seconds. The floor, not the rate. */
+    pollFloorSeconds: z.number().int().positive().max(86_400).nullable(),
+    /**
+     * Whether polls must carry `If-None-Match` / `If-Modified-Since`.
+     *
+     * Not politeness theatre: a conditional GET that hits returns 304 with no body, so the
+     * publisher serves bytes only when something actually changed. For a feed polled every
+     * fifteen minutes, almost every poll is a 304.
+     */
+    conditionalGet: z.boolean(),
+    /** Whether the publisher requires a descriptive user agent and refuses requests without one. */
+    userAgentRequired: z.boolean(),
+    /** Where the policy is published, so the recorded summary can be checked against it. */
+    policyUrl: z.string().url().max(500).nullable(),
+    /** The policy in the approver's own words. What they read, not a link they might have read. */
+    policySummary: z.string().min(1).max(2000),
+    /**
+     * Per-source escalations of FR-06's failure table. They may only ever **stop** a source
+     * sooner — never permit a request FR-06 refused. See `stop-conditions.ts` in the domain
+     * package, where that invariant is stated and tested.
+     */
+    stopConditions: z
+      .object({
+        haltOnStatuses: z.array(z.number().int().min(100).max(599)).max(10),
+        haltOnRateLimit: z.boolean(),
+        rateLimitCooldownSeconds: z.number().int().min(0).max(86_400),
+        serverErrorStreakToHalt: z.number().int().positive().max(100).nullable(),
+        requiresFreshApprovalOnHalt: z.boolean(),
+      })
+      .strict(),
+    /**
+     * Who approved the **first live request** to this source, by name (D17).
+     *
+     * Null for every source that has never been contacted, which is all of them at the time this
+     * field is added. It is not the same as the version's approver: approving a registry entry
+     * says the configuration is right, and this says a named person accepted that this service
+     * would start making requests to a publisher who did not ask to hear from it.
+     */
+    firstContactApproval: z
+      .object({
+        approvedBy: z.string().min(1).max(200),
+        role: z.string().min(1).max(120),
+        /** ISO 8601 date. */
+        approvedOn: z.string().min(10).max(40),
+        /** The open decision this approval closes — `D17` for the first one. */
+        decision: z.string().min(1).max(40),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+export type SourceAccessPolicy = z.infer<typeof sourceAccessPolicySchema>;
+
+/**
  * A source version's content — the FR-05 registry fields.
  *
  * Note what is absent and must stay absent: any field that becomes an executable instruction.
@@ -203,6 +284,8 @@ export const sourceContentSchema = z
     robotsPosition: z.enum(['HONOURED', 'EXCEPTION_APPROVED', 'NOT_ESTABLISHED']),
     /** How the source publishes: CR's gazette is PDF, most news is HTML. Drives extraction. */
     contentFormat: z.enum(['HTML', 'PDF', 'JSON', 'XML_FEED', 'MIXED']),
+    /** The publisher's own access policy, where they publish one. See above (D17). */
+    accessPolicy: sourceAccessPolicySchema.nullable().optional(),
   })
   .strict();
 
