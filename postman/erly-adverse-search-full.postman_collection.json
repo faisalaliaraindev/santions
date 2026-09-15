@@ -1,0 +1,1300 @@
+{
+  "info": {
+    "name": "Erly adverse-search API - full",
+    "description": "Every endpoint this service exposes, in the order you would meet them.\n\n## Before you start\n\n```\npnpm local:up && pnpm local:bootstrap\npnpm dev            # API + worker together\npnpm key:issue      # prints the key once\n```\n\nPaste the key into the `apiKey` environment variable. Admin folders need a key with the right role:\n\n```\npnpm key:issue --role source_admin --label \"postman admin\"\n```\n\n## What you are looking at\n\nMock mode. Every source is a fixture, every record is stamped `mode: \"MOCK\"`, and nothing leaves your machine. The shape of every response is real; the content is test data.\n\n## The one thing not to misread\n\nThree independent fields come back and must be read together: `execution` (did the job finish), `findingsState` (did we find anything) and `coverage` (did we search everything we said we would).\n\n`SUCCEEDED` + `NO_MATCHES_FOUND` + `INCOMPLETE` means the run finished, found nothing, **and did not search everything it promised**. That is not a clean result.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "Authorization",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "ApiKey {{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Fail early and clearly rather than letting every request 401.",
+          "const path = pm.request.url.getPath();",
+          "const needsKey = path.indexOf('/v1') === 0 || path.indexOf('/auth/session') === 0;",
+          "if (needsKey && !pm.environment.get('apiKey')) {",
+          "  throw new Error('No apiKey set. Run `pnpm key:issue` and paste the secret into the environment.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0 - Health",
+      "description": "No auth on the first two. Run these before debugging an auth problem that is really a stopped process.",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "live"]
+            },
+            "description": "Is the process running? Says nothing about its dependencies.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('alive', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Can it serve traffic? A 503 usually means the stack is not bootstrapped.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ready', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 503) console.log('Try: pnpm local:up && pnpm local:bootstrap');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dependency detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/health/dependencies",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "health", "dependencies"]
+            },
+            "description": "Per-dependency health, for an authorised operator. Needs `platform:read_health` - `pnpm key:issue --role platform_operator`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 - Auth (browser session)",
+      "description": "The **browser** flow, for the control panel. A machine client uses an API key and needs none of this.\n\n`/auth/login` and `/auth/callback` are redirects and do not work usefully in Postman. They are here so the surface is complete, not so you can click them.",
+      "item": [
+        {
+          "name": "Begin sign-in (redirect)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Starts the OIDC authorisation-code flow. Returns a 302 to Keycloak. Follow it in a browser.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Sign-in callback (redirect)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/callback",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "callback"]
+            },
+            "description": "Completes sign-in and sets the session cookie. Called by the identity provider, not by you.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Who am I",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/session",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "session"]
+            },
+            "description": "The current principal. Works with an API key too, which is the quickest way to confirm a key is live and which roles it carries."
+          }
+        },
+        {
+          "name": "Sign out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revokes the session. A cookie-authenticated request needs the CSRF header; an API key does not.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 - Subjects",
+      "description": "Who is being screened. A name is enough (D-011); anything more improves identity resolution.",
+      "item": [
+        {
+          "name": "Create a subject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "`purpose` is **required**. The service records why a person was screened, because that is what limits who may later see the result.\n\n`knownCompanies` is accepted as user-supplied and unverified, and is labelled that way all the way through - never presented as a confirmed association.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"María Fernanda Solís Rojas\",\n  \"aliases\": [],\n  \"countryContext\": [\n    \"CR\"\n  ],\n  \"dateOfBirth\": {\n    \"value\": \"1972-03-15\",\n    \"precision\": \"DAY\"\n  },\n  \"knownCompanies\": [\n    {\n      \"registrationNumber\": \"CR-3101-100001\",\n      \"jurisdiction\": \"CR\"\n    }\n  ],\n  \"externalSubjectRef\": \"postman-demo-1\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('subjectId', b.subjectId);",
+                  "pm.environment.set('subjectVersion', b.version);",
+                  "console.log('subject', b.subjectId, 'v' + b.version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read a pinned version",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects/{{subjectId}}/versions/{{subjectVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects", "{{subjectId}}", "versions", "{{subjectVersion}}"]
+            },
+            "description": "Subjects are versioned and immutable. A search pins the exact version it ran against, so a six-month-old result can still say who it was about at the time."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 - Searches",
+      "description": "Start a run. The response is a receipt, not an answer.",
+      "item": [
+        {
+          "name": "Create a search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "Returns **202** and a `searchId`. The run is queued; the worker does the work.\n\nA queued run reports `findings: NOT_EVALUATED`. Rendering that would show someone \"nothing found\" about a search that has not started.\n\n`Idempotency-Key`: send the same value twice and you get **200** with the same id, not a second search.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{subjectId}}\",\n    \"version\": 1\n  },\n  \"externalCaseRef\": \"postman-case-1\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"CR\"\n    ],\n    \"languages\": [\n      \"es\",\n      \"en\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"sandbox\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.expect([200,202]).to.include(pm.response.code));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('searchId', b.searchId);",
+                  "console.log('search', b.searchId, '-', b.execution);",
+                  "if (pm.response.code === 200) console.log('Idempotent replay - same key, same search.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Poll until terminal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}"]
+            },
+            "description": "Run until `execution` is `SUCCEEDED`, `PARTIAL`, `FAILED` or `CANCELLED`.\n\nIn a Collection Run this re-runs itself until the run settles. `ETag` carries the revision."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED','PARTIAL','FAILED','CANCELLED'];",
+                  "console.log(b.execution, '| findings:', b.findings, '| coverage:', b.coverage);",
+                  "if (terminal.indexOf(b.execution) === -1) {",
+                  "  const tries = Number(pm.environment.get('pollTries') || 0) + 1;",
+                  "  pm.environment.set('pollTries', tries);",
+                  "  if (tries > 30) {",
+                  "    pm.environment.unset('pollTries');",
+                  "    pm.test('terminal', () => pm.expect.fail('Still ' + b.execution + ' after 30 polls. Is the worker running? pnpm dev:worker'));",
+                  "  } else { postman.setNextRequest('Poll until terminal'); }",
+                  "} else {",
+                  "  pm.environment.unset('pollTries');",
+                  "  pm.test('terminal', () => pm.expect(terminal).to.include(b.execution));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List searches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Scoped to the calling key's tenant. There is no way to ask for another tenant's."
+          }
+        },
+        {
+          "name": "Cancel a search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}", "cancel"]
+            },
+            "description": "Only while it is still running. A finished search stays finished - cancelling is not a way to erase a result.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Cancelled from Postman\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 - Results",
+      "description": "What the search produced, and what it could not reach.",
+      "item": [
+        {
+          "name": "Findings and coverage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/findings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}", "findings"]
+            },
+            "description": "There is deliberately **no endpoint that returns findings alone**.\n\n- `findings` - each with its band, four axis values and rationale\n- `coverage` - whether everything promised was searched\n- `sourceOutcomes` - **the FR-05 ladder**: what each rung did, including the rungs nothing is approved for\n- `rejectedLeads` - candidates deliberately not promoted, with reasons. Diligence, not noise\n- `noMatchStatement` - what an absence does and does not mean\n- `mode` - `MOCK` or `LIVE`\n\nA `band` is not a score. Do not rank, average or threshold it into a number."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "console.log('mode:', b.mode, '| findings:', b.findings.length, '| rejected:', b.rejectedLeads.length);",
+                  "console.log('state:', b.findingsState, '| coverage:', b.coverage);",
+                  "console.log('--- the FR-05 ladder ---');",
+                  "(b.sourceOutcomes || []).slice().sort((x,y) => x.cascadeRung - y.cascadeRung).forEach(function (o) {",
+                  "  console.log('  rung ' + o.cascadeRung + '  ' + o.outcome + '  ' + (o.sourceName || ''));",
+                  "});",
+                  "pm.test('mode is stated', () => pm.expect(['MOCK','LIVE']).to.include(b.mode));",
+                  "if (b.findings.length === 0 && b.coverage !== 'WITHIN_DECLARED_SCOPE') {",
+                  "  console.log('NOT a clean result: nothing found AND not everything searched.');",
+                  "  console.log(b.noMatchStatement && b.noMatchStatement.headline);",
+                  "}",
+                  "if (b.mode === 'MOCK') console.log('Fixture data. Nothing was fetched from any real source.');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Association graph",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/associations",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}", "associations"]
+            },
+            "description": "The company graph, frozen to this run. An officer who resolved only partially attaches **no** companies - a partial identity match is not an association."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 - Admin: source registry",
+      "description": "The four-eyes lifecycle. Needs `source_admin`:\n\n```\npnpm key:issue --role source_admin --label \"postman admin\"\n```\n\n`collection` is one of `sources`, `taxonomy`, `policies`.\n\n**Approve needs a different person from the proposer.** With one key, Approve returns 403 - that is the check working. Issue a second key to complete the flow.",
+      "item": [
+        {
+          "name": "List source versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Every source version and its lifecycle state. A source is usable only when a version is ACTIVE."
+          }
+        },
+        {
+          "name": "Read one version",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources", "{{recordId}}", "versions", "{{recordVersion}}"]
+            },
+            "description": "One version, with its content, rights policy, data profile and history."
+          }
+        },
+        {
+          "name": "Propose - the SEC feed (D17)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources"]
+            },
+            "description": "**Step 1 of taking the SEC source live.**\n\nThe body is exactly what `apps/api/src/sources/registry/sec-litigation-releases.ts` holds, so what you propose here is what is written down and reviewable in the repo.\n\nNote `robotsPosition: NOT_ESTABLISHED` - deliberate. Nobody has read their robots.txt, and the fetch gate refuses that value. Run `pnpm first-contact` before changing it, and change it through this lifecycle rather than by hand.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recordId\": \"sec-litigation-releases\",\n  \"content\": {\n    \"sourceName\": \"SEC litigation releases (RSS)\",\n    \"publisher\": \"US Securities and Exchange Commission\",\n    \"connectorType\": \"NEWS_DISCOVERY_RSS\",\n    \"canonicalDomains\": [\n      \"www.sec.gov\"\n    ],\n    \"authorityTier\": 1,\n    \"cascadeRung\": 1,\n    \"countries\": [\n      \"US\"\n    ],\n    \"languages\": [\n      \"en\"\n    ],\n    \"credentialsRef\": null,\n    \"freeTierHourlyBudget\": 6,\n    \"freeTierDailyBudget\": 120,\n    \"stabilityClass\": \"UNDOCUMENTED_VOLATILE\",\n    \"parserVersion\": \"sec-litigation-rss-1\",\n    \"licenceTermsVersion\": \"sec-fair-access-2026-09-15\",\n    \"licenceExpiresAt\": null,\n    \"robotsPosition\": \"NOT_ESTABLISHED\",\n    \"contentFormat\": \"XML_FEED\",\n    \"accessPolicy\": {\n      \"requestCeilingPerSecond\": 10,\n      \"pollFloorSeconds\": 900,\n      \"endpointUrl\": \"https://www.sec.gov/enforcement-litigation/litigation-releases/rss\",\n      \"endpointKind\": \"FIXED_FEED\",\n      \"queryParam\": null,\n      \"conditionalGet\": true,\n      \"userAgentRequired\": true,\n      \"policyUrl\": \"https://www.sec.gov/about/webmaster-frequently-asked-questions\",\n      \"policySummary\": \"Every request must carry a descriptive User-Agent naming the application and a contact email address; requests without one are refused with 403 and the originating IP may be blocked for approximately ten minutes. The rate ceiling is 10 requests per second per IP. Established by desk research on 2026-09-15.\",\n      \"stopConditions\": {\n        \"haltOnStatuses\": [\n          403\n        ],\n        \"haltOnRateLimit\": true,\n        \"rateLimitCooldownSeconds\": 600,\n        \"serverErrorStreakToHalt\": 3,\n        \"requiresFreshApprovalOnHalt\": true\n      },\n      \"firstContactApproval\": {\n        \"approvedBy\": \"Faisal Ali\",\n        \"role\": \"Source admin\",\n        \"approvedOn\": \"2026-09-15\",\n        \"decision\": \"D17\"\n      }\n    }\n  },\n  \"rightsPolicy\": {\n    \"policyId\": \"sec-fair-access-2026-09-15\",\n    \"jurisdiction\": \"US\",\n    \"permittedOperations\": [\n      \"COLLECT\",\n      \"PROCESS\",\n      \"STORE\",\n      \"DISPLAY\"\n    ],\n    \"permittedClassifications\": [\n      \"PUBLIC_RECORD\",\n      \"PUBLISHED_CONTENT\"\n    ],\n    \"permittedIntendedUses\": [\n      \"ADVERSE_SCREENING\"\n    ],\n    \"permittedCollectionMethods\": [\n      \"PUBLISHED_FEED\",\n      \"HTML_FETCH\"\n    ],\n    \"permittedRegions\": [\n      \"eu-west-2\"\n    ],\n    \"maxRetentionDays\": 30,\n    \"rawPersonalDataRetentionPermitted\": false,\n    \"approvalRequiredFor\": []\n  },\n  \"dataProfile\": {\n    \"jurisdiction\": \"US\",\n    \"classification\": \"PUBLIC_RECORD\",\n    \"collectionMethod\": \"PUBLISHED_FEED\",\n    \"intendedUse\": \"ADVERSE_SCREENING\",\n    \"operations\": [\n      \"COLLECT\",\n      \"PROCESS\",\n      \"STORE\",\n      \"DISPLAY\"\n    ],\n    \"requestedRetentionDays\": 30,\n    \"retainsRawPersonalData\": false,\n    \"processingRegion\": \"eu-west-2\",\n    \"approval\": null\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('proposed', () => pm.expect([200,201]).to.include(pm.response.code));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('recordId', b.recordId);",
+                  "pm.environment.set('recordVersion', b.version);",
+                  "pm.environment.set('recordRevision', b.revision);",
+                  "console.log('draft', b.recordId, 'v' + b.version, '-', b.status);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit the draft",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources", "{{recordId}}", "versions", "{{recordVersion}}"]
+            },
+            "description": "A draft may be incomplete - that is what a draft is. Conformance against the FR-05 field list is enforced at **submit**, so nobody is asked to approve a record that cannot be interpreted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": {\n    \"sourceName\": \"SEC litigation releases (RSS)\",\n    \"publisher\": \"US Securities and Exchange Commission\",\n    \"connectorType\": \"NEWS_DISCOVERY_RSS\",\n    \"canonicalDomains\": [\n      \"www.sec.gov\"\n    ],\n    \"authorityTier\": 1,\n    \"cascadeRung\": 1,\n    \"countries\": [\n      \"US\"\n    ],\n    \"languages\": [\n      \"en\"\n    ],\n    \"credentialsRef\": null,\n    \"freeTierHourlyBudget\": 6,\n    \"freeTierDailyBudget\": 120,\n    \"stabilityClass\": \"UNDOCUMENTED_VOLATILE\",\n    \"parserVersion\": \"sec-litigation-rss-1\",\n    \"licenceTermsVersion\": \"sec-fair-access-2026-09-15\",\n    \"licenceExpiresAt\": null,\n    \"robotsPosition\": \"NOT_ESTABLISHED\",\n    \"contentFormat\": \"XML_FEED\",\n    \"accessPolicy\": {\n      \"requestCeilingPerSecond\": 10,\n      \"pollFloorSeconds\": 900,\n      \"endpointUrl\": \"https://www.sec.gov/enforcement-litigation/litigation-releases/rss\",\n      \"endpointKind\": \"FIXED_FEED\",\n      \"queryParam\": null,\n      \"conditionalGet\": true,\n      \"userAgentRequired\": true,\n      \"policyUrl\": \"https://www.sec.gov/about/webmaster-frequently-asked-questions\",\n      \"policySummary\": \"Every request must carry a descriptive User-Agent naming the application and a contact email address; requests without one are refused with 403 and the originating IP may be blocked for approximately ten minutes. The rate ceiling is 10 requests per second per IP. Established by desk research on 2026-09-15.\",\n      \"stopConditions\": {\n        \"haltOnStatuses\": [\n          403\n        ],\n        \"haltOnRateLimit\": true,\n        \"rateLimitCooldownSeconds\": 600,\n        \"serverErrorStreakToHalt\": 3,\n        \"requiresFreshApprovalOnHalt\": true\n      },\n      \"firstContactApproval\": {\n        \"approvedBy\": \"Faisal Ali\",\n        \"role\": \"Source admin\",\n        \"approvedOn\": \"2026-09-15\",\n        \"decision\": \"D17\"\n      }\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit for approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "`SUBMIT` puts it in front of an approver, and is where content conformance is checked.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"SUBMIT\",\n  \"reason\": \"SEC litigation releases, per D17\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Approve (needs a second person)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "**Four eyes.** The approver must not be the proposer. With the same key this returns 403 - the check working, not a bug.\n\n```\npnpm key:issue --role source_admin --label \"second approver\"\n```",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"APPROVE\",\n  \"reason\": \"Terms and rate reviewed; matches the recorded fair-access policy\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Request changes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "Sends it back to draft with a mandatory reason.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"REQUEST_CHANGES\",\n  \"reason\": \"Rate ceiling needs checking against their current policy\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Activate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/activate",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "activate"
+              ]
+            },
+            "description": "**Step 2 of taking a source live.** Runs the SEC-05 rights gate: the data profile must be inside the rights policy, or activation is refused.\n\nAfter this the source is in the registry and on the FR-05 ladder - and still unreachable, because `robotsPosition` is `NOT_ESTABLISHED`. That ordering is deliberate."
+          }
+        },
+        {
+          "name": "Suspend",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "Stops an active version. One person, reason mandatory.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"SUSPEND\",\n  \"reason\": \"Publisher asked us to pause\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Restore",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "Brings a suspended version back.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"RESTORE\",\n  \"reason\": \"Resolved with the publisher\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Retire",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{recordRevision}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "Terminal. A retired version is off the ladder and cannot be restored.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"RETIRE\",\n  \"reason\": \"Superseded by v2\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6 - Admin: taxonomy and policy",
+      "description": "The same lifecycle, different records. `taxonomy` needs `taxonomy_admin`; `policies` needs `source_admin`.\n\nActivating a taxonomy version runs the **lexicon audit** - it fails activation if any query term maps to a protected characteristic, not only CI.",
+      "item": [
+        {
+          "name": "List taxonomy versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/taxonomy?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "taxonomy"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List policy versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/policies?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "policies"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Read a taxonomy version",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/taxonomy/{{recordId}}/versions/{{recordVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "taxonomy", "{{recordId}}", "versions", "{{recordVersion}}"]
+            },
+            "description": "Its content includes the lexicon. Spanish terms are marked `UNREVIEWED_AUTHORED` - no Spanish reader has reviewed them (D-033)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7 - Admin: capability coverage",
+      "description": "What the service can and cannot do in a jurisdiction, and why. Anything other than `SUPPORTED` means an empty result is reported as `NOT_ESTABLISHED` rather than as \"no findings\".",
+      "item": [
+        {
+          "name": "Coverage for a jurisdiction",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/coverage/CR",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "coverage", "CR"]
+            },
+            "description": "Read this for CR after a search and compare it with the coverage line on the result."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "(b.capabilities || []).forEach(function (c) { console.log('  ' + c.capability + '  ' + c.status); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Declare or revise coverage",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/coverage",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "coverage"]
+            },
+            "description": "Revisable without a deployment. What is **not** revisable is the rule that anything other than SUPPORTED means an empty result is `NOT_ESTABLISHED`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jurisdiction\": \"US\",\n  \"capability\": \"REGULATOR_ENFORCEMENT\",\n  \"status\": \"PARTIAL\",\n  \"rationale\": \"SEC litigation releases only. Federal securities enforcement, nothing else.\",\n  \"sourceIds\": [\n    \"sec-litigation-releases\"\n  ],\n  \"evidenceRef\": \"docs/decisions.md#D-045\",\n  \"blockedByDecision\": null\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8 - Admin: source health and the kill switch",
+      "description": "What an operator watches once anything is live.",
+      "item": [
+        {
+          "name": "Source health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/source-health",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "source-health"]
+            },
+            "description": "Breaker state, budget spend, licence clock and kill switch, per source."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const rows = b.sources || b || [];",
+                  "rows.forEach(function (s) {",
+                  "  console.log('  ' + (s.sourceId || '') + '  breaker=' + (s.breaker || '') + '  killSwitch=' + (s.killSwitch ? 'ENGAGED' : 'none'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Engage the kill switch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources", "fixture-newsroom", "kill-switch"]
+            },
+            "description": "One person, effective immediately, **mid-run**. The reason is mandatory and reaches the coverage statement of every run that wanted this source, so write it for a reviewer.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Testing the kill switch from Postman\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Release the kill switch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch/release",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources", "fixture-newsroom", "kill-switch", "release"]
+            },
+            "description": "**Four eyes.** With the same key that engaged it this returns 403 - the check working. Stopping is the safe direction and needs one person; starting again needs two.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Testing complete\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9 - Reserved (501 by design)",
+      "description": "The commercial self-service layer, deferred by **D-007**. These return **501 with a documented reason** rather than 404, so the gap is visible to an integrator instead of looking like something to work around.\n\nKeys are provider-managed this phase: `pnpm key:issue`.",
+      "item": [
+        {
+          "name": "Plans (list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/plans",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "plans"]
+            },
+            "description": "Plan management is deferred (D-007)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reserved', () => pm.expect([403,501]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Plans (create)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/plans",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "plans"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "Tenant usage (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/tenants/{{tenantId}}/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "tenants", "{{tenantId}}", "usage"]
+            },
+            "description": "Usage metering is deferred. Counters are recorded but not exposed or billed."
+          }
+        },
+        {
+          "name": "Tenant usage (admin, write)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/tenants/{{tenantId}}/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "tenants", "{{tenantId}}", "usage"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "Own usage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "usage"]
+            },
+            "description": "Tenant usage reporting is deferred."
+          }
+        },
+        {
+          "name": "Own usage (write)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/usage",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "usage"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "Own API keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "Tenant self-service key management is deferred. Use `pnpm key:issue`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reserved', () => pm.expect([403,501]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create own API key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 - Refusals worth seeing",
+      "description": "The API refusing things correctly is most of what it does. Worth running once so the behaviour is familiar before it happens in anger.",
+      "item": [
+        {
+          "name": "No key -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "An unauthenticated request gets 401 with no detail about what exists.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No purpose -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "The service will not hold a person's name without a recorded reason for screening them.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Someone Without A Purpose\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.expect([400,422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Misspelled field -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "Schemas are strict. A typo is rejected rather than silently dropped, so a client mistake fails loudly instead of quietly narrowing a search.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Typo Tester\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"contryContext\": [\n    \"CR\"\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('typo rejected', () => pm.expect([400,422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Regional pseudo-code -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "FR-05: \"EU\", \"LATAM\" and \"GLOBAL\" are **not** source permissions. Naming one is rejected explicitly rather than silently widening a search's scope.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{subjectId}}\",\n    \"version\": 1\n  },\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"EU\"\n    ],\n    \"languages\": [\n      \"en\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"sandbox\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('regional code refused', () => pm.expect([400,422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown search -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/00000000-0000-0000-0000-000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "00000000-0000-0000-0000-000000000000"]
+            },
+            "description": "A tenant learns nothing about what exists outside its own scope - 404, not 403."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('not found', () => pm.expect([403,404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin route without the role -> 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/source-health",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "source-health"]
+            },
+            "description": "Run this with an `analyst` key. Permission is checked per route, not per prefix."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "console.log('403 here means your key lacks source_admin. That is the guard working.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

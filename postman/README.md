@@ -53,10 +53,13 @@ route — `POST /v1/searches` needs `search:write`, the admin routes need `admin
 
 ## 4. Import into Postman
 
-Import both files from this folder:
+Import from this folder:
 
-- `erly-adverse-search.postman_collection.json`
-- `local.postman_environment.json`
+| File                                               | What it is                                                   |
+| :------------------------------------------------- | :----------------------------------------------------------- |
+| `erly-adverse-search-full.postman_collection.json` | **All 34 endpoints**, 48 requests, 11 folders. Start here    |
+| `erly-adverse-search.postman_collection.json`      | The short version — just the happy path and the refusals     |
+| `local.postman_environment.json`                   | `baseUrl`, `apiKey` and the ids the requests fill in for you |
 
 Select the **Erly adverse-search — local** environment, then paste the secret from step 3 into
 the `apiKey` variable.
@@ -71,6 +74,12 @@ the `apiKey` variable.
 | **3 — Results**  | Findings, coverage and the association graph                                             |
 | **4 — Admin**    | Source health, coverage, kill switch. Needs a `source_admin` key                         |
 | **5 — Refusals** | The API saying no, correctly. Worth running once                                         |
+
+The full collection adds folders for auth, the taxonomy and policy lifecycles, capability
+coverage, the reserved 501 endpoints, and — in **5 — Admin: source registry** — the SEC source
+proposal, submit, approve and activate requests, with the body already filled in from
+`apps/api/src/sources/registry/sec-litigation-releases.ts`. That is the first two steps of taking
+a source live, ready to send.
 
 Or use **Run collection** and let it walk the whole thing.
 
