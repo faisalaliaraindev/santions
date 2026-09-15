@@ -27,6 +27,97 @@ Say what you did about it.
 
 ---
 
+## 2026-09-15 (end of day) — **Session close: Phase E paused, extraction is next**
+
+**Read this one first if you are starting cold, then read
+[`phase-f.md`](./phase-f.md), which was expanded into a real brief today.**
+
+**Did.** Nothing new built. This entry exists to hand over cleanly. The work of the day is in the
+two entries below it: live mode and rungs 3–4 (D-046), then the FR-06 relevance filter (D-047).
+
+**State of the tree.** Clean, committed, everything green:
+
+```
+lint · typecheck · format     clean
+unit          829      invariants     29      evaluation     12
+security      106      integration   207      API e2e        10
+```
+
+`pnpm verify:local` still fails by design — `end-to-end (browser)` is unimplemented and exits
+non-zero rather than passing vacuously.
+
+**Still true, and check it is still true before you claim otherwise: no live source has been
+contacted by this project.**
+
+---
+
+### What the next session is starting: the extraction model (Phase F)
+
+The pipeline currently calls `MockExtractionModel` — rule-based, keyword-driven, honest about it
+(`modelId` and `promptVersion` are null on every assertion). It only ever finds what its keyword
+table already knows, so **the pipeline has never been run against extraction it could be
+surprised by.** That is the single biggest thing between here and a Postman result worth
+believing.
+
+**`docs/execution/phase-f.md` is now a full brief, not the outline.** It carries the execution
+order, the exact files, and the two blockers below. Work from it.
+
+### Two blockers I found while writing that brief — both would cost hours if hit cold
+
+**1. D7 says "benchmarked on the labelled set". The labelled set has no document text.**
+`packages/evaluation/src/dataset/seed.ts` has 16 cases carrying document _metadata_ and the _axis
+inputs_ a pipeline would produce — by design (D-005), because that is the seam that lets
+`runAllInvariants` run against real output without touching the harness. But there are **no
+bodies**, so there is nothing to extract from and D7 cannot be executed as written. A labelled
+**extraction** corpus has to be decided and built first. Three options and a recommendation are in
+phase-f.md §3.1. **Do not start F2 before it is settled** — the benchmark's shape determines the
+adapter's whole test surface.
+
+**2. The pipeline hands raw HTML to the extractor and calls it normalised text.** One line in
+`search-pipeline.service.ts` (~665):
+
+```ts
+const text = new TextDecoder().decode(fetched.data.body);
+```
+
+- **No normalisation.** `ExtractionInput.text` is documented as normalised text with the caller
+  holding the offset map. There is neither. Spans therefore point into **raw HTML** — every offset
+  shown to a reviewer, and every offset the FR-07 validator would check. Hidden only because the
+  fetch fixtures are effectively plain text; the first real HTML page breaks it.
+- **No charset handling.** `TextDecoder()` is UTF-8 and ignores the declared charset. A Spanish
+  page served as ISO-8859-1 — common on Latin American news sites — decodes to mojibake and name
+  matching silently stops matching. Same failure class as the `María` → `Mar?a` shell issue in
+  `postman/README.md`, and the same symptom: a clean `NO_MATCHES_FOUND` that reads as an absence
+  of news.
+
+Both are **F1**, which is why F1 comes before any model work.
+
+### One more thing the brief changes: build the validator before the model
+
+The outline numbers validation F3, after the model at F2. Work it **F1 → F3 → F2**. The eight
+FR-07 rules are what make a model's output checkable, and written second they get written against
+whatever the model happened to produce; written first they are its acceptance criteria. Note that
+**no FR-07 validation module exists anywhere in the repo** — `grep validateAssertion` returns
+nothing. It is a from-scratch step in `packages/domain` (pure, no I/O), not a wiring step.
+
+**Next session should:** run the health check in `START-HERE.md`, then open `phase-f.md` and start
+**F1** — the normalisation and charset fix at `search-pipeline.service.ts` ~665, with an offset
+map so spans point into text rather than markup.
+
+**Waiting on the user, not on code** (unchanged, none of it blocks extraction):
+
+1. Verified endpoints **and named first-contact approvals** for cascade rungs 2, 3 and 4. The
+   three registry records are inert templates and stay refused until someone checks the addresses.
+2. The source list as `name | endpoint URL | countries | languages | kind`.
+3. SEC live activation — `pnpm first-contact` is written and has never been run.
+4. The two Costa Rican sanctions spreadsheets. **List matching, not adverse media** — that is
+   open decision **D4**, due at this same gate. No paths supplied yet.
+
+**Decisions touched:** none closed. **D7** and **D9** are the two due at G7 and both are open;
+**D4** is also due at G7. **D15** remains the nearer blocker for live Costa Rican sources.
+
+---
+
 ## 2026-09-15 (late) — **The FR-06 relevance filter** (D-047)
 
 **Did.** `packages/domain/src/planning/relevance.ts` — pure, nine FR-06 signals, `assessRelevance`.

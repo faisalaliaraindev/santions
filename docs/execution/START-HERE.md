@@ -7,7 +7,29 @@ of previous sessions. It is deliberately short.
 
 ## 1. Active phase
 
-> **Phase E — Query planning, discovery cascade and fetch (gate G6)**
+> **Phase F — Extraction, classification and the full pipeline (gate G7)**
+>
+> 🔧 **Starting now: the extraction model.** Phase E's discovery and fetch path is built and
+> green; the pipeline runs end to end in mock mode and over real HTTP. What it does _not_ have is
+> extraction it could be surprised by — `MockExtractionModel` is rule-based and keyword-driven, so
+> it only ever finds what its own table already knows. That is the largest thing between here and
+> a result worth believing.
+>
+> **Brief: [`phase-f.md`](./phase-f.md) — expanded into a full brief on 2026-09-15.** It carries
+> an execution order that deliberately differs from the `F1`–`F7` numbering (**build the FR-07
+> validator before the model**), and **two blockers found while writing it**: the labelled set has
+> no document bodies, so D7 cannot be benchmarked as written; and the pipeline hands **raw HTML**
+> to the extractor while calling it normalised text, with no charset handling. Read §3 before
+> writing code.
+>
+> **The largest gap in the pipeline is unchanged: FR-10 clustering is not wired**, so a syndicated
+> copy still counts as a second independent source on axis D. It sits in F5, and it is the
+> highest-value thing to pull forward if the phase splits across sessions, because it changes
+> bands being produced today.
+>
+> ---
+>
+> **Phase E — Query planning, discovery cascade and fetch (gate G6) — the path is built**
 >
 > 🔧 **Current work: the live-source path. Steps 1 and 2 of eight are done, and step 3 has its
 > foundations.** `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and
@@ -146,10 +168,11 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today: clean, clean, **726 passed, 29 passed, 12 passed**.
+Expected today (2026-09-15): clean, clean, **829 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**206 integration** tests and `pnpm test:security` **106 security** tests.
+**207 integration** tests, `pnpm test:security` **106 security** tests, and `pnpm test:e2e:api`
+**10 API end-to-end** tests over real HTTP, real SQS and a real worker.
 
 Coverage is gated at 85/80 and currently reports 94.07% / 90.46% — but only under CI's own
 invocation, which is
@@ -196,12 +219,12 @@ product that states something untrue about a real person.
 | B     | G3     | Identity, tenancy, API contract      | [`phase-b.md`](./phase-b.md) |
 | C     | G4     | Persistence, jobs, index, storage    | [`phase-c.md`](./phase-c.md) |
 | D     | G5     | Sources, graph, taxonomy admin       | [`phase-d.md`](./phase-d.md) |
-| **E** | G6     | Planning, cascade, fetch             | [`phase-e.md`](./phase-e.md) |
-| F     | G7     | Extraction and the full pipeline     | [`phase-f.md`](./phase-f.md) |
+| E     | G6     | Planning, cascade, fetch             | [`phase-e.md`](./phase-e.md) |
+| **F** | G7     | Extraction and the full pipeline     | [`phase-f.md`](./phase-f.md) |
 | G     | G8     | Control panel                        | [`phase-g.md`](./phase-g.md) |
 | H     | G9–G11 | Integration, live sources, hardening | [`phase-h.md`](./phase-h.md) |
 
-Briefs for A, B, C and D are complete, and all four phases are done. E through H are outlines that must be expanded into full
+Briefs for A, B, C, D, E and **F** are complete. G and H are outlines that must be expanded into full
 briefs **at the start of their phase** — deliberately, because their detail depends on what
 earlier phases reveal. Writing them out now would harden guesses into instructions. Each
 outline says what expanding it involves.
