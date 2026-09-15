@@ -27,6 +27,111 @@ Say what you did about it.
 
 ---
 
+## 2026-09-15 (evening) — **Group 1, the cascade**: the FR-05 ladder, and mock mode stops flattering itself
+
+**Context.** The parser, both breakers, the D17 stop conditions and the RSS connector were all
+built earlier in the day and **nothing called them**. This is the piece that joins them to the
+pipeline. Also ran the integration and security suites for the first time, and built the API
+end-to-end suite.
+
+---
+
+### Two suites that had never been run
+
+206 integration and 106 security tests, all passing. They were the largest untested surface in the
+repo and needed two commands with the stack up.
+
+### The API end-to-end suite — `pnpm test:e2e:api`
+
+Ten tests. In through the HTTP door and out through it, with the real outbox, the real SQS queue
+and a real worker in between. `tests/integration/pipeline.test.ts` drives the handler directly,
+which is right for what it asserts — but nothing proved the pieces were _joined_.
+
+**It is not the browser e2e suite and `pnpm test:e2e` is still red.** That one is G8 and mostly
+lives in the frontend repo. Pointing it at this suite would have made `verify:local` green and
+been exactly the failure `verify-local.mjs` says it exists to prevent, so there are two entries
+now and one is honestly unimplemented.
+
+Two things writing it exposed, both worth keeping:
+
+- **Starting only the worker leaves every search at `QUEUED`.** `OutboxPublisher` turns the
+  committed row into an SQS message and only `main.ts` starts it. Either process missing gives the
+  identical symptom and no log line explaining it.
+- **The `afterAll` hook timed out at Vitest's 10s default while every test passed.** The consumer
+  long-polls SQS with `WaitTimeSeconds: 20`, so a drain takes that long.
+
+### The cascade — D-045
+
+`packages/domain/src/planning/cascade.ts` is the FR-05 table and every decision about it, pure,
+23 tests. `CascadeService` does the I/O and nothing else. `LadderBuilder` reads the registry.
+
+**Two things FR-05 does not say had to be decided.**
+
+**What happens on success.** The table only says what happens on _failure_. This walks the whole
+ladder rather than first-hit-wins, and the reason is axis D: FR-11 grants `CORROBORATED` on two
+independent Tier 2–3 sources, and stopping at the first rung that returns something makes that
+clause structurally unreachable. The banding engine would carry a rule it could never satisfy.
+
+**What is on the ladder.** A source sits at **the rung its approved version records**, read fresh
+every run. Approving a source at rung 2 puts it on the ladder; retiring its version removes it.
+Same rule as D-043 one level up.
+
+**The distinction the whole thing exists to keep:** a source that answered "nothing" is not a gap;
+a rung with nothing behind it is. `EMPTY` produces no coverage outcome, `NO_SOURCE` produces a
+`SKIPPED` one naming the rung as unsearched, `FAILED` stays `FAILED` so nobody investigates an
+outage at a publisher that is working.
+
+### What changed visibly, verified against the running stack
+
+Mock mode now **admits it searches two rungs of seven**. A real search over HTTP returns the same
+2 findings it always did, and its coverage now names rungs 0, 1, 3, 4 and 6 as unsearched, by
+name. Before this, discovery reported one line and the run looked considerably more thorough than
+it was.
+
+Also corrected: the mock web adapter serves rungs 5 and 6 and was **seeded at rung 3**, so mock
+mode was rehearsing a ladder that does not exist.
+
+### Verified
+
+```
+lint / typecheck / format   clean
+unit            777   (was 754)
+invariants       29
+evaluation       12
+integration     206
+e2e-api          10
+```
+
+Plus a real HTTP search returning 2 findings with per-rung gaps in its coverage.
+
+`verify:local` passes everything except the browser e2e suite, and fails on that, correctly.
+
+### Left half-done
+
+- **Rung 0 has no adapter** and reports unsearched on every run. There is no feed poller. That is
+  deliberate — an empty local index that always answered "nothing" would convert a missing
+  capability into a clean answer — but it is a real gap in what the ladder can reach.
+- **Rungs 3 and 4 have no adapter either.** GDELT is JSON and needs no XML parser; Bing News RSS
+  can reuse `RssNewsDiscoveryAdapter` unchanged. Both are now small: the ladder will pick them up
+  from the registry the moment a source is approved at that rung.
+- **`RssNewsDiscoveryAdapter` is still not constructed in live mode.** `buildSourceAdapters`
+  returns an empty news list, so a live process has an empty ladder. Building one adapter per
+  approved RSS source is the remaining wiring, and it needs the registry read that `LadderBuilder`
+  already does — the two should probably meet.
+- **The relevance filter (step 4) is still not built**, so every discovered lead goes to the fetch
+  gate.
+
+### Next session should
+
+1. **Construct `RssNewsDiscoveryAdapter` per approved source in live mode.** Without it the live
+   ladder is empty and every rung reports unsearched — honest, and useless.
+2. Then Group 2: propose/approve/activate the SEC source, and the first `GET /robots.txt`.
+
+### Decisions touched
+
+**D-045** added. **D-043** extended in spirit: not just a source's address but its _position_ on
+the ladder is registry content.
+
 ## 2026-09-15 (late) — **Group 0 of the E2E plan**: the API is callable, and two defects the docs were hiding
 
 **Context.** The earlier part of this session built the XML parser, both breakers, the D17 stop
