@@ -196,6 +196,7 @@ We only write down addresses we know are real.
 | File                            | What is in it                      |
 | :------------------------------ | :--------------------------------- |
 | `docs/SIMPLE-FLOW.md`           | The same thing, as diagrams        |
+| `docs/TODO-E2E.md`              | The checklist to a working system  |
 | `docs/INTEGRATION-AUDIT.md`     | HubSpot + SharePoint: audit + plan |
 | `docs/execution/START-HERE.md`  | Where the work is up to right now  |
 | `docs/execution/handoff-log.md` | What each work session did         |
