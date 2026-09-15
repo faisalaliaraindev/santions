@@ -195,6 +195,7 @@ We only write down addresses we know are real.
 
 | File                            | What is in it                      |
 | :------------------------------ | :--------------------------------- |
+| `docs/SIMPLE-FLOW.md`           | The same thing, as diagrams        |
 | `docs/execution/START-HERE.md`  | Where the work is up to right now  |
 | `docs/execution/handoff-log.md` | What each work session did         |
 | `docs/decisions.md`             | Every decision and why we made it  |
