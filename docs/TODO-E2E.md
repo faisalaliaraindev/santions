@@ -25,11 +25,11 @@ The project's own gates run to **G11**. This list maps onto them so it does not 
 
 | Group                    | Phase / gate |
 | :----------------------- | :----------- |
-| 0 — Postman today        | —            |
+| 0 — Postman today        | — ✅ done    |
 | 1 — Real search          | E / **G6**   |
 | 2 — First live source    | H / G10      |
 | 3 — Real findings        | F / **G7**   |
-| 4 — Integration ready    | H / G9       |
+| 4 — API surface          | H / G9       |
 | 5 — Run it in production | H / G11      |
 | 6 — See what it is doing | H / G11      |
 | 7 — Prove it             | all gates    |
@@ -37,27 +37,34 @@ The project's own gates run to **G11**. This list maps onto them so it does not 
 
 ---
 
-## Group 0 — Postman working today, on mock data
+## Group 0 — Postman working today, on mock data ✅ DONE 2026-09-15
 
 Goal: anyone can drive the whole API from Postman and get real responses with fake data.
 
-- [ ] 🔴 **S — A script that issues an API key.** `pnpm key:issue --tenant t-1 --env sandbox`,
-      prints the key once. Today only `scripts/demo-api.mjs` can mint one, by importing the
-      service and talking to Mongo directly. There is no other way in.
-      _New:_ `scripts/issue-api-key.mjs` · _Uses:_ `apps/api/src/tenancy/api-key.service.ts`
+- [x] **A script that issues an API key.** `pnpm key:issue`. Prints the secret once; only a hash
+      is stored. Also does `--list` and `--revoke`. Refuses to run against a non-local database
+      unless you pass `--i-am-sure`.
+      _Built as a script, not an endpoint:_ decision **D-007** defers the commercial self-service
+      layer and records that keys are provider-managed in this phase. A script an operator runs is
+      what provider-managed means. Building the endpoint would have quietly closed a decision
+      nobody has taken.
+      _File:_ `scripts/issue-api-key.mjs`
 
-- [ ] **S — A Postman collection in the repo.** The six caller endpoints, with the key as an
-      environment variable and the search id captured from the 202 response.
-      _New:_ `postman/erly-adverse-search.postman_collection.json`
+- [x] **A Postman collection in the repo.** Six folders: health, subject, search, results, admin,
+      and the refusals worth seeing once. Ids are captured between requests, the search poll
+      re-runs itself until terminal, and the test scripts warn when findings are empty **and**
+      coverage is incomplete — which is not a clean result.
+      _File:_ `postman/erly-adverse-search.postman_collection.json`
 
-- [ ] **S — A Postman environment file.** `baseUrl`, `apiKey`, `tenantId`.
-      _New:_ `postman/local.postman_environment.json`
+- [x] **A Postman environment file.**
+      _File:_ `postman/local.postman_environment.json`
 
-- [ ] **S — Put the steps in the README.** `local:up` → `local:bootstrap` → `dev:api` → import
-      → set key → send.
+- [x] **The steps written down**, with a troubleshooting table for the seven things that actually
+      go wrong.
+      _Files:_ `postman/README.md`, and a "Calling the API" section in the root `README.md`
 
 **Done when:** a new developer clones the repo and gets a search result in Postman in under ten
-minutes.
+minutes. ✅
 
 ---
 
@@ -142,27 +149,36 @@ Goal: stop returning thin results.
 
 ---
 
-## Group 4 — Ready for a real integration (G9)
+## Group 4 — Complete the API surface (G9)
 
-Goal: HubSpot, SharePoint or anything else can connect safely. Detail in
-[`INTEGRATION-AUDIT.md`](./INTEGRATION-AUDIT.md).
+Goal: every documented endpoint either works or says clearly why it does not, and a machine
+client can be run safely.
 
-- [ ] 🔴 **S — API key endpoints.** `POST` / `GET` / `DELETE /v1/tenant/api-keys`. Create,
-      rotate, revoke, list and audit are all written and tested. Only the HTTP door is missing.
-      _File:_ `apps/api/src/tenancy/api-key.service.ts` · _New:_ a controller
+- [ ] 🔵 **S — Decide the eight reserved endpoints.** `/v1/admin/plans`,
+      `/v1/admin/tenants/{id}/usage`, `/v1/tenant/usage` and `/v1/tenant/api-keys` return **501**
+      with a documented reason, deferred by **D-007**. Either implement them or retire them from
+      the contract. Leaving a documented endpoint permanently unimplemented is the thing that
+      makes an OpenAPI document untrustworthy.
+      _File:_ `apps/api/src/common/reserved.controller.ts`
 
 - [ ] 🔵 **M — Rate limiting.** `RATE_LIMITED` exists as an error code and the OpenAPI document
       lists 429 on `POST /v1/searches`. **Nothing throws it.** A looping caller is unlimited.
+      _File:_ `packages/contracts/src/errors/errors.ts` has the code
 
 - [ ] 🔵 **M — Webhook on search completion.** The outbox exists and publishes only to the
-      internal queue. Polling works until then.
+      internal queue, so polling is the only way to learn a run finished. Fine at low volume.
       _File:_ `apps/api/src/persistence/outbox.service.ts`
 
-- [ ] 🔵 **M — Report export.** Findings are JSON. A document is needed for a file store, and it
-      must carry the coverage statement and the rationale, not just the hits.
+- [ ] **S — Read a subject without knowing its version.** Only
+      `GET /v1/subjects/{id}/versions/{version}` exists. A caller holding just an id cannot read
+      one back.
 
-- [ ] 🔵 **S — Refuse `MOCK` downstream.** Any integration hard-fails when `mode !== "LIVE"`.
-      A test, not a warning.
+- [ ] **S — Endpoints for domain health.** The per-domain breaker can suspend a publisher and
+      only the service can release it. Nothing exposes that, so it is a dead end for an operator.
+      _File:_ `apps/api/src/sources/domain-health.service.ts` — suspend and release exist
+
+**Done when:** every path in `openapi.json` does what it says, and no caller can run the service
+out of budget by accident.
 
 ---
 
@@ -274,7 +290,7 @@ Not code. Still blocking.
 
 ## Shortest path, if you want it demoable first
 
-1. **Group 0** — all of it. Half a day. Postman works properly.
+1. ~~**Group 0**~~ — done. Postman works properly.
 2. **Group 1** — the cascade and the two wiring items.
 3. **Group 2** — all of it. One real source answers.
 

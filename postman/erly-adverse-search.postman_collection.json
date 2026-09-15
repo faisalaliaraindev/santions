@@ -1,0 +1,503 @@
+{
+  "info": {
+    "name": "Erly adverse-search API",
+    "description": "End-to-end walkthrough of the adverse-search service.\n\n**Read this before running anything.**\n\n1. Start the stack: `pnpm local:up && pnpm local:bootstrap`\n2. Start the API: `pnpm dev:api`\n3. Issue a key: `pnpm key:issue` — it prints the secret once\n4. Put that secret in the `apiKey` environment variable\n5. Run the folders in order: Health → Subject → Search → Results\n\n**What you are looking at.** The service runs in mock mode. Every source is a fixture and every record is stamped `mode: \"MOCK\"`. The shape of every response is real; the content is test data. No request leaves your machine.\n\n**The one thing not to misread.** Three independent fields come back and they must be read together: `execution` (did the job finish), `findingsState` (did we find anything) and `coverage` (did we search everything we said we would). `SUCCEEDED` + `NO_MATCHES_FOUND` + `INCOMPLETE` means the run finished, found nothing, and did not search everything it promised. That is not a clean result.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "Authorization", "type": "string" },
+      { "key": "value", "value": "ApiKey {{apiKey}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Fail early and clearly rather than letting every request 401.",
+          "if (!pm.environment.get('apiKey')) {",
+          "  throw new Error('No apiKey set. Run `pnpm key:issue` and paste the secret into the environment.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [{ "key": "baseUrl", "value": "http://127.0.0.1:3000", "type": "string" }],
+  "item": [
+    {
+      "name": "0 — Health",
+      "description": "No auth needed. Confirms the API is up before you debug an auth problem that is really a stopped process.",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "live"]
+            },
+            "description": "Is the process running? Says nothing about its dependencies."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('API is alive', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Can it serve traffic? Checks the dependencies it needs. A 503 here usually means the stack is not bootstrapped."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('API is ready', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 503) {",
+                  "  console.log('Not ready. Try: pnpm local:up && pnpm local:bootstrap');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1 — Subject",
+      "description": "Who is being screened. A name is enough (decision D-011); anything more improves identity resolution.",
+      "item": [
+        {
+          "name": "Create a subject",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"María Fernanda Solís Rojas\",\n  \"aliases\": [],\n  \"countryContext\": [\"CR\"],\n  \"dateOfBirth\": { \"value\": \"1972-03-15\", \"precision\": \"DAY\" },\n  \"knownCompanies\": [\n    { \"registrationNumber\": \"CR-3101-100001\", \"jurisdiction\": \"CR\" }\n  ],\n  \"externalSubjectRef\": \"postman-demo-1\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "`purpose` is required. The service records **why** a person was screened, because that is what limits who may later see the result.\n\n`knownCompanies` is accepted as user-supplied and unverified — it is labelled as such all the way through, never presented as a confirmed association."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('subject created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.environment.set('subjectId', body.subjectId);",
+                  "pm.environment.set('subjectVersion', body.version);",
+                  "console.log('subject', body.subjectId, 'v' + body.version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read a pinned subject version",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects/{{subjectId}}/versions/{{subjectVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects", "{{subjectId}}", "versions", "{{subjectVersion}}"]
+            },
+            "description": "Subjects are versioned and immutable. A search pins the exact version it ran against, so a result six months old can still say who it was about at the time."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 — Search",
+      "description": "Start a run. The response is a receipt, not an answer.",
+      "item": [
+        {
+          "name": "Create a search",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "description": "Send the same key twice and you get 200 with the same searchId, not a second search. Use a stable value derived from your own record id in production."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{subjectId}}\",\n    \"version\": {{subjectVersion}}\n  },\n  \"externalCaseRef\": \"postman-case-1\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"CR\"],\n    \"languages\": [\"es\", \"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"sandbox\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "Returns **202** and a `searchId`. The run is queued; the worker does the work.\n\nA queued run reports `findings: NOT_EVALUATED`. Rendering that as a result would show someone \"nothing found\" about a search that has not started."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('search accepted', () => pm.expect([200, 202]).to.include(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "pm.environment.set('searchId', body.searchId);",
+                  "console.log('search', body.searchId, '-', body.execution);",
+                  "if (pm.response.code === 200) {",
+                  "  console.log('This was an idempotent replay — same key, same search.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Poll until terminal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}"]
+            },
+            "description": "Run this until `execution` is terminal: `SUCCEEDED`, `PARTIAL`, `FAILED` or `CANCELLED`.\n\nIn a Collection Run this request re-runs itself until it settles. The `ETag` header carries the revision if you need to detect a stale read."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "console.log(body.execution, '| findings:', body.findings, '| coverage:', body.coverage);",
+                  "",
+                  "if (!terminal.includes(body.execution)) {",
+                  "  // Re-run this request until the run settles. Bounded, so a stuck run does not loop forever.",
+                  "  const tries = Number(pm.environment.get('pollTries') || 0) + 1;",
+                  "  pm.environment.set('pollTries', tries);",
+                  "  if (tries > 30) {",
+                  "    pm.environment.unset('pollTries');",
+                  "    pm.test('run reached a terminal state', () => pm.expect.fail('Still ' + body.execution + ' after 30 polls. Is the worker running? `pnpm dev:worker`'));",
+                  "  } else {",
+                  "    setTimeout(() => {}, 1000);",
+                  "    postman.setNextRequest('Poll until terminal');",
+                  "  }",
+                  "} else {",
+                  "  pm.environment.unset('pollTries');",
+                  "  pm.test('run reached a terminal state', () => pm.expect(terminal).to.include(body.execution));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List searches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches?limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"],
+              "query": [{ "key": "limit", "value": "20" }]
+            },
+            "description": "Scoped to the calling key's tenant. There is no way to ask for another tenant's searches."
+          }
+        },
+        {
+          "name": "Cancel a search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Cancelled from Postman\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}", "cancel"]
+            },
+            "description": "Only while it is still running. A finished search stays finished — cancelling is not a way to erase a result."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 — Results",
+      "description": "What the search produced, and what it could not reach.",
+      "item": [
+        {
+          "name": "Findings and coverage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/findings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}", "findings"]
+            },
+            "description": "There is deliberately **no endpoint that returns findings alone**.\n\nRead together:\n- `findings` — what was found, each with its band, four axis values and rationale\n- `coverage` — whether everything promised was searched\n- `sourceOutcomes` — what each source did, including what refused us and why\n- `rejectedLeads` — candidates deliberately not promoted, with reasons. Evidence of diligence, not noise\n- `noMatchStatement` — when there are no findings, what the absence does and does not mean\n- `mode` — `MOCK` or `LIVE`\n\nA `band` is not a score. Do not rank, average or threshold it into a number."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings returned', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "",
+                  "console.log('mode:', body.mode);",
+                  "console.log('findings:', body.findings.length, '| rejected leads:', body.rejectedLeads.length);",
+                  "console.log('findingsState:', body.findingsState, '| coverage:', body.coverage);",
+                  "",
+                  "pm.test('mode is stated', () => pm.expect(['MOCK', 'LIVE']).to.include(body.mode));",
+                  "",
+                  "// The check that matters. An empty result with incomplete coverage is NOT a clean result.",
+                  "if (body.findings.length === 0 && body.coverage !== 'WITHIN_DECLARED_SCOPE') {",
+                  "  console.log('---');",
+                  "  console.log('NOT a clean result: nothing was found AND not everything was searched.');",
+                  "  console.log(body.noMatchStatement && body.noMatchStatement.statement);",
+                  "}",
+                  "",
+                  "if (body.mode === 'MOCK') {",
+                  "  console.log('--- This is fixture data. Nothing was fetched from any real source.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Association graph",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/associations",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{searchId}}", "associations"]
+            },
+            "description": "The company graph, frozen to this run. An officer who resolved only partially attaches no companies — a partial identity match is not an association."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 — Admin",
+      "description": "Source registry and operational controls. Needs a key with `source_admin`:\n\n`pnpm key:issue --role source_admin --label \"postman admin\"`",
+      "item": [
+        {
+          "name": "Source health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/source-health",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "source-health"]
+            },
+            "description": "Breaker state, budget spend and kill switch, per source. This is what an operator watches once anything is live."
+          }
+        },
+        {
+          "name": "Capability coverage for a jurisdiction",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/coverage/CR",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "coverage", "CR"]
+            },
+            "description": "What the service can and cannot do in a country, and why. Anything other than SUPPORTED means an empty result is reported as `NOT_ESTABLISHED` rather than as \"no findings\"."
+          }
+        },
+        {
+          "name": "List source versions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources"]
+            },
+            "description": "Every source version and its lifecycle state. A source is only usable when a version is ACTIVE."
+          }
+        },
+        {
+          "name": "Engage a kill switch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Testing the kill switch from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources", "fixture-newsroom", "kill-switch"]
+            },
+            "description": "One person, effective immediately, mid-run. The reason is mandatory and reaches the coverage statement of every run that wanted this source.\n\nReleasing needs a **different** person — see the next request."
+          }
+        },
+        {
+          "name": "Release a kill switch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Testing complete\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch/release",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources", "fixture-newsroom", "kill-switch", "release"]
+            },
+            "description": "Four eyes. With one key this returns **403** — that is the check working, not a bug. Issue a second key to release it:\n\n`pnpm key:issue --role source_admin --label \"second approver\"`"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 — Refusals worth seeing",
+      "description": "The API refusing things correctly is most of what it does. These are worth running once so the behaviour is familiar before it happens in anger.",
+      "item": [
+        {
+          "name": "No key → 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "An unauthenticated request gets 401 with no detail about what exists."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('refused without a key', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Subject with no purpose → 422",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Someone Without A Purpose\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "`purpose` is required. The service will not hold a person's name without a recorded reason for screening them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused without a purpose', () => pm.expect([400, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown field → 422",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Typo Tester\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"contryContext\": [\"CR\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "Schemas are strict. A misspelled field is rejected rather than silently dropped, so a client typo fails loudly instead of quietly narrowing a search."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('typo rejected, not ignored', () => pm.expect([400, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reserved endpoint → 501",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "Deliberate. Decision **D-007** defers the commercial self-service layer, so keys are provider-managed this phase — use `pnpm key:issue`.\n\nIt returns 501 with a documented reason rather than 404, so the gap is visible to an integrator instead of looking like something to work around."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reserved, and says so', () => pm.expect([403, 501]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

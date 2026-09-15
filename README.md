@@ -57,27 +57,51 @@ To run only what exists and passes today:
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm test:unit         # 165 tests
+pnpm test:unit         # 754 tests
 pnpm test:invariants   #  29 tests — the I1-I10 release gate, needs no infrastructure
 pnpm test:evaluation   #  12 tests
 ```
 
+## Calling the API
+
+Five steps from a clean checkout to a search result in Postman.
+
+```bash
+pnpm local:up && pnpm local:bootstrap   # start and seed the stack
+pnpm dev:api                            # terminal 1 — accepts searches
+pnpm dev:worker                         # terminal 2 — runs them
+pnpm key:issue                          # prints a machine API key, once
+```
+
+Then import `postman/erly-adverse-search.postman_collection.json` and
+`postman/local.postman_environment.json`, paste the key into the `apiKey` variable, and run the
+folders in order. Full walkthrough: [`postman/README.md`](./postman/README.md).
+
+`pnpm demo:api` does the same sequence from the command line if you would rather watch it than
+click it.
+
+**Everything above runs in mock mode.** Every source is a fixture, every record is stamped
+`mode: "MOCK"`, and nothing leaves your machine. The shape of every response is real; the content
+is test data.
+
 ## Commands
 
-| Command                                               | What it does                                                           |
-| :---------------------------------------------------- | :--------------------------------------------------------------------- |
-| `pnpm local:up`                                       | Start dependencies; waits for each service's own healthcheck           |
-| `pnpm local:down`                                     | Stop dependencies, **keeping** persisted volumes                       |
-| `pnpm local:reset`                                    | Delete local volumes, behind an explicit typed confirmation            |
-| `pnpm local:bootstrap`                                | Seed the selected local environment — _not implemented (G3)_           |
-| `pnpm dev`                                            | Run API, worker and panel — _not implemented (G3)_                     |
-| `pnpm lint` / `format` / `typecheck`                  | Quality gates                                                          |
-| `pnpm test:unit`                                      | Domain unit tests                                                      |
-| `pnpm test:invariants`                                | **The I1-I10 release gate.** Runs with no I/O dependency.              |
-| `pnpm test:evaluation`                                | FR-16 metrics on the held-out split                                    |
-| `pnpm test:integration` / `security` / `e2e` / `load` | _Not implemented_ — exit non-zero                                      |
-| `pnpm verify:local`                                   | Aggregates mandatory non-live checks; fails on skipped required suites |
-| `pnpm lexicon:audit`                                  | Fails if any query term maps to a protected characteristic             |
+| Command                                               | What it does                                                             |
+| :---------------------------------------------------- | :----------------------------------------------------------------------- |
+| `pnpm local:up`                                       | Start dependencies; waits for each service's own healthcheck             |
+| `pnpm local:down`                                     | Stop dependencies, **keeping** persisted volumes                         |
+| `pnpm local:reset`                                    | Delete local volumes, behind an explicit typed confirmation              |
+| `pnpm local:bootstrap`                                | Seed the selected local environment                                      |
+| `pnpm dev:api` / `pnpm dev:worker`                    | Run the API and the worker. Both are needed for a search to finish       |
+| `pnpm key:issue`                                      | Mint a machine API key. Prints the secret once (D-007: provider-managed) |
+| `pnpm demo:api`                                       | End-to-end walkthrough over the real HTTP API, mock sources              |
+| `pnpm lint` / `format` / `typecheck`                  | Quality gates                                                            |
+| `pnpm test:unit`                                      | Domain unit tests                                                        |
+| `pnpm test:invariants`                                | **The I1-I10 release gate.** Runs with no I/O dependency.                |
+| `pnpm test:evaluation`                                | FR-16 metrics on the held-out split                                      |
+| `pnpm test:integration` / `security` / `e2e` / `load` | _Not implemented_ — exit non-zero                                        |
+| `pnpm verify:local`                                   | Aggregates mandatory non-live checks; fails on skipped required suites   |
+| `pnpm lexicon:audit`                                  | Fails if any query term maps to a protected characteristic               |
 
 Live-mode commands (`test:contract:live`, `measure:coverage`, `verify:aws`) do not exist yet.
 They will require configured access and owner authorisation. **Live mode defaults off.**
