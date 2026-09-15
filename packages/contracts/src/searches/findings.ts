@@ -176,7 +176,15 @@ export const rejectedLeadSchema = z
     queryId: z.string(),
     /** Why it did not become a finding, in a reviewer's words. */
     reason: z.string(),
-    stage: z.enum(['FETCH', 'EXTRACTION', 'CLASSIFICATION']),
+    /**
+     * Where it stopped.
+     *
+     * `RELEVANCE` is before a socket opens — FR-06's filter decided the candidate was not worth
+     * a request. It is a separate value from `FETCH` on purpose: a reviewer reading "rejected at
+     * FETCH" about something that was never fetched has been told something untrue about what
+     * the service did.
+     */
+    stage: z.enum(['RELEVANCE', 'FETCH', 'EXTRACTION', 'CLASSIFICATION']),
   })
   .strict();
 

@@ -77,6 +77,7 @@ import {
   type PreciseDate,
   type SourceCoverageOutcome,
   type TenureLabel,
+  assessRelevance,
   cascadeCoverageOutcomes,
   type RungAttempt,
   type TaxonomyVersion,
@@ -489,6 +490,18 @@ export class SearchPipeline {
     const enabledCategoryIds = input.taxonomy.categories.map((category) => category.category);
     const nameForms = [input.subject.fullName, ...input.subject.aliases.map((alias) => alias.name)];
 
+    // The pinned taxonomy's terms, in the run's languages. Read once: the relevance filter asks
+    // whether an adverse term sits near the name, and rebuilding the list per lead would be the
+    // same work a few hundred times.
+    const taxonomyTerms = input.taxonomy.lexicon
+      .filter((term) => input.languages.includes(term.language))
+      .map((term) => term.term);
+
+    /** Titles already accepted per domain, for the near-duplicate signal. */
+    const acceptedTitles = new Map<string, string[]>();
+    /** Canonical URLs already fetched in this run, for the aggregator-copy signal. */
+    const fetchedOrigins = new Set<string>();
+
     for (const { lead, query } of input.sourced) {
       // D5 / T36, the second point of use. A lead discovered ten seconds ago from a source that
       // has since been suspended is **not** fetched, and the run says so rather than dropping
@@ -519,6 +532,48 @@ export class SearchPipeline {
         continue;
       }
 
+      // FR-06 relevance, **before** the gate and therefore before any socket opens. A candidate
+      // refused here cost the publisher nothing, which is the whole point of filtering before
+      // fetching rather than after (D-047).
+      //
+      // It never decides adversity: a candidate that names the subject and no adverse term at
+      // all is still fetched. What it refuses is categorical — outside the window, the subject
+      // mentioned nowhere, not an article, a copy of something already fetched.
+      const relevance = assessRelevance({
+        title: lead.title,
+        snippet: lead.snippet,
+        url: lead.url,
+        subjectNameForms: nameForms,
+        // What would separate this subject from a namesake: a birth year, a known company. Taken
+        // from the subject record, never inferred — a guessed disambiguator would make a
+        // namesake's article look like a confirmed match.
+        disambiguators: [
+          ...(input.subject.dateOfBirth?.value === undefined ||
+          input.subject.dateOfBirth.value === null
+            ? []
+            : [input.subject.dateOfBirth.value.slice(0, 4)]),
+          ...input.subject.knownCompanies
+            .map((company) => company.name ?? '')
+            .filter((n) => n !== ''),
+        ],
+        adverseTerms: taxonomyTerms,
+        publisherTier: null,
+        publishedOn: lead.publishedAt.value,
+        window: null,
+        acceptedTitlesFromDomain: acceptedTitles.get(lead.publisherDomain) ?? [],
+        originAlreadyFetched: fetchedOrigins.has(lead.url),
+      });
+      if (relevance.decision === 'REJECT') {
+        rejected.push({
+          ...this.leadRecord(lead, query, input),
+          // Not `FETCH`. Nothing was fetched, and telling a reviewer otherwise would describe
+          // work the service did not do.
+          stage: 'RELEVANCE',
+          reason: relevance.detail,
+        });
+        continue;
+      }
+
       // The FR-06 gate (Phase E step 2). Every field of the authorisation is derived here, by
       // the one component permitted to issue one. A refusal is recorded with its reason and,
       // when it is a property of the source rather than of this URL, as a coverage gap too —
@@ -537,6 +592,15 @@ export class SearchPipeline {
         leadSnippet: lead.snippet,
         now: input.now,
       });
+      // Recorded before the fetch so the next lead's near-duplicate and aggregator-copy signals
+      // have something to compare against. A candidate that passed relevance and the gate is a
+      // candidate this run has committed to, whatever the fetch then returns.
+      acceptedTitles.set(lead.publisherDomain, [
+        ...(acceptedTitles.get(lead.publisherDomain) ?? []),
+        lead.title,
+      ]);
+      fetchedOrigins.add(lead.url);
+
       if (!gate.authorised) {
         this.recordGateRefusal({
           gate,

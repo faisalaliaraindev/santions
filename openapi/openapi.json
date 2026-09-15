@@ -1705,7 +1705,10 @@
           "cascadeRung": { "type": "integer", "minimum": 0, "maximum": 7 },
           "queryId": { "type": "string" },
           "reason": { "type": "string" },
-          "stage": { "type": "string", "enum": ["FETCH", "EXTRACTION", "CLASSIFICATION"] }
+          "stage": {
+            "type": "string",
+            "enum": ["RELEVANCE", "FETCH", "EXTRACTION", "CLASSIFICATION"]
+          }
         },
         "required": [
           "leadId",

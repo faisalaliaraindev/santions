@@ -366,8 +366,24 @@ describe('an accepted search becomes a result', () => {
     expect(page.rejectedLeads.length).toBeGreaterThan(0);
     for (const lead of page.rejectedLeads) {
       expect(lead.reason.length).toBeGreaterThan(20);
-      expect(['FETCH', 'EXTRACTION', 'CLASSIFICATION']).toContain(lead.stage);
+      // `RELEVANCE` is a lead refused **before** a socket opened (D-047).
+      expect(['RELEVANCE', 'FETCH', 'EXTRACTION', 'CLASSIFICATION']).toContain(lead.stage);
     }
+  }, 60_000);
+
+  it('refuses the tag page before it opens a socket (FR-06)', async () => {
+    const searchId = await runSearchFor(SHARED_NAME);
+    const page = await searches.findingsFor({ tenantId: TENANT, searchId });
+
+    // The fixture corpus carries one lead that is a real URL naming the subject with no article
+    // behind it. This asserts the relevance filter is *reached* and *fires* in a real run —
+    // a filter that never fires is indistinguishable from one that was never wired in. It must
+    // be refused at RELEVANCE and not at FETCH: there is no document at that URL, so a fetch
+    // would have 404ed, and a 404 here would mean the request was made before it was judged.
+    const refused = page.rejectedLeads.find((lead) => lead.url.includes('/tag/'));
+    expect(refused, 'the tag page reached the fetch stage or vanished').toBeTruthy();
+    expect(refused?.stage).toBe('RELEVANCE');
+    expect(refused?.reason).toMatch(/index|listing|not a document|article/i);
   }, 60_000);
 
   it('reports coverage alongside the findings, never findings alone', async () => {

@@ -16,6 +16,13 @@
  *   something to be caught by.
  * - **A Spanish-language item.** D-010 enables Costa Rica, whose language is Spanish, and a
  *   fixture corpus in English only would let an English-only pipeline pass every test.
+ * - **A lead that is not a document.** `lead-nonarticle-0001` is a tag page: a real URL, on a
+ *   real publisher, naming the subject, that has no article behind it. Web search returns these
+ *   constantly. The FR-06 relevance filter is supposed to refuse it before a socket opens, and
+ *   without a lead of this shape nothing in a mock run would ever exercise that refusal — a
+ *   filter that never fires looks exactly like a filter that was never wired in. There is
+ *   deliberately no document at this URL in `evidence-fetch.mock.ts`, so if the filter is
+ *   removed the lead becomes a 404 and an INCOMPLETE run rather than passing quietly.
  *
  * None of these leads carry a category, a stage or a role — see `lead.ts` for why the type has
  * no room for them.
@@ -104,6 +111,21 @@ export const FIXTURE_LEADS: readonly FixtureLead[] = [
       snippet: null,
       publisher: 'El Observador (example)',
       publisherDomain: 'observador-example.cr',
+      publishedAt: { value: null, precision: 'UNKNOWN' },
+      language: 'es',
+    },
+  },
+  {
+    // A tag page: names the subject, is not a document. FR-06 refuses it before the fetch.
+    requires: [DISCOVERY_SUBJECT_NAME],
+    rung: 5,
+    lead: {
+      leadId: 'lead-nonarticle-0001',
+      url: 'https://www.nacion-example.cr/tag/maria-fernanda-solis-rojas',
+      title: 'María Fernanda Solís Rojas — La Nación (example)',
+      snippet: 'Todas las noticias sobre María Fernanda Solís Rojas.',
+      publisher: 'La Nación (example)',
+      publisherDomain: 'nacion-example.cr',
       publishedAt: { value: null, precision: 'UNKNOWN' },
       language: 'es',
     },

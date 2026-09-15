@@ -1565,3 +1565,72 @@ subject searched afterwards, silently, with nothing thrown (T84).
 The adapter also deliberately ignores GDELT's own tone and theme scores. A discovery source's
 opinion about a document is not evidence about a person, and FR-06 is explicit that filtering
 never decides adversity.
+
+## D-047 — The relevance filter refuses on facts, never on a score, and never on adversity
+
+**Status:** Accepted · **Decided at:** Phase E step 4, 2026-09-15
+
+FR-06 gives nine signals for deciding whether a candidate is worth a request. It gives no
+weights, and no corpus exists yet to derive any. Three rules follow from that.
+
+### It never decides adversity
+
+A candidate that names the subject and no adverse term at all is still fetched. This is the
+load-bearing property and it is easy to lose: a filter that required an adverse term would only
+ever find evidence confirming a suspicion, and would never find the article that clears someone.
+The adverse-term signal is scored as a statement about _topic_ — the signal's own `detail` says
+"says nothing about what they did" — so nothing downstream can read proximity as conduct.
+
+The GDELT adapter's refusal to read tone and theme scores (D-046) is the same rule on the other
+side of the boundary: a discovery source's opinion about a document is not evidence about a
+person.
+
+### The score is recorded, explained, and does not gate
+
+`minimumScore` defaults to 0, so the number never refuses anything unless somebody deliberately
+configures a threshold. The method is `FR06_NINE_SIGNAL_UNCALIBRATED_v1` — the word is in the
+identifier so it cannot be read as a measured judgement, and so a calibrated successor gets a
+new name rather than quietly changing the meaning of stored scores. The score is computed only
+over signals that could actually be evaluated, and the ones that could not are listed: a score
+from six of nine signals must not be presented as a score from nine.
+
+Refusals are therefore **categorical** — a fact about the candidate: outside the requested
+window, not a document, or a copy of an origin already fetched.
+
+### What is _not_ a refusal: the subject's name
+
+The first draft refused a candidate whose title and snippet never named the subject, and the
+mock fixtures caught it immediately — every lead was refused and every run returned nothing.
+
+That was wrong for a reason worth recording, because it will look reasonable again. The FR-04
+plan has **company-anchored query families**, which exist precisely to find documents naming a
+_company_ the subject is associated with: "Fiscalía acusa a directiva de Inversiones Talamanca"
+names the company and the role and not the person. Refusing those deletes the entire association
+half of the product — silently, while the coverage statement still says the sources were
+searched. A headline is also not the document; a name absent from a headline is routinely in the
+second paragraph, which is the paragraph that matters.
+
+It is a missing positive signal. The score says so, and the candidate is still fetched.
+
+### The mock corpus now contains something the filter must refuse
+
+`lead-nonarticle-0001` is a tag page — a real URL on a real publisher, naming the subject, with
+no article behind it. Web search returns these constantly.
+
+Without a lead of that shape, no mock run exercised a single refusal, and **a filter that never
+fires is indistinguishable from one that was never wired in**. There is deliberately no document
+at that URL in the fetch mock, so removing the filter turns the lead into a 404 and an INCOMPLETE
+run rather than a quiet pass. An integration test asserts it is refused at `RELEVANCE` and _not_
+at `FETCH`: a 404 there would mean the request was made before the candidate was judged.
+
+### `RELEVANCE` is its own rejection stage
+
+Not folded into `FETCH`. A reviewer reading "rejected at FETCH" about something that was never
+fetched has been told something untrue about what the service did — and the distinction is also
+the audit difference between a socket that opened and one that did not.
+
+**Cost.** Recall is deliberately favoured over precision: the filter refuses little, so more is
+fetched than a calibrated filter would fetch, against publishers' rate ceilings. That is the
+right direction to err while no corpus exists — over-fetching costs requests, and over-refusing
+costs findings nobody will ever know were missed. FR-16's labelled dataset is what changes this,
+and the method name is what makes the change visible when it comes.

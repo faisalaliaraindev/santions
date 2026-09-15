@@ -94,7 +94,14 @@ export interface RejectedLeadRecord {
   readonly publisher: string;
   readonly cascadeRung: number;
   readonly queryId: string;
-  readonly stage: 'FETCH' | 'EXTRACTION' | 'CLASSIFICATION';
+  /**
+   * Where the lead stopped.
+   *
+   * `RELEVANCE` is **before a socket opened** — FR-06's filter decided the candidate was not
+   * worth a request. Separate from `FETCH` on purpose: telling a reviewer a lead was rejected at
+   * fetch, when nothing was fetched, describes work the service did not do.
+   */
+  readonly stage: 'RELEVANCE' | 'FETCH' | 'EXTRACTION' | 'CLASSIFICATION';
   readonly reason: string;
 }
 
