@@ -27,6 +27,64 @@ Say what you did about it.
 
 ---
 
+## 2026-09-15 (late) — **The FR-06 relevance filter** (D-047)
+
+**Did.** `packages/domain/src/planning/relevance.ts` — pure, nine FR-06 signals, `assessRelevance`.
+Wired into `SearchPipelineService.discover()` between the ladder walk and the fetch gate. Added
+`RELEVANCE` to the rejected-lead `stage` enum in `packages/contracts` (regenerated
+`openapi/openapi.json`) and to `findings.service.ts`. Added `lead-nonarticle-0001` to the mock
+discovery fixtures. D-047 in `docs/decisions.md`.
+
+**Verified.** lint, typecheck, format clean. 829 unit, 29 invariants, 12 evaluation, 106
+security, **207 integration (207/207 — the Meilisearch write-visibility test that flaked last
+session passed both runs today)**, 10 API end-to-end. No live source has been contacted.
+
+**Found — the mistake worth reading, because it will look reasonable again.**
+
+My first draft made _"the subject's name appears in the title or snippet"_ a **categorical
+rejection**. The mock fixtures caught it within minutes: every lead refused, every run returning
+zero findings, integration at 204/206.
+
+It was not a fixture problem. The FR-04 plan has **company-anchored query families**, which exist
+precisely to find documents naming a _company_ the subject is associated with — the fixture
+headline is _"Fiscalía acusa a directiva de Inversiones Talamanca por presunto fraude"_, which
+names the company and the role and not the person. Refusing those deletes the entire association
+half of the product, **silently**, while the coverage statement still says the sources were
+searched. A headline is also not the document: a name absent from a headline is routinely in the
+second paragraph. FR-06 lists the name as a _signal_ and makes only the window a _gate_; I had
+promoted it. It is now a missing positive signal and the score reflects it.
+
+**Found — a filter that never fires looks exactly like one that was never wired in.**
+
+With that fixed, nothing in the mock corpus was refused at all, so no mock run exercised the
+filter end to end. Added `lead-nonarticle-0001`: a tag page, a real URL on a real publisher,
+naming the subject, with no article behind it — what web search returns constantly. There is
+**deliberately no document at that URL** in `evidence-fetch.mock.ts`, so deleting the filter
+turns the lead into a 404 and an INCOMPLETE run rather than a quiet pass. The new integration
+test asserts it is refused at `RELEVANCE` and **not** at `FETCH`, because a 404 there would mean
+the request was made before the candidate was judged.
+
+**Left half-done.** Nothing in this change. The score is uncalibrated by construction
+(`FR06_NINE_SIGNAL_UNCALIBRATED_v1`, `minimumScore` defaults to 0 so it gates nothing) and stays
+that way until FR-16 produces a labelled corpus. Recall is deliberately favoured over precision
+meanwhile: over-fetching costs requests, over-refusing costs findings nobody would know were
+missed.
+
+**Next session should:** pick up the remaining TODO groups — the extraction model (**D7**, still
+open and now the largest gap between here and a useful e2e result), then FR-10 clustering.
+
+**Still waiting on the user, not on code:**
+
+1. Verified endpoints **and named first-contact approvals** for rungs 2, 3 and 4. The three
+   registry records are inert templates (`firstContactApproval: null`, `robotsPosition:
+NOT_ESTABLISHED`) and stay refused until someone checks the addresses.
+2. The source list in the agreed shape: `name | endpoint URL | countries | languages | kind`.
+3. The SEC live activation — `pnpm first-contact` is written and has never been run.
+4. The two Costa Rican sanctions spreadsheets. **That is list matching, not adverse media** —
+   open decision **D4**, and no paths supplied yet.
+
+**Decisions touched:** **D-047 recorded.** D7 and D4 still open.
+
 ## 2026-09-15 (evening) — **Group 1, the cascade**: the FR-05 ladder, and mock mode stops flattering itself
 
 **Context.** The parser, both breakers, the D17 stop conditions and the RSS connector were all
