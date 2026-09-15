@@ -27,6 +27,112 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 — Phase F, the two engineering P0s for the live path
+
+**Read this, then [`phase-f.md`](./phase-f.md) §4 for what comes next. The live path's remaining
+blockers are not code.**
+
+**Did.** Both P0 items from the previous entry, and nothing else.
+
+1. **The live rule-based `ExtractionModelPort` (D-048).**
+   `apps/api/src/sources/rule-based-extraction.adapter.ts` — a **non-mock** adapter, `mode: 'LIVE'`,
+   `modelId: null` and `promptVersion: null` on the adapter and on every assertion it emits. Wired
+   into `sources.registry.ts`, which returned `extractionModel: null` before. The mock is
+   untouched: still `mode: 'MOCK'`, still `jurisdictions: ['CR']`, still requires a
+   `MockModeWitness` a live process cannot construct (T55).
+
+   Two rules beyond what D-048 asked for, both in the adapter's header and both tested.
+   **Proximity, not presence:** a conduct or stage term counts only within 600 characters of one
+   of the subject's name forms, because a presence test over a whole page attributes its sidebar
+   and its "related articles" list to whoever the page happens to name. **An outcome wins:** where
+   an acquittal and a charge are both near, the acquittal is taken — D-047's rule reaching
+   extraction, since taking the earliest or the highest match would systematically report the
+   accusation and drop the exoneration. Name matching is word-bounded, so "Ana" no longer matches
+   inside "Santana".
+
+2. **A missing extractor is now a configuration fault** (`search-pipeline.service.ts`). A null
+   fetch or extraction adapter produces a `SKIPPED` coverage outcome named `capability:extraction`
+   (or `capability:fetch`), a run warning saying in words that it is a misconfiguration and not a
+   result, and a rejected lead at **the stage where it actually stopped** — it used to say `FETCH`
+   even when the fetcher existed and the extractor did not. Extraction `FAILED` is now also
+   distinct from "read it and it said nothing", per D-046's rule.
+
+   And because a reader of a result cannot see the adapter: **every run using an extractor with a
+   null model id now carries a warning** saying the extraction was rule-based, that its recall has
+   never been measured, and that a category it has no term for returns nothing rather than failing.
+
+3. **F1 normalisation and charset (§3.2, recorded as D-049).**
+   `apps/api/src/pipeline/normalise-document.ts` replaces `new TextDecoder().decode(body)`. Markup
+   is stripped (script and style contents dropped whole, block elements become line breaks, inline
+   elements do **not** split a word, character references decoded, whitespace collapsed); the
+   charset comes from a BOM, then the `Content-Type` parameter, then `<meta charset>` or the XML
+   declaration, then a recorded default; **nothing is sniffed**; and every output character carries
+   the index of the original character that produced it. `mapSpanToOriginal` converts a span. A
+   finding now records `textNormalisation` (charset, which declaration said so, normaliser version)
+   and `originalSpans`, so a surface showing the stored bytes can highlight the same passage.
+
+**Verified.** Everything below was run in this session, with the local stack already up:
+
+```
+lint · typecheck               clean
+unit          865  (was 829; +36 new)      invariants   29      evaluation   12
+integration   207      security   106      API e2e      10
+```
+
+The four suites that need infrastructure were run against the running stack, not skipped. **No
+live source was contacted, and `pnpm first-contact` was not run.** The extractor was exercised
+only against strings written in its own test file and against the existing fixtures.
+
+**Left half-done.** Nothing is half-built, but F1 is only half-**done**: PDF and OCR are not
+built (such a body is reported as unreadable rather than decoded as if it were text), no
+boilerplate removal is attempted, and **the four FR-07 date fields are still never parsed** — the
+rule-based extractor leaves all four null, which is correct under FR-07 and means every finding it
+produces is undated. That is the rest of F1 and it is listed as such in the brief's checklist.
+
+**Found.**
+
+- The mock fixtures are HTML, so normalisation changes what the **mock** extractor sees too. It
+  still finds everything it found before — checked directly against the fixture bodies, and the
+  207 integration tests still produce findings — but a fixture written to be found by an offset
+  will now be found at a different offset.
+- `apps/api/test/source-adapters.test.ts` asserted `live.extractionModel` was null. That assertion
+  was the old behaviour, not a safety property, and it now asserts the opposite plus the two
+  things that **are** safety properties: the adapter is not the mock, and its model id is null.
+- The rule-based extractor's term tables are English and Spanish. A document in any other
+  language yields no assertions, and that reads as "nothing found" rather than as "not read". It
+  is the same blindness as the unreviewed Spanish lexicon (D-033) and it is not fixed here; the
+  run-level warning about unbenchmarked rule-based extraction is the only thing currently saying
+  so.
+
+**Next session should:** build **F3 — the eight FR-07 validation rules** in `packages/domain`,
+pure, from scratch (`grep validateAssertion` still returns nothing), each with a test proving it
+rejects its own failure case. The brief's execution order puts the validator before the model
+deliberately: rules written after a model get written around whatever that model produced. The
+rule-based extractor is now a real thing for those rules to be applied to.
+
+**Waiting on the user, not on code** — unchanged from the previous entry, and now the **only**
+thing between this project and a live Postman run:
+
+1. `pnpm first-contact` against the SEC feed. **It has never been run, and the project owner runs
+   it — not a session.** Then `robotsPosition` updated on what robots.txt actually said, then
+   propose → approve → activate with four eyes.
+2. A subject actually present in the SEC feed for the demo. It is a `FIXED_FEED`: the name never
+   reaches the SEC, the feed is polled whole and matched locally. A Costa Rican name against it
+   gives a correct, well-reasoned `NO_MATCHES_FOUND`.
+3. Verified endpoints and named first-contact approvals for rungs 2, 3 and 4.
+4. The two Costa Rican sanctions spreadsheets — list matching, not adverse media (**D4**).
+
+**What the first live run will honestly report**, unchanged: coverage `INCOMPLETE`, most rungs
+unsearched, one live source, US and English only, every fixture source refused — plus, now, a
+warning that the extraction was rule-based and unbenchmarked.
+
+**Decisions touched:** **D-048** implemented, with a "Built" section added recording the two rules
+added while building it. **D-049 recorded** — normalisation is ours, the charset is the
+publisher's, nothing is sniffed. **D7** still open and still blocked on a corpus; it is not on the
+critical path. D9 and D4 open and due at G7.
+
+---
+
 ## 2026-09-15 (session close) — **Start here: the live extractor is the one thing blocking a live Postman search**
 
 **Read this, then [`phase-f.md`](./phase-f.md) §3.3, then start work. Nothing else is needed to

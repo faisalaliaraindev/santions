@@ -68,9 +68,40 @@ export interface FindingRecord {
     readonly cascadeRung: number;
     readonly mode: 'MOCK' | 'LIVE';
   };
+  /** Offsets into the **normalised** text, which is what `textNormalisation` describes. */
   readonly subjectMentionSpans: readonly { readonly start: number; readonly end: number }[];
   readonly conductSpan: { readonly start: number; readonly end: number } | null;
   readonly stageSpan: { readonly start: number; readonly end: number } | null;
+  /**
+   * How the text those spans point into was produced from the stored bytes (F1).
+   *
+   * Recorded rather than the offset map itself, because the normalisation is deterministic: the
+   * stored document, this charset and this normaliser version reproduce the same text and the
+   * same map. Storing a map per finding would be a second copy of the document in a different
+   * shape, and the shape would drift.
+   *
+   * `charsetSource` is the load-bearing field. `DEFAULTED` means the publisher declared no
+   * encoding and UTF-8 was assumed — so a reviewer looking at a finding with an accented name
+   * can tell whether the encoding was known or guessed.
+   */
+  readonly textNormalisation: {
+    readonly normaliserVersion: string;
+    readonly charset: string;
+    readonly charsetSource: string;
+    readonly markupRemoved: boolean;
+  };
+  /**
+   * The same spans as offsets in the **decoded original** document.
+   *
+   * Carried so a surface that shows the stored document itself — rather than the normalised text
+   * — can highlight the passage without re-running the normaliser. Null where a span could not
+   * be mapped, which is honest: a highlight that is nearly right is worse than none.
+   */
+  readonly originalSpans: {
+    readonly subjectMentions: readonly { readonly start: number; readonly end: number }[];
+    readonly conduct: { readonly start: number; readonly end: number } | null;
+    readonly stage: { readonly start: number; readonly end: number } | null;
+  };
   readonly identityFactors: readonly {
     readonly kind: string;
     readonly strength: string;

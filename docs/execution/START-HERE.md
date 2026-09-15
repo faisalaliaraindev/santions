@@ -9,24 +9,32 @@ of previous sessions. It is deliberately short.
 
 > **Phase F — Extraction, classification and the full pipeline (gate G7)**
 >
-> 🔧 **Starting now: the live extractor — the one thing blocking a live search from Postman.**
+> ✅ **Both engineering P0s for the live path are built (2026-09-16). What remains is yours.**
 >
-> **Read [`phase-f.md`](./phase-f.md) §3.3 before anything else.** `sources.registry.ts:209`
-> returns `extractionModel: null` in live mode, and the pipeline rejects a document when the
-> extractor is null. So a live run discovers real leads, filters them, passes the fetch gate,
-> opens a real socket, commits real evidence — and then rejects **every document** at
-> `EXTRACTION`, reporting `NO_MATCHES_FOUND`. To a reader that is indistinguishable from "the
-> source had nothing on this person". **D-048** decides what to do about it. Discovery is fine;
-> `ladder.builder.ts:271` builds live connectors per activated source.
+> Live mode has a real extractor: `RuleBasedExtractionAdapter` (**D-048**) — non-mock,
+> `modelId: null`, keyword-and-span, and **unbenchmarked, which every run it takes part in says
+> in its warnings**. A missing extractor is now a loud configuration fault in the warnings and the
+> coverage statement rather than a finding count of zero. And the pipeline no longer hands raw
+> HTML to the extractor: `normalise-document.ts` (**D-049**) strips markup, keeps an offset map
+> back to the original, and takes the charset from what the publisher declared.
+>
+> **Nothing live has been contacted. `pnpm first-contact` has still never been run, and the
+> project owner runs it — not a session.**
 >
 > **Priority order for a live Postman e2e** (detail in `phase-f.md` §3bis):
 >
-> | P      | What                                                                                                        | Whose                       |
-> | :----- | :---------------------------------------------------------------------------------------------------------- | :-------------------------- |
-> | **P0** | The live rule-based extractor (D-048)                                                                       | Engineering                 |
-> | **P0** | F1 normalisation and charset — SEC serves real HTML and the pipeline hands markup to the extractor today    | Engineering                 |
-> | **P1** | `pnpm first-contact` → update `robotsPosition` on what it said → propose/approve/activate                   | **Source admin, four eyes** |
-> | **P1** | Search a subject actually present in the SEC feed — it is a `FIXED_FEED`, so the name never reaches the SEC | Whoever runs the demo       |
+> | P      | What                                                                                                        | Whose                       | State           |
+> | :----- | :---------------------------------------------------------------------------------------------------------- | :-------------------------- | :-------------- |
+> | **P0** | The live rule-based extractor (D-048)                                                                       | Engineering                 | **Done**        |
+> | **P0** | F1 normalisation and charset (D-049)                                                                        | Engineering                 | **Done**        |
+> | **P1** | `pnpm first-contact` → update `robotsPosition` on what it said → propose/approve/activate                   | **Source admin, four eyes** | Open — blocking |
+> | **P1** | Search a subject actually present in the SEC feed — it is a `FIXED_FEED`, so the name never reaches the SEC | Whoever runs the demo       | Open            |
+>
+> **Engineering's next step is F3: the eight FR-07 validation rules**, from scratch, in
+> `packages/domain`, pure — `grep validateAssertion` still returns nothing. Build the validator
+> before the model (phase-f.md §4). What F1 still owes: PDF, OCR, and the four date fields — the
+> rule-based extractor leaves every date null, which is correct and means every finding it
+> produces is undated.
 >
 > **The wider phase: the extraction model.** Phase E's discovery and fetch path is built and
 > green; the pipeline runs end to end in mock mode and over real HTTP. What it does _not_ have is

@@ -10,13 +10,22 @@
  * and a `LIVE` process throws before it constructs anything. The module then registers what
  * this returns.
  *
- * **What a live process gets today, honestly stated.** Two of the six seams have a live adapter:
- * the GB company registry (D2) and, as of Phase E step 1, evidence fetch. The other four are
- * `null` in live mode rather than a mock. Not a fallback, not a stub: null, so that a caller has
- * to handle "this capability has no source" explicitly. Falling back to a mock would make a live
- * process serve fixtures (T55), and falling back to an adapter that returns empty results would
- * make a live process report clean results from sources that were never consulted, which is the
- * failure this whole service is built to avoid.
+ * **What a live process gets today, honestly stated.** Three of the six seams have a live
+ * adapter: the GB company registry (D2), evidence fetch (Phase E step 1) and — as of D-048 —
+ * extraction, which is **rule-based rather than a model** and declares that on every assertion it
+ * produces. The rest are `null` in live mode rather than a mock. Not a fallback, not a stub:
+ * null, so that a caller has to handle "this capability has no source" explicitly. Falling back
+ * to a mock would make a live process serve fixtures (T55), and falling back to an adapter that
+ * returns empty results would make a live process report clean results from sources that were
+ * never consulted, which is the failure this whole service is built to avoid.
+ *
+ * **Why extraction is no longer among the nulls.** It was, and it was the one null that produced
+ * a dishonest-looking *result*: the pipeline rejects a document when the extractor is null, so a
+ * live run discovered real leads, fetched them, committed real evidence, and then rejected every
+ * document at `EXTRACTION` and reported `NO_MATCHES_FOUND`. D-048 decided that a missing
+ * extractor must read as a configuration fault in the warnings and the coverage statement — the
+ * pipeline now does that — and that live extraction starts rule-based rather than waiting on D7,
+ * which is blocked on a benchmark corpus nobody has built.
  *
  * **The fetch adapter is null unless it can be honest.** It needs a contact URL for its user
  * agent (FR-06) and a source-health service to consult before every call (D5). Neither is
@@ -41,6 +50,7 @@ import { MockExtractionModelAdapter } from './mock/extraction-model.mock.js';
 import { MockNewsDiscoveryAdapter } from './mock/news-discovery.mock.js';
 import { MockPrimarySourceAdapter } from './mock/primary-source.mock.js';
 import { MockWebDiscoveryAdapter } from './mock/web-discovery.mock.js';
+import { RuleBasedExtractionAdapter } from './rule-based-extraction.adapter.js';
 import type { NewsDiscoveryPort } from './news-discovery.port.js';
 import type { PrimarySourcePort } from './primary-source.port.js';
 import { MockModeWitness, type OperatingMode } from './source-adapter.js';
@@ -138,8 +148,22 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
   // Live. Four seams still have no adapter; see the file header for why they are null rather
   // than stubbed. Fetch is the one Phase E step 1 fills.
   logger.log(
-    'ADVERSE_SEARCH_MODE=live: discovery and extraction have no live adapter yet (Phase E ' +
-      'steps 3 and F). Those capabilities are unavailable, not empty.',
+    'ADVERSE_SEARCH_MODE=live: discovery has no live adapter constructed here (the connectors ' +
+      'are built per activated source by the composition root). That capability is unavailable, ' +
+      'not empty.',
+  );
+
+  // D-048. Extraction was `null` here, and the pipeline rejects a document when the extractor is
+  // null — so a live run did everything right and then rejected every document at EXTRACTION,
+  // reporting a clean `NO_MATCHES_FOUND`. It is now a **rule-based** extractor that says so:
+  // `modelId` and `promptVersion` are null on the adapter and on every assertion, because that is
+  // the truthful value for an extraction no model participated in. It is not the mock — the mock
+  // needs a `MockModeWitness`, which a live process cannot construct (T55).
+  logger.warn(
+    'Live extraction is rule-based (D-048): a keyword-and-span extractor, not the D7 model. Its ' +
+      'recall against real prose is unmeasured — no labelled extraction corpus exists — so the ' +
+      'quality of what it finds must never be reported as a measurement. Every run that uses it ' +
+      'says so in its warnings and in its coverage statement.',
   );
 
   if (options.companiesHouseApiKey === null) {
@@ -206,6 +230,6 @@ export function buildSourceAdapters(options: SourceRegistryOptions): SourceAdapt
         ? null
         : new CompaniesHouseAdapter({ apiKey: options.companiesHouseApiKey }),
     evidenceFetch,
-    extractionModel: null,
+    extractionModel: new RuleBasedExtractionAdapter(),
   };
 }

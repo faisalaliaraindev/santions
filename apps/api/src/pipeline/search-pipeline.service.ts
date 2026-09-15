@@ -84,6 +84,12 @@ import {
 } from '@erly/adverse-domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
+import {
+  mapSpanToOriginal,
+  normaliseDocument,
+  NORMALISER_VERSION,
+  type NormalisedDocument,
+} from './normalise-document.js';
 import { CascadeService } from './cascade.service.js';
 import { LadderBuilder } from './ladder.builder.js';
 import { TaxonomyService } from '../admin/taxonomy.service.js';
@@ -290,7 +296,12 @@ export class SearchPipeline {
     }
 
     // ---- 4-6. Fetch, extract, band ---------------------------------------------------------
-    const { findings, rejected, accessOutcomes } = await this.assess({
+    const {
+      findings,
+      rejected,
+      accessOutcomes,
+      warnings: assessWarnings,
+    } = await this.assess({
       sourced: leads,
       subject,
       graph,
@@ -303,6 +314,9 @@ export class SearchPipeline {
       now: input.now,
     });
     sourceOutcomes.push(...accessOutcomes);
+    // How the documents were read, and anything that limits what can be concluded from them:
+    // a missing extractor, an undeclared encoding, a rule-based extraction (D-048).
+    warnings.push(...assessWarnings);
 
     return {
       findings,
@@ -463,28 +477,78 @@ export class SearchPipeline {
     findings: FindingRecord[];
     rejected: RejectedLeadRecord[];
     accessOutcomes: SourceCoverageOutcome[];
+    /** What a reader of the result has to be told about how these documents were read. */
+    warnings: string[];
   }> {
     const fetcher = this.adapters.evidenceFetch;
     const extractor = this.adapters.extractionModel;
     const findings: FindingRecord[] = [];
     const rejected: RejectedLeadRecord[] = [];
     const accessOutcomes: SourceCoverageOutcome[] = [];
+    /** Deduplicated: a normalisation problem is reported once per run, not once per document. */
+    const warnings = new Set<string>();
     /** One coverage outcome per refused source, not one per lead it cost. */
     const refusedSources = new Set<string>();
     /** The same rule for gate refusals, keyed by source *and* refusal: two gaps, two lines. */
     const gateRefusedSources = new Set<string>();
 
+    // A capability with no adapter is a **configuration fault**, and D-048 is explicit about
+    // what that must look like: it belongs in the run's warnings and in the coverage statement
+    // as an unsearched capability, and never as a finding count of zero. Before this, a live run
+    // with no extractor discovered real leads, passed the gate, committed real evidence and then
+    // reported a clean `NO_MATCHES_FOUND` — indistinguishable, to a reader, from "the source had
+    // nothing on this person". The same rule the GDELT parser follows (D-046): "could not read
+    // it" and "read it and it said nothing" are different facts and never merge.
     if (fetcher === null || extractor === null) {
+      const missing = fetcher === null ? 'fetch' : 'extraction';
+      const sentence =
+        fetcher === null
+          ? 'No evidence-fetch adapter is configured in this process, so no document was ' +
+            'retrieved and nothing was read. This is a configuration fault, not a result: the ' +
+            'leads below were never looked at.'
+          : 'No extraction adapter is configured in this process, so no retrieved document was ' +
+            'read. This is a configuration fault, not a result: nothing was concluded about ' +
+            'this subject from any document, and an empty finding list here means the service ' +
+            'was misconfigured rather than that the sources were silent.';
+
+      warnings.add(sentence);
       for (const { lead, query } of input.sourced) {
         rejected.push({
           ...this.leadRecord(lead, query, input),
-          stage: 'FETCH',
-          reason:
-            'No fetch or extraction adapter is configured in this mode, so the document was ' +
-            'never retrieved. The lead stands; nothing was concluded from it.',
+          // The stage names where it actually stopped. Saying FETCH when the fetcher exists and
+          // the extractor does not would describe work the service did not do.
+          stage: fetcher === null ? 'FETCH' : 'EXTRACTION',
+          reason: sentence,
         });
       }
-      return { findings, rejected, accessOutcomes };
+      accessOutcomes.push({
+        // Not a registry source: the gap is a capability this process does not hold. Named as
+        // such so a coverage reader is not sent looking for a publisher that is working fine.
+        sourceId: `capability:${missing}`,
+        sourceName: `${missing === 'fetch' ? 'Evidence fetch' : 'Extraction'} (capability)`,
+        cascadeRung: 0,
+        // SKIPPED: nothing was asked of any publisher. It makes coverage INCOMPLETE, which is
+        // the honest reading of a run that could not read a single document.
+        outcome: 'SKIPPED',
+        detail: sentence,
+        queriesAffected: input.sourced.length,
+        truncation: null,
+      });
+      return { findings, rejected, accessOutcomes, warnings: [...warnings] };
+    }
+
+    // D-048's third decision: "rule-based" must not become permanent by default. A reader of a
+    // result cannot see the adapter, so every run it took part in says what read the documents
+    // and that its recall has never been measured. FR-03's rule by analogy: no figure exists, so
+    // no figure is quoted.
+    if (extractor.modelId === null) {
+      warnings.add(
+        `Extraction was rule-based (${extractor.descriptor.adapterId}): a keyword-and-span ` +
+          `extractor, with no model involved — every assertion it produced carries a null model ` +
+          `id. Its recall has never been measured against a labelled corpus, so no figure for ` +
+          `what it finds can be quoted, and a category it has no term for returns nothing ` +
+          `rather than failing (D-048, D7 open).`,
+      );
     }
 
     const enabledCategoryIds = input.taxonomy.categories.map((category) => category.category);
@@ -662,7 +726,21 @@ export class SearchPipeline {
         continue;
       }
 
-      const text = new TextDecoder().decode(fetched.data.body);
+      // F1 (phase-f.md §3.2). This used to be `new TextDecoder().decode(body)`, which had two
+      // defects in one line: it handed **raw HTML** to something documented to receive normalised
+      // text — so every span pointed into markup — and it ignored the declared charset, so a
+      // Spanish page served as ISO-8859-1 decoded to mojibake and simply stopped matching the
+      // subject's name. Spans now point into text a reader would recognise, the encoding comes
+      // from what the publisher declared, and the offset map back to the original is held here,
+      // which is exactly what `ExtractionInput.text` says the caller does with it.
+      const normalised = normaliseDocument({
+        body: fetched.data.body,
+        contentType: fetched.data.contentType,
+      });
+      const text = normalised.text;
+      for (const warning of normalised.warnings) {
+        warnings.add(warning);
+      }
 
       // Evidence is committed before anything is concluded from it, so a finding can never
       // cite a document this service did not durably store (FI-03).
@@ -696,6 +774,20 @@ export class SearchPipeline {
         now: input.now,
       });
 
+      if (!normalised.normalisable || text.length === 0) {
+        // Retrieved, stored, and unreadable by this service. Recorded as that, never as a
+        // document that asserted nothing — the distinction is the whole of D-046 and D-048.
+        rejected.push({
+          ...this.leadRecord(lead, query, input),
+          stage: 'EXTRACTION',
+          reason:
+            normalised.warnings[0] ??
+            'The document was retrieved and stored, and no text could be recovered from it. ' +
+              'It was not read.',
+        });
+        continue;
+      }
+
       const extracted = await extractor.extract({
         documentId: document.documentId,
         documentVersion: document.version,
@@ -711,8 +803,14 @@ export class SearchPipeline {
           ...this.leadRecord(lead, query, input),
           stage: 'EXTRACTION',
           reason:
-            'The document was retrieved and read, and it did not assert categorised adverse ' +
-            'conduct naming the subject. It remains a lead.',
+            // "The extractor failed on this document" and "the extractor read it and it said
+            // nothing about this person" are different facts about the run, and merging them is
+            // how an unreadable document becomes a clean negative (D-046, D-048).
+            extracted.status === 'FAILED'
+              ? `The document was retrieved and stored, and extraction failed on it: ` +
+                `${extracted.detail} Nothing was concluded from it.`
+              : 'The document was retrieved and read, and it did not assert categorised adverse ' +
+                'conduct naming the subject. It remains a lead.',
         });
         continue;
       }
@@ -724,6 +822,7 @@ export class SearchPipeline {
           query,
           document,
           text,
+          normalised,
           subject: input.subject,
           graph: input.graph,
           searchId: input.searchId,
@@ -744,7 +843,7 @@ export class SearchPipeline {
       }
     }
 
-    return { findings, rejected, accessOutcomes };
+    return { findings, rejected, accessOutcomes, warnings: [...warnings] };
   }
 
   /**
@@ -840,6 +939,8 @@ export class SearchPipeline {
     readonly query: PlannedQuery;
     readonly document: { readonly documentId: string; readonly version: number };
     readonly text: string;
+    /** The normalisation that produced `text`, so the finding can record how it was read. */
+    readonly normalised: NormalisedDocument;
     readonly subject: Awaited<ReturnType<SubjectsService['findVersion']>>;
     readonly graph: Awaited<ReturnType<AssociationGraphService['loadForSearch']>>;
     readonly searchId: string;
@@ -974,6 +1075,25 @@ export class SearchPipeline {
       subjectMentionSpans: assertion.subjectMentionSpans,
       conductSpan: assertion.conductSpan,
       stageSpan: assertion.stageSpan,
+      textNormalisation: {
+        normaliserVersion: NORMALISER_VERSION,
+        charset: input.normalised.charset.label,
+        charsetSource: input.normalised.charset.source,
+        markupRemoved: input.normalised.markupRemoved,
+      },
+      originalSpans: {
+        subjectMentions: assertion.subjectMentionSpans
+          .map((span) => mapSpanToOriginal(input.normalised, span))
+          .filter((span): span is { start: number; end: number } => span !== null),
+        conduct:
+          assertion.conductSpan === null
+            ? null
+            : mapSpanToOriginal(input.normalised, assertion.conductSpan),
+        stage:
+          assertion.stageSpan === null
+            ? null
+            : mapSpanToOriginal(input.normalised, assertion.stageSpan),
+      },
       identityFactors,
       queryId: input.query.queryId,
       queryFamily: input.query.family,

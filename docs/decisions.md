@@ -1698,3 +1698,87 @@ parts where a defect is expensive, and the only way to find their defects is to 
 **The extraction quality must therefore never be reported as a measurement.** FR-03's rule applies
 by analogy: no recall figure exists, so none is quoted, and the coverage statement says the
 extraction was rule-based and unbenchmarked.
+
+### Built on 2026-09-16
+
+`apps/api/src/sources/rule-based-extraction.adapter.ts`, wired in `sources.registry.ts` for live
+mode. `apps/api/test/rule-based-extraction.test.ts` holds the three properties in place: it is
+`mode: 'LIVE'` and needs no mock witness, every assertion carries `modelId: null`, and a category
+the tenant has not enabled produces no assertion rather than a nearest-neighbour one.
+
+Two rules were added while building it, and both are in the adapter's header. **Proximity, not
+presence:** a conduct term is only read as being about the subject when it sits within 600
+characters of one of their name forms, because a presence test over a whole page attributes its
+sidebar to whoever the page happens to name. **An outcome wins:** where several stage terms are
+near, an acquittal or dismissal is taken over a charge — D-047's rule reaching extraction, since a
+rule that took the earliest or the highest match would systematically report the accusation and
+drop the exoneration.
+
+The missing-extractor half is in `search-pipeline.service.ts`: a null fetch or extraction adapter
+now produces a `SKIPPED` coverage outcome named `capability:extraction`, a warning that says it is
+a configuration fault rather than a result, and a rejected lead at the stage where it actually
+stopped. And because a reader of a result cannot see the adapter, **every run that uses the
+rule-based extractor says so in its warnings**, including that its recall has never been measured.
+
+---
+
+## D-049 — Normalisation is ours, the charset is the publisher's, and nothing is sniffed
+
+**Status:** Accepted · **Decided at:** Phase F, F1, 2026-09-16 · **Implements:** phase-f.md §3.2
+
+### What was found
+
+The pipeline satisfied `ExtractionInput.text` — documented as "normalised text, with the offset
+mapping back to the original held by the caller" — with one line:
+
+```ts
+const text = new TextDecoder().decode(fetched.data.body);
+```
+
+Two defects. **Raw markup was handed to the extractor and called text**, so every span a reviewer
+would be shown, and every span the FR-07 validator will check, pointed into HTML. And **the
+declared encoding was ignored**, so a Spanish page served as ISO-8859-1 decoded to mojibake and
+the name-form matching silently stopped matching. Both failures end the same way: a clean
+`NO_MATCHES_FOUND` that reads as an absence of news.
+
+Neither had surfaced, because every fetch fixture is UTF-8 and nearly plain text.
+
+### The decisions
+
+**1. The charset comes from a declaration, and the declaration is ranked.** Byte-order mark, then
+the `Content-Type` charset parameter, then the document's own `<meta charset>` or XML declaration,
+then a default of UTF-8. A BOM outranks a header because it is in the bytes and cannot be a stale
+server configuration; the header outranks the document because the transport is what the bytes
+arrived under.
+
+**2. Nothing is sniffed.** There is no byte-frequency guess at an undeclared encoding. Guessing is
+how a document silently becomes a different document, and the cases where a guess would help are
+exactly the cases where nobody can tell it guessed wrong. An undeclared encoding is **recorded as
+undeclared** — `charsetSource: 'DEFAULTED'` reaches the finding record and a warning reaches the
+run — so a reviewer looking at an accented name can tell whether the encoding was known.
+
+**3. The offset map is kept, and the normalisation is recorded rather than the map.** Spans point
+into the normalised text; `mapSpanToOriginal` converts one to offsets in the decoded original. A
+finding stores the charset, its source and the normaliser version instead of a per-finding copy of
+the map, because that triple plus the stored document reproduces the text exactly, and a stored
+map is a second copy of the document in a shape that will drift.
+
+**4. The markup stripper is hand-written, not a DOM library.** Two reasons, and neither is taste.
+It cannot fail — real pages are not well-formed, and a parse error here turns a readable document
+into a coverage gap — and `textContent` from a DOM library yields **no offsets at all**, which is
+the one thing this module exists to produce. Inline elements deliberately do not insert a space:
+`<b>Jo</b>hn` is one word, and splitting a name in half looks exactly like the person not being
+mentioned.
+
+**5. A body we cannot read says so.** A PDF is reported as `normalisable: false` with a sentence,
+and the lead is rejected at `EXTRACTION` naming that reason. PDF and OCR are still unbuilt; what
+is not allowed is decoding their bytes as if they were text, or letting "we could not read it"
+reach a reader as "it said nothing" (the same rule as D-046 and D-048).
+
+### What this costs
+
+The stripper is a good approximation, not a browser. A page that hides its prose behind a client
+render still yields little text — that is what FR-06's render trigger is for, and `allowRender` is
+off at this call site. Boilerplate removal is not attempted at all: navigation and footer text is
+in the normalised text, which means a keyword in a site's own menu can sit near a name. The
+extractor's proximity window is what limits the damage, and it is a limit rather than a fix.

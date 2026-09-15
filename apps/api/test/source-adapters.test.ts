@@ -77,7 +77,15 @@ describe('the mode rule', () => {
     expect(live.newsDiscovery).toHaveLength(0);
     expect(live.webDiscovery).toHaveLength(0);
     expect(live.primarySource).toBeNull();
-    expect(live.extractionModel).toBeNull();
+    // Extraction has a live adapter as of D-048, and it is emphatically **not** the mock: it is
+    // the rule-based extractor, stamped LIVE. The null it replaced was honest and produced a
+    // dishonest result — every document rejected at EXTRACTION, reported as NO_MATCHES_FOUND.
+    expect(live.extractionModel?.descriptor.adapterId).toBe('rule-based-extraction');
+    expect(live.extractionModel?.descriptor.mode).toBe('LIVE');
+    // Null model id, truthfully: no model participated. FR-07 requires the attribution to be
+    // pinned, and naming a model that did not answer would be worse than naming none.
+    expect(live.extractionModel?.modelId).toBeNull();
+    expect(live.extractionModel?.promptVersion).toBeNull();
     // Null rather than mocked — an unavailable capability, not an empty one.
     expect(live.companyRegistry).toBeNull();
     // The live fetch adapter exists as of Phase E step 1, but it is not constructed without a

@@ -69,7 +69,13 @@ test surface. The recommendation is **(b)**, with the fetch fixtures already in
 `evidence-fetch.mock.ts` as the seed corpus — they were written to be awkward, which is the
 property that matters. But it is a real decision and it belongs in `docs/decisions.md`.
 
-### 3.2 The pipeline passes raw HTML to the extractor and calls it normalised text.
+### 3.2 The pipeline passes raw HTML to the extractor and calls it normalised text. — **CLOSED 2026-09-16**
+
+> **Built.** `apps/api/src/pipeline/normalise-document.ts`, decided in **D-049**. Spans point into
+> text, the charset comes from the declaration and says which declaration, and the offset map back
+> to the original is held by the pipeline. **PDF and OCR are still not built** — such a body is
+> reported as unreadable rather than decoded as if it were text — and the four date fields are
+> still unparsed. The rest of this section is preserved as the problem statement.
 
 `apps/api/src/pipeline/search-pipeline.service.ts` (the extraction call site, ~line 665):
 
@@ -93,7 +99,13 @@ symptom: a clean `NO_MATCHES_FOUND` that looks like an absence of news.
 
 **This is F1, and F1 must therefore come first** — before any model work. See the order below.
 
-### 3.3 Live mode has no extractor, so a live run rejects every document — **P0**
+### 3.3 Live mode has no extractor, so a live run rejects every document — **P0** — **CLOSED 2026-09-16**
+
+> **Built.** `RuleBasedExtractionAdapter` is the live `ExtractionModelPort`, and a missing
+> extractor is now a configuration fault in the warnings and the coverage statement. See D-048's
+> "Built" section for what was added beyond the decision — the proximity rule and the
+> outcome-wins rule — and the handoff entry for what it does not do. The rest of this section is
+> preserved as the problem statement.
 
 `apps/api/src/sources/sources.registry.ts:209` returns `extractionModel: null` for live mode, and
 `search-pipeline.service.ts:477` rejects the document when the extractor is null.
@@ -258,18 +270,24 @@ been supplied yet. Do not fold them into the adverse-media pipeline to make them
 
 **The live Postman path (do these first):**
 
-- [ ] **§3.3** Live rule-based `ExtractionModelPort`, `modelId: null`, non-mock (**D-048**)
-- [ ] **§3.3** A missing extractor reports as a configuration fault in warnings and coverage,
-      never as a finding count of zero
-- [ ] **F1** Normalisation with an offset map, and charset from the declared encoding
+- [x] **§3.3** Live rule-based `ExtractionModelPort`, `modelId: null`, non-mock (**D-048**) —
+      `apps/api/src/sources/rule-based-extraction.adapter.ts`, 2026-09-16
+- [x] **§3.3** A missing extractor reports as a configuration fault in warnings and coverage,
+      never as a finding count of zero — `search-pipeline.service.ts`, a `SKIPPED` outcome named
+      `capability:extraction` plus a warning
+- [x] **F1** Normalisation with an offset map, and charset from the declared encoding —
+      `apps/api/src/pipeline/normalise-document.ts` (**D-049**). PDF, OCR and the four date
+      fields are **not** done; they are the rest of F1, below
 - [ ] `pnpm first-contact`, `robotsPosition` updated on what it said, source proposed → approved
       → activated _(source admin, four eyes)_
 - [ ] A live search from Postman for a subject actually present in the SEC feed
 
 **The rest of Phase F:**
 
-- [ ] **F1** Normalisation with an offset map; charset from the declared encoding; PDF; OCR; the
-      four date fields with declared precision
+- [ ] **F1** ~~Normalisation with an offset map; charset from the declared encoding~~ (done,
+      D-049); **PDF; OCR; the four date fields with declared precision** — still open. The
+      rule-based extractor leaves all four dates null, which is correct but means every finding
+      it produces is undated
 - [ ] **F3** The eight FR-07 validation rules in `packages/domain`, each with a test proving it
       rejects its own failure case
 - [ ] **3.1 settled and recorded** — what the extraction benchmark corpus is
