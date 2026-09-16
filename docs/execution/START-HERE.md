@@ -9,7 +9,7 @@ of previous sessions. It is deliberately short.
 
 > **Phase I — Tenant self-service onboarding**
 >
-> **I4, I1 and I2 are built. I3 is next, and nothing blocks it.** Read
+> **I4, I1, I2 and I3 are built. I5/I6 are the remainder, and nothing blocks them.** Read
 > [`phase-i-tenant-onboarding.md`](./phase-i-tenant-onboarding.md) — it is the brief, and it is
 > short.
 >
@@ -40,10 +40,20 @@ of previous sessions. It is deliberately short.
 > writes to an `outboundEmails` collection, and **production refuses to start** rather than
 > dropping messages somewhere nobody reads).
 >
-> **Next: I3** — a login that returns a session. `UserService.authenticate` already checks the
-> password and applies the lockout; what is missing is the route. It must not become a second
-> authentication system: one verifier, one session store, one set of rules — and one opaque answer
-> for every failure, as `AuthGuard` already gives for API keys.
+> **Done (2026-09-16): I3.** `POST /v1/auth/login` returns a session token presented as
+> `Authorization: Session <token>`, created in the **same store** as the panel's cookie and ended
+> by `POST /v1/auth/logout`. Every failure is one opaque `401`; the session's environment is
+> derived from `decideLiveAccess` rather than requested; attempts are bounded per origin by a
+> limiter now shared with signup. Recorded as **D-059**.
+>
+> **Signup → confirm → sign in → issue your own key now runs end to end**, with nobody at Erly
+> involved. `tests/security/login.test.ts` does exactly that.
+>
+> **Next: I5/I6** — mostly assembly. A tenant can already hold both key kinds; what is left is
+> the single response that hands over both with each secret shown once (I6), and a decision about
+> whether signup itself should issue the sandbox key rather than making the customer sign in for
+> it. **Before live keys reach anyone**, the fixed-feed fetch below is the prerequisite — I3 was
+> the last thing standing between a self-signed-up tenant and live traffic.
 >
 > **All three gating decisions are closed** (2026-09-16), so no session needs to stop and ask:
 >
@@ -110,7 +120,7 @@ pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm te
 Expected today (2026-09-16): clean, clean, **895 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**215 integration** tests, `pnpm test:security` **167 security** tests, and `pnpm test:e2e:api`
+**215 integration** tests, `pnpm test:security` **181 security** tests, and `pnpm test:e2e:api`
 **10 API end-to-end** tests over real HTTP, real SQS and a real worker. All four figures were
 re-measured on 2026-09-16; the ones they replace had drifted by a session or two.
 

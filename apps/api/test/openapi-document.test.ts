@@ -24,6 +24,7 @@ import { buildOpenApiDocument } from '@erly/adverse-contracts';
 import { AdminController } from '../src/admin/admin.controller.js';
 import { AccountController } from '../src/auth/account.controller.js';
 import { AuthController } from '../src/auth/auth.controller.js';
+import { LoginController } from '../src/auth/login.controller.js';
 import { ReservedController } from '../src/common/reserved.controller.js';
 import { SignupController } from '../src/tenancy/signup.controller.js';
 import { TenantApiKeysController } from '../src/tenancy/tenant-api-keys.controller.js';
@@ -38,6 +39,7 @@ const committedPath = join(repoRoot, 'openapi', 'openapi.json');
 const CONTROLLERS = [
   HealthController,
   AuthController,
+  LoginController,
   AccountController,
   SubjectsController,
   SearchesController,

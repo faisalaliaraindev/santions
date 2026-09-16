@@ -16,6 +16,7 @@ export * from './auth/session.js';
 export * from './tenancy/api-keys.js';
 export * from './tenancy/signup.js';
 export * from './tenancy/account.js';
+export * from './tenancy/login.js';
 export * from './common/pagination.js';
 export * from './common/health.js';
 export * from './openapi/components.js';

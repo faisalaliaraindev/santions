@@ -2075,3 +2075,49 @@ unconfirmed, which the response says, and `resend-verification` is the way back.
 and the endpoint to send it to rather than a link to a host nobody confirmed. It is deliberately
 not derived from `CORS_ORIGINS`: that list says who may call this API, which is a different
 question from where the customer's interface lives.
+
+---
+
+## D-059 — A password login returns a session in the existing store, presented as its own scheme
+
+**Status:** Accepted and implemented 2026-09-16, as Phase I step **I3**.
+
+**Context.** `GET /auth/login` is an OIDC redirect journey ending in an HTTP-only cookie. That is
+right for the control panel and useless to an integrator's backend, which has no browser to
+redirect. I2 built the credential store; what was missing was the way in.
+
+**Decision.** `POST /v1/auth/login` takes an email address and a password and returns a session
+token, presented afterwards as `Authorization: Session <token>`.
+
+**One store, not two.** The session is created by the same `SessionService` the cookie uses, with
+the same idle and absolute expiry, the same revocation, and the same resolution in `AuthGuard`.
+Only the presentation differs. A second session mechanism is how a service ends up with a
+sign-out that works on one of them and a revocation that misses the other.
+
+**Its own scheme, not `Bearer`.** The same reasoning that gave API keys `ApiKey`: a session token
+is never fed to the JWT verifier and a JWT is never looked up in the session store, so a rejection
+can still say which credential the caller meant, and no verification has to be attempted twice.
+
+**Every failure is one `401` with one sentence.** `UserService.authenticate` distinguishes unknown
+address, wrong password, locked and suspended — the audit trail and the lockout counter need the
+distinction, and the caller never gets it. Telling an anonymous caller the address exists but the
+password is wrong halves the work of guessing; telling them an account is **locked** confirms the
+address is real, which is precisely the enumeration D-057 keeps off every other account route. The
+cost is a customer who cannot tell why they are still refused; the reset flow is the answer, and
+the lockout expires on its own.
+
+**The session's environment is derived, never requested.** It comes from `decideLiveAccess` — the
+same function that gates a live key (D-055) — so a tenant entitled to live with a confirmed
+address gets a `live` session and everybody else gets `sandbox`. There is no environment field in
+the request, and a sandbox session cannot mint a live key whatever its roles say.
+
+**No provider tokens.** A password session has nothing standing behind it, so `providerTokens` is
+null rather than an empty string this service would then carry around as though it were one, and
+`authenticationAssurance` is null rather than an invented claim about how somebody authenticated.
+
+**The attempt limiter is now shared.** Signup's per-origin bound (D-056) and login's are one
+service with two buckets, because login computes an argon2id hash on every attempt — 19 MiB and a
+few milliseconds **by design** — so an unbounded login route is a way to spend the server's memory
+with nothing but a socket. It is a different axis from the per-account lockout: that stops somebody
+grinding one customer's password, this stops a spray across many accounts, which the per-account
+counter cannot see. Neither substitutes for the other.

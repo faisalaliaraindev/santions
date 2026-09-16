@@ -27,6 +27,98 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (ninth) — Phase I step I3: a password buys a session, and the phase closes its loop
+
+**Did.**
+
+1. **I3 is built (D-059).** `POST /v1/auth/login` takes an email address and a password and
+   returns a session token; `POST /v1/auth/logout` ends it. The token is presented as
+   **`Authorization: Session <token>`** — its own scheme, for the same reason `ApiKey` has one: a
+   session is never fed to the JWT verifier, a JWT is never looked up in the session store, and a
+   rejection can still say which credential the caller meant.
+   - **One session store, not two.** Created by the same `SessionService` as the panel's cookie,
+     same idle and absolute expiry, resolved in the same branch of `AuthGuard`, revoked by the
+     same call. `SessionService.create` now accepts a session with **no provider tokens** —
+     `providerTokens: null` rather than an empty string this service would carry around as though
+     it were one — and `authenticationAssurance` is null rather than an invented claim.
+   - **Every failure is one `401` with one sentence.** `authenticate` still distinguishes
+     `UNKNOWN_USER`, `BAD_PASSWORD`, `LOCKED` and `SUSPENDED` for the audit trail and the counter;
+     the caller never gets it. Saying "locked" would confirm the address is real, which is exactly
+     the enumeration D-057 keeps off every other account route.
+   - **The session's environment is derived, never requested.** `decideLiveAccess` decides it —
+     the same function that gates a live key (D-055) — so an unconfirmed tenant signs into
+     sandbox and confirming the address raises the _next_ session to live. There is no
+     environment field in the request, and the strict schema refuses one.
+
+2. **The attempt limiter is now shared** (`apps/api/src/common/attempt-limiter.ts`), with two
+   buckets in one `attemptLog` collection: `SIGNUP` (5/hour, D-056) and `LOGIN` (30/10 min).
+   Login needs one because argon2id costs 19 MiB per attempt **by design**, so an unbounded login
+   route spends the server's memory with nothing but a socket. It is a different axis from the
+   per-account lockout — that stops somebody grinding one customer's password, this stops a spray
+   across many accounts, which the per-account counter cannot see. Signup's private copy and its
+   `signupAttempts` collection are gone; `signupOriginKey` is now `originKeyFor`.
+
+3. **The phase's loop is closed.** Sign up → confirm the address → sign in → issue your own API
+   key, with nobody at Erly involved at any point. There is a test that does exactly that, and
+   Postman requests 1–9 walk it.
+
+**Verified.** The stack was already up; everything below actually ran.
+
+```
+lint            clean          typecheck       clean
+unit            895 passed     invariants      29 passed     evaluation   12 passed
+integration     215 passed     security        181 passed    e2e (API)    10 passed
+```
+
+Security was 167 before this session; the 14 new tests are `tests/security/login.test.ts`.
+
+**Three claims proven by planting the violation:**
+
+- removed `readSessionHeader` from the guard → "authenticates a real route with
+  Authorization: Session" fails;
+- gave `LOCKED` its own message → "answers a locked account the same way" fails;
+- derived the environment from the entitlement alone, ignoring verification → "signs an
+  unconfirmed tenant into sandbox" fails.
+
+Each was reverted immediately after.
+
+**Left half-done.** Nothing in I3. **I5 and I6 are the remainder of the phase**, and both are
+mostly assembly: a tenant can already hold both key kinds, so what is left is the single response
+that hands over both with each secret shown once (I6), plus a decision about whether signup should
+issue the sandbox key itself rather than making the customer sign in for it.
+
+**Found.**
+
+1. **`SessionService.create` required provider tokens**, which a password session does not have.
+   Widened to nullable rather than passing `''` — an empty string would have been a value every
+   downstream reader had to remember was not a token.
+2. **A human session could not have reached live at all** under the first design. Making the
+   session's environment `sandbox` unconditionally would have made I5/I6 impossible: the key route
+   refuses a live key from a sandbox credential (T62), so a signed-in admin could never issue the
+   live key their tenant was entitled to. Deriving it from `decideLiveAccess` fixes that without
+   weakening T62 — the refusal still stands for any session that is genuinely sandbox.
+3. **The `409` for a taken address (D-057) is worth re-reading now that login exists.** A caller
+   can now confirm an address is a customer through signup _and_ then confirm nothing further
+   through login, which is the intended shape — but if signup ever becomes asynchronous, both
+   routes must change together.
+
+**Next session should:** build **I5/I6** — one response carrying both keys, each secret shown
+once, with what each key can do. Start by deciding whether `POST /v1/signup` issues the sandbox
+key itself: it would remove a round trip, at the cost of putting a credential in the response of
+the one route that is unauthenticated. My reading is that it should **not**, and that the first
+key should keep coming from a signed-in session, but it is a decision and the brief says to make
+it deliberately.
+
+**Before any live key reaches a tenant nobody has spoken to**, the `FIXED_FEED` fetch is still the
+prerequisite: once per run, not once per planned query. I3 removed the last thing standing between
+a self-signed-up tenant and live traffic, so that fix is now the only thing left in the way.
+
+**Decisions touched:** **D-059 opened and accepted.** D-056 is now implemented by the shared
+limiter rather than by signup's own copy. D-051, D-052, D-053, D-054, D-055, D-057, D-058
+unchanged.
+
+---
+
 ## 2026-09-16 (eighth) — Phase I step I2: the customer credential store
 
 **Did.**

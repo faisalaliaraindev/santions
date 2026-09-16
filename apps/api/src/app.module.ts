@@ -17,6 +17,7 @@ import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { AccountController } from './auth/account.controller.js';
 import { AccountService } from './auth/account.service.js';
 import { AuthController } from './auth/auth.controller.js';
+import { LoginController } from './auth/login.controller.js';
 import {
   MailboxNotificationAdapter,
   NOTIFICATION_PORT,
@@ -28,6 +29,7 @@ import { AuthGuard, PermissionGuard } from './auth/auth.guard.js';
 import { CsrfGuard } from './auth/csrf.guard.js';
 import { SessionService } from './auth/session.service.js';
 import { TokenVerifier } from './auth/token-verifier.js';
+import { AttemptLimiter } from './common/attempt-limiter.js';
 import { ApiExceptionFilter } from './common/exception.filter.js';
 import { ReservedController } from './common/reserved.controller.js';
 import { loadConfig, type AppConfig } from './config/config.js';
@@ -105,6 +107,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
   controllers: [
     HealthController,
     AuthController,
+    LoginController,
     AccountController,
     SubjectsController,
     SearchesController,
@@ -143,6 +146,13 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [APP_CONFIG],
     },
     { provide: SessionService, useFactory: (db: Db) => new SessionService(db), inject: [MONGO_DB] },
+    {
+      // One limiter, two buckets: the unauthenticated signup and login routes. A second copy of
+      // this is the one that drifts, and a limiter that drifts is one that stops limiting.
+      provide: AttemptLimiter,
+      useFactory: (db: Db, config: AppConfig) => new AttemptLimiter(db, config),
+      inject: [MONGO_DB, APP_CONFIG],
+    },
     {
       provide: UserService,
       useFactory: (db: Db, t: TransactionRunner, a: AuditService, s: SessionService) =>
@@ -201,11 +211,20 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         db: Db,
         transactions: TransactionRunner,
         audit: AuditService,
+        limiter: AttemptLimiter,
         users: UserService,
         accounts: AccountService,
         config: AppConfig,
-      ) => new SignupService(db, transactions, audit, users, accounts, config),
-      inject: [MONGO_DB, TransactionRunner, AuditService, UserService, AccountService, APP_CONFIG],
+      ) => new SignupService(db, transactions, audit, limiter, users, accounts, config),
+      inject: [
+        MONGO_DB,
+        TransactionRunner,
+        AuditService,
+        AttemptLimiter,
+        UserService,
+        AccountService,
+        APP_CONFIG,
+      ],
     },
     {
       provide: InboxReceiptService,
@@ -692,6 +711,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       useFactory: (
         sessions: SessionService,
         users: UserService,
+        limiter: AttemptLimiter,
         mailbox: MailboxNotificationAdapter,
         apiKeys: ApiKeyService,
         signups: SignupService,
@@ -715,6 +735,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         new StartupService(
           sessions,
           users,
+          limiter,
           mailbox,
           apiKeys,
           signups,
@@ -738,6 +759,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [
         SessionService,
         UserService,
+        AttemptLimiter,
         MailboxNotificationAdapter,
         ApiKeyService,
         SignupService,

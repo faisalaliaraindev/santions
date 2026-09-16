@@ -105,6 +105,11 @@ describe('the OpenAPI document', () => {
     // confirming an address or recovering a lost password has no credential to present. What
     // replaces it is a single-use, expiring token that was emailed to the address in question,
     // and two of the four answer identically whether or not that address is a customer.
+    //
+    // `/v1/auth/login` (I3) is public because signing in is what you do when you have no session
+    // yet. Its every failure is one opaque 401, and it is bounded per client address as well as
+    // by the per-account lockout. `/v1/auth/logout` is deliberately NOT here: ending a session
+    // requires holding one.
     expect(publicOperations.toSorted()).toEqual([
       '/auth/callback',
       '/auth/login',
@@ -112,6 +117,7 @@ describe('the OpenAPI document', () => {
       '/health/ready',
       '/v1/account/password-reset',
       '/v1/account/password-reset/confirm',
+      '/v1/auth/login',
       '/v1/signup',
       '/v1/signup/resend-verification',
       '/v1/signup/verify',

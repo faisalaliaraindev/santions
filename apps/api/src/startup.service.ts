@@ -3,6 +3,7 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
+import { AttemptLimiter } from './common/attempt-limiter.js';
 import type { AppConfig } from './config/config.js';
 import { APP_CONFIG } from './tokens.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
@@ -47,6 +48,7 @@ export class StartupService implements OnModuleInit {
   constructor(
     private readonly sessions: SessionService,
     private readonly users: UserService,
+    private readonly limiter: AttemptLimiter,
     private readonly mailbox: MailboxNotificationAdapter,
     private readonly apiKeys: ApiKeyService,
     private readonly signups: SignupService,
@@ -82,6 +84,7 @@ export class StartupService implements OnModuleInit {
     await Promise.all([
       this.sessions.ensureIndexes(),
       this.users.ensureIndexes(),
+      this.limiter.ensureIndexes(),
       this.mailbox.ensureIndexes(),
       this.apiKeys.ensureIndexes(),
       this.signups.ensureIndexes(),

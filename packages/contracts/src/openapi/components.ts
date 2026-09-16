@@ -22,6 +22,7 @@ import {
   revokeApiKeySchema,
 } from '../tenancy/api-keys.js';
 import { liveAccessBlockSchema, signupResultSchema, signupSchema } from '../tenancy/signup.js';
+import { loginResultSchema, loginSchema, logoutResultSchema } from '../tenancy/login.js';
 import {
   acceptedSchema,
   emailRequestSchema,
@@ -108,6 +109,9 @@ export const COMPONENT_SCHEMAS = {
   SignupRequest: signupSchema,
   SignupResult: signupResultSchema,
   LiveAccessBlock: liveAccessBlockSchema,
+  LoginRequest: loginSchema,
+  LoginResult: loginResultSchema,
+  LogoutResult: logoutResultSchema,
   VerifyEmailRequest: verifyEmailSchema,
   VerifyEmailResult: verifyEmailResultSchema,
   EmailRequest: emailRequestSchema,

@@ -1803,7 +1803,7 @@
     },
     {
       "name": "13 - Tenant: signing yourself up",
-      "description": "Self-service tenant creation (phase I step I1, decision D-053). Open signup: no invite code,\nno credential, and nobody at Erly involved.\n\nThis is the ONLY route in the service that writes without a credential, so three things are\nworth seeing here:\n  * the tenant id is GENERATED. There is no field for one, and sending `tenantId` is refused\n    rather than ignored — a caller who could name their own id could name somebody else's\n  * all four records (tenant, entitlement, taxonomy, policy) are written in one transaction.\n    A tenant missing its taxonomy fails at its first search with something that reads like a\n    bug in search rather than a signup that stopped halfway\n  * the entitlement grants live, and live is still not available yet. `liveAccess` in the\n    response says so, and says what would change it: a confirmed contact address (D-052)\n\nSignups are bounded per client address. The sixth in an hour answers 429, which is retryable.\n\nRequests 3-6 are the I2 account flow: confirming the address, which is what unlocks a live key, and getting back in after losing a password. No mail server runs on this stack, so the tokens are read out of the `outboundEmails` collection - that collection is the inbox (D-058).",
+      "description": "Self-service tenant creation (phase I step I1, decision D-053). Open signup: no invite code,\nno credential, and nobody at Erly involved.\n\nThis is the ONLY route in the service that writes without a credential, so three things are\nworth seeing here:\n  * the tenant id is GENERATED. There is no field for one, and sending `tenantId` is refused\n    rather than ignored — a caller who could name their own id could name somebody else's\n  * all four records (tenant, entitlement, taxonomy, policy) are written in one transaction.\n    A tenant missing its taxonomy fails at its first search with something that reads like a\n    bug in search rather than a signup that stopped halfway\n  * the entitlement grants live, and live is still not available yet. `liveAccess` in the\n    response says so, and says what would change it: a confirmed contact address (D-052)\n\nSignups are bounded per client address. The sixth in an hour answers 429, which is retryable.\n\nRequests 3-6 are the I2 account flow: confirming the address, which is what unlocks a live key, and getting back in after losing a password. No mail server runs on this stack, so the tokens are read out of the `outboundEmails` collection - that collection is the inbox (D-058).\n\nRequests 7-9 are I3: signing in with the password from request 1, using the session to issue a key, and signing out. Together with 1-6 they are the whole phase - a customer who has never spoken to anybody at Erly ends up holding a working credential.",
       "item": [
         {
           "name": "1. Sign up",
@@ -2033,6 +2033,129 @@
                   "pm.test('reset', () => pm.expect(pm.response.code).to.eql(200));",
                   "pm.test('and every session for that user ended', () => pm.expect(pm.response.json().sessionsEnded).to.be.a('number'));"
                 ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Sign in",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{signedUpEmail}}\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "login"]
+            },
+            "description": "The way in for a caller that is not a browser. `GET /auth/login` next door is the OIDC redirect journey the control panel uses; this is the same session, obtained without one (D-059).\n\nPresent the token afterwards as `Authorization: Session <token>` - its own scheme, like ApiKey, so a session is never fed to the JWT verifier.\n\nEVERY FAILURE IS ONE 401 WITH ONE SENTENCE. Wrong password, unknown address, locked, suspended - try them and see. The service records which; you never learn it. Saying an account is locked would confirm the address is real.\n\n`environment` is derived from what the tenant may actually use - a live entitlement AND a confirmed address. Sign in before confirming and you get a sandbox session; confirm and sign in again and it is live. There is no environment field to ask with."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('signed in', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('sessionToken', b.sessionToken);",
+                  "  console.log('session for ' + b.userId + ' in ' + b.tenantId + ' (' + b.environment + ')');",
+                  "  console.log('expires ' + b.expiresAt + ', idle timeout ' + b.idleTimeoutSeconds + 's');",
+                  "}",
+                  "pm.test('the session carries the roles', () => pm.expect(b.roles).to.include('tenant_admin'));",
+                  "pm.test('environment was derived, not asked for', () => pm.expect(['sandbox', 'live']).to.include(b.environment));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Issue your first key from that session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "Authorization",
+                "value": "Session {{sessionToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"issued from a signed-in session\",\n  \"roles\": [\n    \"tenant_admin\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "The end of the whole phase: signup, confirm, sign in, issue your own key - nobody at Erly involved at any point.\n\nSends `Authorization: Session {{sessionToken}}` rather than an API key. The route does not care which kind of credential authenticated it, only what the principal may do.\n\nA live key from a sandbox session is refused with SANDBOX_CANNOT_ACCESS_LIVE however good the entitlement is - confirm the address first, then sign in again.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('issuedKey', b.secret);",
+                  "  console.log('SECRET SHOWN ONCE - saved to {{issuedKey}}');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Sign out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "Authorization",
+                "value": "Session {{sessionToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "logout"]
+            },
+            "description": "Ends whichever session authenticated the call. Immediate and cluster-wide, because the session is a server-side record rather than something the client forgets - so the token stops working everywhere at once, not just here.\n\nSend request 8 again afterwards: it answers 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('signed out', () => pm.expect(pm.response.code).to.eql(200));"]
               }
             }
           ]

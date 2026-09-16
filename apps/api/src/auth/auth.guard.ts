@@ -69,13 +69,14 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
 
-    // Three credential shapes, in a deliberate order.
+    // Four credential shapes, in a deliberate order.
     //
-    // The BFF session cookie is checked first, because that is how humans arrive. Machine
-    // credentials — an API key, then a bearer token — are checked after. A request carrying
-    // more than one is not special-cased: the first match wins and the rest are ignored rather
-    // than merged, so a stolen credential cannot escalate an existing session.
-    const sessionId = readSessionCookie(request);
+    // The session comes first, from the BFF cookie or from `Authorization: Session` — the same
+    // store either way, because a browser sign-in and a machine sign-in must be revocable by the
+    // same act (I3). Machine credentials — an API key, then a bearer token — are checked after. A
+    // request carrying more than one is not special-cased: the first match wins and the rest are
+    // ignored rather than merged, so a stolen credential cannot escalate an existing session.
+    const sessionId = readSessionCookie(request) ?? readSessionHeader(request) ?? null;
     if (sessionId !== null) {
       const principal = await this.sessions.resolve(sessionId);
       if (principal === null) {
@@ -250,6 +251,26 @@ function readApiKey(request: Request): string | undefined {
 }
 
 export const SESSION_COOKIE = 'adverse_session';
+
+/**
+ * `Authorization: Session <token>`.
+ *
+ * How a caller with no cookie jar presents the session `POST /v1/auth/login` gave it (I3). Its
+ * own scheme, for the same reason `ApiKey` is: a session token is never fed to the JWT verifier
+ * and a JWT is never looked up in the session store, so a rejection can still say which
+ * credential the caller meant.
+ *
+ * It resolves through the **same** `SessionService` as the cookie. One store, one expiry policy,
+ * one revocation — a second session mechanism is how a sign-out ends up working on one of them.
+ */
+function readSessionHeader(request: Request): string | null {
+  const header = request.headers.authorization;
+  if (typeof header !== 'string') {
+    return null;
+  }
+  const [scheme, value] = header.split(' ');
+  return scheme?.toLowerCase() === 'session' && value !== undefined && value !== '' ? value : null;
+}
 
 function readSessionCookie(request: Request): string | null {
   const cookies: unknown = (request as { cookies?: unknown }).cookies;

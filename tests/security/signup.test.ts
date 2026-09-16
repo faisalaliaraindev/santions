@@ -32,11 +32,12 @@ import { TransactionRunner } from '../../apps/api/src/persistence/transaction.ru
 import { AccountService } from '../../apps/api/src/auth/account.service.js';
 import { UserService } from '../../apps/api/src/auth/user.service.js';
 import { ApiKeyService, type IssuedApiKey } from '../../apps/api/src/tenancy/api-key.service.js';
+import { SignupService } from '../../apps/api/src/tenancy/signup.service.js';
 import {
-  signupOriginKey,
-  SignupService,
-  SIGNUP_MAX_PER_WINDOW,
-} from '../../apps/api/src/tenancy/signup.service.js';
+  AttemptLimiter,
+  originKeyFor,
+  SIGNUP_POLICY,
+} from '../../apps/api/src/common/attempt-limiter.js';
 
 const MONGODB_URI =
   process.env['MONGODB_URI'] ??
@@ -91,7 +92,7 @@ const TEST_ENV: NodeJS.ProcessEnv = {
  * keying cannot drift between them.
  */
 const LOOPBACK_KEYS = ['::ffff:127.0.0.1', '::1', '127.0.0.1'].map((ip) =>
-  signupOriginKey(String(TEST_ENV['SESSION_SECRET']), ip),
+  originKeyFor(String(TEST_ENV['SESSION_SECRET']), ip),
 );
 
 function testPassword(): string {
@@ -200,7 +201,9 @@ beforeEach(async () => {
   // `signup.test.ts` is building up against its own fixed address — the two files run in
   // parallel against one database, and that is exactly how a suite starts failing for a reason
   // that has nothing to do with what it tests.
-  await db.collection('signupAttempts').deleteMany({ originKey: { $in: LOOPBACK_KEYS } });
+  await db
+    .collection('attemptLog')
+    .deleteMany({ bucket: 'SIGNUP', originKey: { $in: LOOPBACK_KEYS } });
 });
 
 afterAll(async () => {
@@ -362,6 +365,7 @@ describe('I1 — all four records, or none', () => {
       db,
       app.get(TransactionRunner),
       exploding,
+      app.get(AttemptLimiter),
       app.get(UserService),
       app.get(AccountService),
       loadConfig(TEST_ENV),
@@ -457,7 +461,7 @@ describe('I1 — the open door is bounded', () => {
     // other test in this file signs up from.
     const ip = `203.0.113.${String(Math.floor(Math.random() * 250) + 1)}`;
 
-    for (let attempt = 0; attempt < SIGNUP_MAX_PER_WINDOW; attempt += 1) {
+    for (let attempt = 0; attempt < SIGNUP_POLICY.max; attempt += 1) {
       await signups.signUp(
         {
           organisationName: 'Bounded Ltd',

@@ -304,6 +304,46 @@ does say an address is taken, and D-057 records why it has to.
 Production **refuses to start** with no mail transport configured rather than dropping messages
 into a collection nobody reads — see D-058.
 
+---
+
+# Part 3e — Signing in, and issuing your own first key
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"compliance@acme.example","password":"harbour-lantern-drift-98"}'
+```
+
+The token comes back in the body and is presented as its own scheme:
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/tenant/api-keys \
+  -H "Authorization: Session <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"first key","roles":["tenant_admin"]}'
+```
+
+**That is the whole phase**: sign up, confirm the address, sign in, issue your own key — with
+nobody at Erly involved at any point. `POST /v1/auth/logout` ends the session, immediately and
+cluster-wide.
+
+Four things about it are deliberate (D-059):
+
+- **One session store.** The same `SessionService` the panel's cookie uses — same idle and
+  absolute expiry, same revocation. Only the presentation differs.
+- **Its own `Authorization` scheme**, like `ApiKey`, so a session token is never fed to the JWT
+  verifier and a rejection can still say which credential you meant.
+- **Every failure is one `401` with one sentence.** Wrong password, unknown address, locked and
+  suspended are indistinguishable to you. The service records which. Saying "locked" would
+  confirm the address is real.
+- **`environment` is derived, not requested.** A tenant entitled to live _with a confirmed
+  address_ gets a live session; everybody else gets sandbox, and a sandbox session cannot mint a
+  live key however good its roles are.
+
+Sign-in attempts are bounded per address as well as by the per-account lockout — the first stops a
+spray across many accounts, the second stops somebody grinding one password. Neither replaces the
+other.
+
 **Behind a load balancer**, set Express's `trust proxy` before exposing this route, or every
 customer shares one bucket of five signups an hour — see D-056.
 

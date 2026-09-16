@@ -980,6 +980,64 @@ function buildPaths(): Record<string, SchemaObject> {
       'reservedTenantUsage',
       'Tenant usage reporting is deferred by decision D-007.',
     ),
+    '/v1/auth/login': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'logIn',
+        summary: 'Sign in with an email address and password',
+        security: [],
+        description:
+          'For a caller that is not a browser. `GET /auth/login` next door is the OIDC redirect ' +
+          'journey the control panel uses; this is the same session, obtained without one.\n\n' +
+          'Present the token as `Authorization: Session <token>` — its own scheme, like ' +
+          '`ApiKey`, so a session is never fed to the JWT verifier and a token is never looked ' +
+          'up in the session store.\n\n' +
+          '**There is one session store behind both ways in**, with the same idle and absolute ' +
+          'expiry and the same revocation. `POST /v1/auth/logout` ends whichever session ' +
+          'authenticated the call.\n\n' +
+          '**Every failure is one `401` with one sentence** — wrong password, unknown address, ' +
+          'locked, suspended. The service records which; the caller never learns it. Telling an ' +
+          'anonymous caller that an address exists but the password is wrong halves the work of ' +
+          'guessing, and saying an account is locked confirms the address is real.\n\n' +
+          'The `environment` of the session is decided from what the tenant may actually use — ' +
+          'a live entitlement **and** a confirmed address — never from anything sent here.\n\n' +
+          'Attempts are bounded per client address as well as per account: the account lockout ' +
+          'stops somebody grinding one password, and this stops a spray across many accounts.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('LoginRequest') } },
+        },
+        responses: {
+          '200': {
+            description: 'A session, and enough context not to have to ask again.',
+            content: { 'application/json': { schema: ref('LoginResult') } },
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '429': errorRef(429),
+        },
+      },
+    },
+    '/v1/auth/logout': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'logOut',
+        summary: 'End this session',
+        description:
+          'Revokes whichever session authenticated the call — the `Authorization: Session` one ' +
+          'for a machine caller, the cookie for a browser.\n\n' +
+          'Immediate and cluster-wide, because the session is a server-side record rather than ' +
+          'something the client forgets. Idempotent.',
+        responses: {
+          '200': {
+            description: 'Signed out.',
+            content: { 'application/json': { schema: ref('LogoutResult') } },
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+        },
+      },
+    },
     '/v1/signup': {
       post: {
         tags: ['Tenant'],

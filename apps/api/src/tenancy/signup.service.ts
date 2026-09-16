@@ -29,7 +29,7 @@
  * open door (D-053), not the per-tenant live budget D-052 deferred.
  */
 
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
@@ -40,6 +40,7 @@ import { AccountService } from '../auth/account.service.js';
 import { assessPassword } from '../auth/password.js';
 import { UserError, UserService, type SafeUser } from '../auth/user.service.js';
 import { ApiException } from '../common/api-exception.js';
+import { AttemptLimitExceeded, AttemptLimiter, SIGNUP_POLICY } from '../common/attempt-limiter.js';
 import { AuditService } from '../persistence/audit.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';
 import type { AppConfig } from '../config/config.js';
@@ -47,36 +48,6 @@ import { APP_CONFIG } from '../tokens.js';
 import type { EntitlementVersionRecord, TenantRecord } from './entitlements.service.js';
 import { CREATED_VIA_SIGNUP, decideLiveAccess } from './live-access.js';
 import { buildTenantProvisioning, INITIAL_VERSION } from './provisioning.js';
-
-/**
- * A keyed digest of the address, never the address.
- *
- * A bare SHA-256 of an IPv4 address is not anonymisation — the whole space is four billion values
- * and a laptop walks it in seconds. Keying the digest with the deployment's own secret makes the
- * stored value useless to anyone who does not also hold that secret, while still being stable
- * enough to count against for an hour.
- *
- * Exported rather than private so that anything needing to find one origin's rows — an operator
- * asking why an address is being refused, a test clearing its own bucket without touching
- * another's — uses this function instead of reimplementing the keying beside it.
- */
-export function signupOriginKey(secret: string, ip: string | undefined): string {
-  return createHmac('sha256', secret)
-    .update(ip ?? 'unknown')
-    .digest('hex');
-}
-
-/** How long a signup attempt counts against its origin. */
-export const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
-
-/**
- * Signups permitted from one address per window.
- *
- * Generous by design. A real firm signs up once; five leaves room for a genuine second tenant,
- * a colleague on the same office address, and two mistakes, while still turning an unattended
- * script into a few rows rather than a few million.
- */
-export const SIGNUP_MAX_PER_WINDOW = 5;
 
 /** Why signup was refused before anything was written. */
 export type SignupRejection = 'RATE_LIMITED' | 'WEAK_PASSWORD' | 'EMAIL_TAKEN';
@@ -91,12 +62,6 @@ export class SignupError extends Error {
     super(message);
     this.name = 'SignupError';
   }
-}
-
-interface SignupAttemptRecord {
-  /** Keyed, never the address itself — see `originKey`. */
-  readonly originKey: string;
-  readonly at: Date;
 }
 
 export interface SignupRequestContext {
@@ -120,12 +85,12 @@ export class SignupService {
   private readonly entitlements: Collection<EntitlementVersionRecord>;
   private readonly taxonomies: Collection<Record<string, unknown>>;
   private readonly policies: Collection<Record<string, unknown>>;
-  private readonly attempts: Collection<SignupAttemptRecord>;
 
   constructor(
     db: Db,
     private readonly transactions: TransactionRunner,
     private readonly audit: AuditService,
+    private readonly limiter: AttemptLimiter,
     private readonly users: UserService,
     private readonly accounts: AccountService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -134,7 +99,6 @@ export class SignupService {
     this.entitlements = db.collection<EntitlementVersionRecord>('tenantEntitlementVersions');
     this.taxonomies = db.collection('taxonomyVersions');
     this.policies = db.collection('policyVersions');
-    this.attempts = db.collection<SignupAttemptRecord>('signupAttempts');
   }
 
   async ensureIndexes(): Promise<void> {
@@ -144,15 +108,6 @@ export class SignupService {
     // is what a real deployment is, would otherwise have signup as the only writer of this
     // collection and no constraint on it at all.
     await this.tenants.createIndex({ tenantId: 1 }, { unique: true });
-
-    await this.attempts.createIndex({ originKey: 1, at: -1 });
-    // The attempt log exists to bound a burst, not to build a record of who visited. Mongo
-    // deletes each row an hour after it was written, so the collection never becomes a store
-    // of addresses that somebody has to reason about under a retention policy.
-    await this.attempts.createIndex(
-      { at: 1 },
-      { expireAfterSeconds: Math.floor(SIGNUP_WINDOW_MS / 1000) },
-    );
   }
 
   /**
@@ -167,7 +122,16 @@ export class SignupService {
     context: SignupRequestContext,
     now: Date = new Date(),
   ): Promise<SignupResult> {
-    await this.recordAttempt(context, now);
+    // Bounded per origin before anything is written and before the argon2id hash is computed:
+    // this is the only route in the service that writes without a credential (D-056).
+    try {
+      await this.limiter.record(SIGNUP_POLICY, context.ip, now);
+    } catch (error) {
+      if (error instanceof AttemptLimitExceeded) {
+        throw new SignupError('RATE_LIMITED', error.message);
+      }
+      throw error;
+    }
 
     // Judged before a single record is written, and before the expensive hash is computed. The
     // two strings the request already contains are part of the check: a password that is the
@@ -344,35 +308,6 @@ export class SignupService {
           : 'A live key becomes available once the contact email address is confirmed.',
       ],
     };
-  }
-
-  /**
-   * Count this origin's recent attempts, and refuse past the bound.
-   *
-   * The attempt is written **before** the check, so a caller whose signups keep failing is
-   * counted too. Counting only successes would leave a loop that sends invalid bodies entirely
-   * unbounded, which is the cheaper attack of the two.
-   *
-   * This is not inside the signup transaction. A row that vanished when a signup failed would
-   * make the limiter forget exactly the attempts it exists to remember.
-   */
-  private async recordAttempt(context: SignupRequestContext, now: Date): Promise<void> {
-    const originKey = this.originKey(context.ip);
-    await this.attempts.insertOne({ originKey, at: now });
-
-    const since = new Date(now.getTime() - SIGNUP_WINDOW_MS);
-    const recent = await this.attempts.countDocuments({ originKey, at: { $gte: since } });
-
-    if (recent > SIGNUP_MAX_PER_WINDOW) {
-      throw new SignupError(
-        'RATE_LIMITED',
-        `${String(recent)} signup attempts from this address in the last hour.`,
-      );
-    }
-  }
-
-  private originKey(ip: string | undefined): string {
-    return signupOriginKey(this.config.session.secret, ip);
   }
 }
 

@@ -78,6 +78,36 @@ Two things worth knowing before you build against these:
 - **A reset ends every session that user holds**, and says how many. A reset may be an account
   being taken back, so leaving other sessions signed in would make it cosmetic.
 
+### Signing in
+
+```http
+POST /v1/auth/login   { "email": "...", "password": "..." }
+→ { "sessionToken": "...", "expiresAt": "...", "idleTimeoutSeconds": 1800, "environment": "..." }
+```
+
+Send it back as **`Authorization: Session <token>`** — its own scheme, not `Bearer`. From there
+every route works as it does with an API key, including issuing your first one:
+
+```http
+POST /v1/tenant/api-keys   Authorization: Session <token>
+```
+
+So the whole path is yours: sign up, confirm, sign in, issue a key. Nobody at Erly is involved.
+
+Four things to build around:
+
+- **One `401` for every sign-in failure.** Wrong password, unknown address, locked account — all
+  identical. Do not try to render "account locked"; there is no signal there to read.
+- **Two expiries.** `expiresAt` is absolute; `idleTimeoutSeconds` ends a session that goes unused
+  before that. A client that watches only the first is surprised by the second.
+- **`environment` is derived** from your entitlement _and_ a confirmed address. You cannot ask for
+  `live`, and a sandbox session cannot issue a live key.
+- **Sign out ends it server-side.** `POST /v1/auth/logout` — the token stops working everywhere,
+  not just in the process that forgot it.
+
+An API key remains the right credential for a long-running integration: it does not expire on idle
+and it carries only the roles you gave it. The session is how you get the first one.
+
 (Signup still hands out no API key.)
 
 **Every key after that, you issue yourself** (decision **D-050**). If that first key carries

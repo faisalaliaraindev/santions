@@ -1,6 +1,6 @@
 # Phase I — Tenant self-service onboarding
 
-**Status: I4, I1 and I2 built, 2026-09-16. I3, I5, I6 not started.** Written 2026-09-16, and the
+**Status: I4, I1, I2 and I3 built, 2026-09-16. I5 and I6 are the remainder.** Written 2026-09-16, and the
 three decisions it raised (D-051, D-052, D-053) are now all closed — see section 7.
 
 Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-running the
@@ -135,13 +135,28 @@ credentials". That is a large new surface for a feature that is not our product.
 **Recorded as open decision D-051.** It is genuinely a decision: self-hosting Keycloak for
 customer identity has its own operational cost, and someone should say yes deliberately.
 
-### I3 — Login and session
+### I3 — Login and session — **BUILT 2026-09-16**
 
-**Next.** `UserService.authenticate` already verifies a password, applies the lockout and returns
-a safe user; what does not exist is the route that turns that into a session. The failure values
-it returns (`UNKNOWN_USER`, `BAD_PASSWORD`, `LOCKED`, `SUSPENDED`) are for the audit trail and the
-counter — I3 must flatten them into **one opaque answer** at the HTTP boundary, exactly as
-`AuthGuard` does for API keys.
+Implemented as **D-059**. `POST /v1/auth/login` takes an email address and a password and returns
+a session token, presented afterwards as `Authorization: Session <token>`; `POST /v1/auth/logout`
+ends it. Both were built on the second of the two options below — a token-returning login for API
+consumers — but **without** becoming a second authentication system:
+
+- the session is created by the **same `SessionService`** as the panel's cookie, with the same
+  idle and absolute expiry, resolved by the same branch of `AuthGuard`, revoked by the same call;
+- it gets **its own `Authorization` scheme**, for the reason `ApiKey` has one: a session token is
+  never fed to the JWT verifier, and a rejection can still say which credential was meant;
+- **every failure is one `401` with one sentence** — the four values `authenticate` returns are
+  for the audit trail and the lockout counter, never for whoever is trying passwords;
+- the session's **environment is derived** from `decideLiveAccess`, not requested, so an
+  unconfirmed tenant signs into sandbox and confirming the address raises the next session to
+  live;
+- sign-in attempts are **bounded per origin** as well as per account. The limiter signup grew in
+  I1 is now shared (`common/attempt-limiter.ts`, two buckets), because argon2id costs 19 MiB per
+  attempt by design and an unbounded login route spends that with nothing but a socket.
+
+**What this completes.** Signup → confirm → sign in → issue your own key now runs end to end with
+nobody at Erly involved. There is a test that does exactly that.
 
 `POST /auth/login` exists as an OIDC redirect for the panel. Machine-driven signup needs a session
 the customer's own backend can obtain and use. Either:
@@ -237,14 +252,14 @@ hour.
 
 ## 4. Order of work
 
-| #   | Step                                | Why here                                                              |
-| :-- | :---------------------------------- | :-------------------------------------------------------------------- |
-| 1   | ~~**I4** disable/enable~~ **done**  | Smallest, self-contained, valuable on its own. Warms up the key model |
-| 2   | ~~**I1** tenant creation~~ **done** | The core. Everything else needs a tenant to exist                     |
-| 3   | ~~**I2** user creation~~ **done**   | D-051 closed: our database, argon2id hashes                           |
-| 4   | **I3** login returning a session    | Needs I2                                                              |
-| 5   | **I5/I6** both keys, one response   | Mostly assembly once the above stand                                  |
-| 6   | Per-tenant live budget              | The D-052 mitigation                                                  |
+| #   | Step                                          | Why here                                                              |
+| :-- | :-------------------------------------------- | :-------------------------------------------------------------------- |
+| 1   | ~~**I4** disable/enable~~ **done**            | Smallest, self-contained, valuable on its own. Warms up the key model |
+| 2   | ~~**I1** tenant creation~~ **done**           | The core. Everything else needs a tenant to exist                     |
+| 3   | ~~**I2** user creation~~ **done**             | D-051 closed: our database, argon2id hashes                           |
+| 4   | ~~**I3** login returning a session~~ **done** | Needs I2                                                              |
+| 5   | **I5/I6** both keys, one response             | Mostly assembly once the above stand                                  |
+| 6   | Per-tenant live budget                        | The D-052 mitigation                                                  |
 
 **I4 first is deliberate.** It is independently useful, ships without any of the signup
 machinery, and proves the key-state changes before anything depends on them.

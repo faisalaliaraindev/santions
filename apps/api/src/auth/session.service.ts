@@ -30,8 +30,17 @@ interface SessionRecord {
   readonly tenantId: string | null;
   readonly roles: readonly Role[];
   readonly environment: 'sandbox' | 'live';
-  /** Kept server-side only, for calls the BFF makes on the user's behalf. */
-  readonly providerTokens: { readonly accessToken: string; readonly refreshToken: string | null };
+  /**
+   * Kept server-side only, for calls the BFF makes on the user's behalf.
+   *
+   * Null for a session created by `POST /v1/auth/login` (I3): a password session has no provider
+   * behind it, so there is nothing to hold. Typed as nullable rather than filled with an empty
+   * string, because "" is a token this service would then carry around as though it were one.
+   */
+  readonly providerTokens: {
+    readonly accessToken: string | null;
+    readonly refreshToken: string | null;
+  } | null;
   /** Verified from the provider, not trusted from a client claim (section 4.2). */
   readonly authenticationAssurance: string | null;
   readonly csrfToken: string;
@@ -64,8 +73,8 @@ export class SessionService {
     readonly tenantId: string | null;
     readonly roles: readonly Role[];
     readonly environment: 'sandbox' | 'live';
-    readonly accessToken: string;
-    readonly refreshToken: string | null;
+    readonly accessToken?: string | null;
+    readonly refreshToken?: string | null;
     readonly authenticationAssurance: string | null;
     readonly now: Date;
   }): Promise<{ sessionId: string; csrfToken: string }> {
@@ -79,7 +88,10 @@ export class SessionService {
       tenantId: input.tenantId,
       roles: input.roles,
       environment: input.environment,
-      providerTokens: { accessToken: input.accessToken, refreshToken: input.refreshToken },
+      providerTokens:
+        input.accessToken === undefined || input.accessToken === null
+          ? null
+          : { accessToken: input.accessToken, refreshToken: input.refreshToken ?? null },
       authenticationAssurance: input.authenticationAssurance,
       csrfToken,
       createdAt: input.now,
@@ -145,6 +157,11 @@ export class SessionService {
     const expected = Buffer.from(record.csrfToken);
     const actual = Buffer.from(presented);
     return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  /** The absolute lifetime a session is created with, for a caller that has to state it. */
+  absoluteLifetimeMs(): number {
+    return SESSION_ABSOLUTE_MS;
   }
 
   /** Sign-out. Revocation is immediate and cluster-wide because the record is shared. */
