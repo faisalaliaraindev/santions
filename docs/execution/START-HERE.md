@@ -7,157 +7,38 @@ of previous sessions. It is deliberately short.
 
 ## 1. Active phase
 
-> **Phase F — Extraction, classification and the full pipeline (gate G7)**
+> **Phase I — Tenant self-service onboarding**
 >
-> ✅ **Both engineering P0s for the live path are built (2026-09-16). What remains is yours.**
+> Planned in full, **not started**. Read
+> [`phase-i-tenant-onboarding.md`](./phase-i-tenant-onboarding.md) — it is the brief, and it is
+> short.
 >
-> Live mode has a real extractor: `RuleBasedExtractionAdapter` (**D-048**) — non-mock,
-> `modelId: null`, keyword-and-span, and **unbenchmarked, which every run it takes part in says
-> in its warnings**. A missing extractor is now a loud configuration fault in the warnings and the
-> coverage statement rather than a finding count of zero. And the pipeline no longer hands raw
-> HTML to the extractor: `normalise-document.ts` (**D-049**) strips markup, keeps an offset map
-> back to the original, and takes the charset from what the publisher declared.
+> **Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-running the
+> bootstrap.** That is provisioning by redeploy. This phase replaces it with signup through the
+> API: a customer registers, sets a password, logs in, and issues their own **sandbox and live**
+> keys with nobody at Erly involved.
 >
-> **Nothing live has been contacted. `pnpm first-contact` has still never been run, and the
-> project owner runs it — not a session.**
+> **Start with I4, not I1.** A reversible `disabledAt`, separate from the one-way `revokedAt`.
+> Small, independently useful, and it proves the key-state change before any signup machinery
+> depends on it. Do **not** conflate the two fields: either a leaked key becomes switch-back-on-able,
+> or a routine pause becomes irreversible.
 >
-> **Priority order for a live Postman e2e** (detail in `phase-f.md` §3bis):
->
-> | P      | What                                                                                                        | Whose                       | State           |
-> | :----- | :---------------------------------------------------------------------------------------------------------- | :-------------------------- | :-------------- |
-> | **P0** | The live rule-based extractor (D-048)                                                                       | Engineering                 | **Done**        |
-> | **P0** | F1 normalisation and charset (D-049)                                                                        | Engineering                 | **Done**        |
-> | **P0** | FI-20 — the automatic halt and its audit entry commit together (`tests/integration/source-halt.test.ts`)    | Engineering                 | **Done**        |
-> | **P1** | `pnpm first-contact` → update `robotsPosition` on what it said → propose/approve/activate                   | **Source admin, four eyes** | Open — blocking |
-> | **P1** | Search a subject actually present in the SEC feed — it is a `FIXED_FEED`, so the name never reaches the SEC | Whoever runs the demo       | Open            |
->
-> **Engineering's next step is F3: the eight FR-07 validation rules**, from scratch, in
-> `packages/domain`, pure — `grep validateAssertion` still returns nothing. Build the validator
-> before the model (phase-f.md §4). What F1 still owes: PDF, OCR, and the four date fields — the
-> rule-based extractor leaves every date null, which is correct and means every finding it
-> produces is undated.
->
-> **The wider phase: the extraction model.** Phase E's discovery and fetch path is built and
-> green; the pipeline runs end to end in mock mode and over real HTTP. What it does _not_ have is
-> extraction it could be surprised by — `MockExtractionModel` is rule-based and keyword-driven, so
-> it only ever finds what its own table already knows. That is the largest thing between here and
-> a result worth believing.
->
-> **Brief: [`phase-f.md`](./phase-f.md) — expanded into a full brief on 2026-09-15.** It carries
-> an execution order that deliberately differs from the `F1`–`F7` numbering (**build the FR-07
-> validator before the model**), and **two blockers found while writing it**: the labelled set has
-> no document bodies, so D7 cannot be benchmarked as written; and the pipeline hands **raw HTML**
-> to the extractor while calling it normalised text, with no charset handling. Read §3 before
-> writing code.
->
-> **The largest gap in the pipeline is unchanged: FR-10 clustering is not wired**, so a syndicated
-> copy still counts as a second independent source on axis D. It sits in F5, and it is the
-> highest-value thing to pull forward if the phase splits across sessions, because it changes
-> bands being produced today.
->
-> ---
->
-> **Phase E — Query planning, discovery cascade and fetch (gate G6) — the path is built**
->
-> 🔧 **Current work: the live-source path. Steps 1 and 2 of eight are done, and step 3 has its
-> foundations.** `HttpEvidenceFetchAdapter` — the real `EvidenceFetchPort` — is built, wired and
-> tested, and `FetchGateService` **derives** every `FetchAuthorisation` field (**D-036**).
->
-> **D17 closed on 2026-09-15**, so this project now has a decided first live source: the **SEC
-> litigation-releases RSS feed**, approved by name (Faisal Ali, source admin), one conditional GET
-> every fifteen minutes against a recorded 10 req/s ceiling, on four stop conditions that are each
-> **proved to fire** by `apps/api/test/fetch-tripwires.test.ts`.
->
-> **No live source has been contacted by this project. That is still true.** The source version is
-> written and schema-checked (`apps/api/src/sources/registry/sec-litigation-releases.ts`) and has
-> **not** been proposed, approved or activated — and it carries `robotsPosition: NOT_ESTABLISHED`,
-> which the fetch gate refuses, so the feed cannot be polled until a first `GET /robots.txt` has
-> actually happened and the position has been updated on what it said. That ordering is deliberate.
->
-> **What step 3 built so far, and what it did not.** The XML parser is decided, built and tested —
-> `fast-xml-parser@4.5.7` pinned exactly, behind a DOCTYPE gate this project owns rather than a
-> parser option (**D-039**, and **D18** is newly open about v5). The **per-domain breaker** exists
-> beside the per-source one, because a discovery source is one agreement and a hundred publishers
-> (**D-040**). **Stop conditions** escalate FR-06 per source and can only ever stop (**D-041**).
-> **The rungs and the connectors themselves are not built** — that is exactly where step 3 resumes,
-> and it is the next concrete action.
->
-> Brief: [`phase-e.md`](./phase-e.md) — **expanded into a full brief on 2026-09-14**. It carries
-> an execution order that deliberately differs from the `E1`–`E6` step numbering, and says why.
->
-> **What step 1 settled, and what a later step must not undo.** The adapter talks HTTPS through
-> `node:https` with the SEC-02 screening inside the connection's own `lookup` (**D-034**) — that
-> is what defeats DNS rebinding, and screening before a `fetch` call would not. Wire bytes and
-> decompressed bytes are separate budgets, because they defend against different attacks. Robots
-> `UNKNOWN` **refuses**: an outage at the publisher is not consent. And **a gate refusal is never
-> recorded against source health** (**D-035**). Rights are checked **before** the domain gate and
-> without spending, so an operator's kill switch is what a refusal reports rather than a
-> publisher's cooldown — found by the trip-wire harness, not by reasoning.
->
-> **`pnpm demo:api` and the whole test suite still run without any live call.** The real
-> transport is constructed only by the live composition root, and every test in the fetch suite
-> uses an injected one.
->
-> **What D5 built, and what the fetch adapter now does** (kept here because every later
-> connector must do the same). Source health is a **separate
-> mutable document** (`sourceHealth`, keyed by `sourceId`) beside the immutable `SourceVersion`:
-> the approved version says what is _permitted_, health says what is _happening_. Call
-> `SourceHealthService.checkAccess` **immediately before every external call**, not at plan time
-> — that point-of-use recheck is what makes the kill switch effective mid-run (T36) — then feed
-> the outcome back with `recordFailure` / `recordSuccess`. The breaker reads the existing FR-06
-> table and invents nothing. A refusal is **never** a silent skip: it becomes a
-> `SourceCoverageOutcome` naming what stopped it. See `docs/decisions.md` D-031 and D-032, and
-> failure-injection rows FI-17 and FI-18.
->
-> **What D6 built, and the gap it leaves open.** The taxonomy lexicon is **no longer empty** —
-> 155 hand-authored terms across `en` and `es`, so F3 category queries are now built — and the
-> lexicon audit now fails **activation** as well as CI (T79), along with three other refusals a
-> `taxonomy_admin` could otherwise slip through. **⚠️ No Spanish reader has reviewed the Spanish
-> terms.** Every term is marked `UNREVIEWED_AUTHORED`, the coverage statement says so on every
-> run, and `docs/decisions.md` D-033 records the open action. An unreviewed term does not fail —
-> it returns nothing — so the Spanish half may report no findings because the query was wrong
-> rather than because nothing exists. **Finding a Spanish-reading reviewer is still open and is
-> owned outside engineering.**
->
-> **No Costa Rican name-frequency distribution is loaded**, and nothing invents one. It is
-> blocked on the SEC-05 aggregate-only approval for the TSE padrón (D-011). The cost is real and
-> is printed on every bootstrap: the FR-08 top-decile penalty never fires for CR names, so a
-> common name reaches a higher identity grade than it should.
->
-> **The largest gap in the pipeline is unchanged: FR-10 clustering is not wired**, so a
-> syndicated copy still counts as a second independent source on axis D.
->
-> **Phase D is complete — gate G5 passed.** D0 the CR source dossier (opening **D14** and
-> **D15**, both owned outside engineering); D1 the propose → approve → activate lifecycle with
-> four eyes and the SEC-05 rights gate (opening **D16**); D2 the six FR-05 ports, six
-> deterministic mocks and one real adapter (UK Companies House, **GB only — not Costa Rican
-> coverage**); D3 the FR-02 association graph, where a `PARTIAL` identity grade attaches nothing;
-> D4 the traversal bounds as policy-version configuration pinned to the run; D5 source health;
-> D6 the lexicon and its activation audit. Decisions D-018 through D-033.
->
-> **D15 remains open and untouched**, and it is now the nearer blocker: the cascade's rung tiers —
-> step 3's remaining work — encode its answer. D17 closing does **not** cover it, because a Costa
-> Rican judicial portal is a different publisher and needs its own named approval.
->
-> **Two decisions are due at G6 and both are open.** Check
-> [`../open-decisions.md`](../open-decisions.md) rather than a phase brief for what is actually
-> open. **D6 — how robots exceptions for official sources are approved and recorded — was raised
-> with specifics on 2026-09-14** and is written up there with three options and a recommendation.
-> **It needs a source admin, not an engineer.** Until it closes, no robots exception can be
-> applied at all: the schema has no field for the named approver the fetch gate demands, so an
-> `EXCEPTION_APPROVED` source is refused rather than fetched. That is the safe direction and it
-> is recorded as provisional. **D15 — the Costa Rican primary-source evidence base — is also due
-> at G6** and is untouched.
->
-> **Phases A, B, C and D are complete.** The stack starts, seeds and survives a restart; auth,
-> tenancy, entitlements, subjects and idempotent search creation are built and tested against it;
-> persistence, jobs, the search index and evidence storage exist with their reconcilers; and a
-> search runs end to end in mock mode (`pnpm demo:api`). The worker refuses to start without a
-> handler (D-016); the handler exists as of the Phase E slice built early for a demo.
+> **Get a decision on D-053 first** — open signup or invite-only. Ten minutes, and it shapes I1.
+> D-051 (Keycloak or our own password store; recommendation on file is Keycloak) blocks I2.
 
-Update this pointer when a phase completes. It is the one line every session depends on.
+### The previous phase, for context
 
----
+Phase F is **partly done** and is not the active phase. The live path works end to end: a real
+search against the SEC litigation-releases feed returns a real finding. What Phase F still owes is
+in [`phase-f.md`](./phase-f.md) — **F3, the eight FR-07 validation rules**, is the next thing
+there, and `grep validateAssertion` still returns nothing.
+
+### The highest-value fix outstanding, in either phase
+
+**A fixed feed is fetched once per planned query** — about 41 identical requests per run,
+retrieving the same bytes each time. That exhausts the SEC's 120-requests-an-hour free tier after
+two or three searches, and the symptom is `PARTIAL` / `UNRESOLVED` with a rejected lead at stage
+`FETCH`. It should be fetched once per run and matched many times.
 
 ## 2. What to read, and what not to
 
