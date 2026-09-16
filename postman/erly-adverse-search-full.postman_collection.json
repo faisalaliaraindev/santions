@@ -1698,7 +1698,75 @@
           ]
         },
         {
-          "name": "5. Revoke the key you issued",
+          "name": "5. Pause it - reversible, and not the same as revoking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"integration paused from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys/{{issuedKeyId}}/disable",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys", "{{issuedKeyId}}", "disable"]
+            },
+            "description": "The key stops authenticating immediately - and `enable` brings it back with the same secret and the same key id, so nothing in your configuration changes.\n\n**Not for a leaked secret.** Anything reversible is the wrong answer to a credential somebody else now holds; use `DELETE`, which is permanent. This is for a paused integration, a rotation window, or a key you want out of service while a question is answered.\n\nList your keys after this and the entry reads `status: \"DISABLED\"` with the reason you gave. A revoked key answers 409 here rather than pretending to pause."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('paused', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('and it is the reversible field', () => pm.expect(pm.response.json().disabled).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Turn it back on",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"integration resumed\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys/{{issuedKeyId}}/enable",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys", "{{issuedKeyId}}", "enable"]
+            },
+            "description": "The same secret works again the moment this returns. Nothing is re-issued.\n\nA **revoked** key answers 409 instead: `revokedAt` is one-way and this route cannot touch it. That is the whole distinction between the two - both stop the key, and only one of them can be undone."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('back on', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('and it is active again', () => pm.expect(pm.response.json().disabled).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Revoke the key you issued",
           "request": {
             "method": "DELETE",
             "header": [

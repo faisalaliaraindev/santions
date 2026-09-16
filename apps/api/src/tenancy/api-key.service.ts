@@ -15,6 +15,12 @@
  *  4. **Rotation issues a new secret and keeps the key's identity**, so the tenant's
  *     configuration does not change — and the old secret stops working immediately. A rotation
  *     that leaves the previous secret valid is not a rotation.
+ *  5. **Disabling and revoking are different fields, and must stay that way.** `disabledAt` is
+ *     a reversible off switch for a paused integration or a rotation window; `revokedAt` is
+ *     permanent, for a secret that has leaked. Collapse them into one field and either a leaked
+ *     key becomes switch-back-on-able or a routine pause becomes irreversible — both wrong, in
+ *     opposite directions, and no single field is right about both. `verify()` refuses either
+ *     state; only one of them can be undone.
  *
  * Tenant self-service management of these keys is deferred by decision D-007; the reserved
  * route answers 501. This is the service the provider-side path uses in the meantime.
@@ -30,7 +36,7 @@ import { isRole, type Principal, type Role } from '@erly/adverse-domain';
 export type KeyEnvironment = 'sandbox' | 'live';
 
 /** What happened to a key. Every one of these is written to the audit collection. */
-export type ApiKeyEvent = 'CREATED' | 'ROTATED' | 'REVOKED';
+export type ApiKeyEvent = 'CREATED' | 'ROTATED' | 'DISABLED' | 'ENABLED' | 'REVOKED';
 
 export interface ApiKeyRecord {
   /** Public half of the credential. Safe to log, display and index on. */
@@ -53,8 +59,23 @@ export interface ApiKeyRecord {
   readonly expiresAt: Date | null;
   readonly lastUsedAt: Date | null;
   readonly rotatedAt: Date | null;
+  /**
+   * Switched off, reversibly. Distinct from `revokedAt` on purpose — see decision 5 above.
+   *
+   * Optional in the type, not because a new record may omit it — `create` always writes it —
+   * but because records written before this field existed do not have it. Every read goes
+   * through `disabledAtOf`, which reads a missing field as "not disabled" rather than as the
+   * `undefined !== null` that would refuse every key issued before today.
+   */
+  readonly disabledAt?: Date | null;
+  readonly disabledReason?: string | null;
   readonly revokedAt: Date | null;
   readonly revokedReason: string | null;
+}
+
+/** A missing `disabledAt` — an older record — means the key was never disabled. */
+function disabledAtOf(record: Pick<ApiKeyRecord, 'disabledAt'>): Date | null {
+  return record.disabledAt ?? null;
 }
 
 export interface ApiKeyAuditRecord {
@@ -76,7 +97,7 @@ export interface IssuedApiKey {
 }
 
 export type ApiKeyRejection =
-  'MALFORMED' | 'UNKNOWN' | 'BAD_SECRET' | 'REVOKED' | 'EXPIRED' | 'NO_ROLES';
+  'MALFORMED' | 'UNKNOWN' | 'BAD_SECRET' | 'REVOKED' | 'DISABLED' | 'EXPIRED' | 'NO_ROLES';
 
 export class ApiKeyError extends Error {
   readonly rejection: ApiKeyRejection;
@@ -150,6 +171,8 @@ export class ApiKeyService {
       expiresAt,
       lastUsedAt: null,
       rotatedAt: null,
+      disabledAt: null,
+      disabledReason: null,
       revokedAt: null,
       revokedReason: null,
     });
@@ -208,6 +231,13 @@ export class ApiKeyService {
     if (record.expiresAt !== null && record.expiresAt.getTime() <= now.getTime()) {
       throw new ApiKeyError('EXPIRED', 'API key has expired.');
     }
+    // A disabled key is refused exactly as a revoked one is. The difference between them is
+    // not what they do to a request — it is that this one can be undone. Checked after expiry
+    // so that the internal detail names the reason the holder would have to act on first, the
+    // same order the listing's `status` uses.
+    if (disabledAtOf(record) !== null) {
+      throw new ApiKeyError('DISABLED', 'API key is disabled.');
+    }
 
     const roles = record.roles.filter((role): role is Role => isRole(role));
     if (roles.length === 0) {
@@ -249,6 +279,10 @@ export class ApiKeyService {
       // Rotating a revoked key would quietly bring it back.
       throw new ApiKeyError('REVOKED', 'A revoked key cannot be rotated. Issue a new one.');
     }
+    // A *disabled* key may be rotated, and stays disabled afterwards. Rotating while paused is
+    // the ordinary sequence — disable, replace the secret, enable — and refusing it would push
+    // the tenant to revoke and re-issue instead, which changes the key id their configuration
+    // holds. Rotation only replaces the secret; it never flips `disabledAt` back.
 
     const secret = randomBytes(32).toString('base64url');
     await this.keys.updateOne(
@@ -266,7 +300,85 @@ export class ApiKeyService {
     };
   }
 
-  /** Revoke immediately and permanently. A revoked key is never un-revoked. */
+  /**
+   * Switch a key off, reversibly. It stops authenticating immediately.
+   *
+   * For a paused integration, a rotation window, or a key someone is unsure about but has no
+   * evidence has leaked. For a key that *has* leaked, use `revoke` — this one can be undone,
+   * and that is the whole difference.
+   *
+   * Idempotent: disabling an already-disabled key changes nothing and writes no second audit
+   * entry, so the trail keeps saying when it actually went off rather than when someone last
+   * clicked. A **revoked** key cannot be disabled — it is already permanently off, and
+   * accepting the call would suggest `enable` could bring it back.
+   */
+  async disable(input: {
+    readonly keyId: string;
+    readonly actor: string;
+    readonly reason: string;
+    readonly now?: Date;
+  }): Promise<void> {
+    const now = input.now ?? new Date();
+    const record = await this.keys.findOne({ keyId: input.keyId });
+    if (record === null) {
+      throw new ApiKeyError('UNKNOWN', 'API key is not recognised.');
+    }
+    if (record.revokedAt !== null) {
+      throw new ApiKeyError('REVOKED', 'A revoked key is already permanently off.');
+    }
+    if (disabledAtOf(record) !== null) {
+      return;
+    }
+
+    await this.keys.updateOne(
+      { keyId: record.keyId },
+      { $set: { disabledAt: now, disabledReason: input.reason } },
+    );
+    await this.record(record.keyId, record.tenantId, 'DISABLED', input.actor, input.reason, now);
+  }
+
+  /**
+   * Switch a disabled key back on. The same secret works again the moment this returns.
+   *
+   * That is what makes it the wrong tool for a leak, and why `revokedAt` is a separate field
+   * this method cannot touch: a revoked key is refused here rather than resurrected.
+   *
+   * Enabling clears `disabledReason` along with `disabledAt` — the record of *why* it was off
+   * lives in the audit trail, which keeps both events; leaving a stale reason on a working key
+   * would read as though it were still disabled.
+   */
+  async enable(input: {
+    readonly keyId: string;
+    readonly actor: string;
+    readonly reason: string;
+    readonly now?: Date;
+  }): Promise<void> {
+    const now = input.now ?? new Date();
+    const record = await this.keys.findOne({ keyId: input.keyId });
+    if (record === null) {
+      throw new ApiKeyError('UNKNOWN', 'API key is not recognised.');
+    }
+    if (record.revokedAt !== null) {
+      throw new ApiKeyError('REVOKED', 'A revoked key cannot be enabled. Issue a new one.');
+    }
+    if (disabledAtOf(record) === null) {
+      return; // Already on. Idempotent, and no audit entry for a change that did not happen.
+    }
+
+    await this.keys.updateOne(
+      { keyId: record.keyId },
+      { $set: { disabledAt: null, disabledReason: null } },
+    );
+    await this.record(record.keyId, record.tenantId, 'ENABLED', input.actor, input.reason, now);
+  }
+
+  /**
+   * Revoke immediately and permanently. A revoked key is never un-revoked.
+   *
+   * A disabled key can still be revoked — "paused" turning out to be "compromised" is exactly
+   * the path this has to support. `disabledAt` is left as it was: it is a record of what
+   * happened, and revocation does not un-happen it.
+   */
   async revoke(input: {
     readonly keyId: string;
     readonly actor: string;

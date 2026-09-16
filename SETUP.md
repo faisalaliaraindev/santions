@@ -199,13 +199,20 @@ an `example` host that resolves nowhere.
 Once you hold a key with the `apikey:manage` permission — which `tenant_admin` has — your tenant
 manages its own credentials. No provider involvement, and nothing to wait for.
 
-| Request                              | Does                                    |
-| :----------------------------------- | :-------------------------------------- |
-| `POST /v1/tenant/api-keys`           | Issue a key. **Secret returned once**   |
-| `GET /v1/tenant/api-keys`            | List your keys. No secrets, no hashes   |
-| `DELETE /v1/tenant/api-keys/{keyId}` | Revoke one. Immediate, reason mandatory |
+| Request                                    | Does                                        |
+| :----------------------------------------- | :------------------------------------------ |
+| `POST /v1/tenant/api-keys`                 | Issue a key. **Secret returned once**       |
+| `GET /v1/tenant/api-keys`                  | List your keys. No secrets, no hashes       |
+| `POST /v1/tenant/api-keys/{keyId}/disable` | Pause one. **Reversible**, reason mandatory |
+| `POST /v1/tenant/api-keys/{keyId}/enable`  | Turn it back on. Same secret, same key id   |
+| `DELETE /v1/tenant/api-keys/{keyId}`       | Revoke one. **Permanent**, reason mandatory |
 
-Postman folder **`12 — Tenant: your own API keys`** drives all three, plus the two refusals worth
+**Pause is for an integration you are stopping; revoke is for a secret that has leaked.** They are
+separate fields on purpose — a single switch would be either reversible, and then a leaked key
+could be turned back on, or permanent, and then pausing for an afternoon destroys the credential.
+A revoked key answers `409` on disable and enable rather than coming back.
+
+Postman folder **`12 — Tenant: your own API keys`** drives all five, plus the two refusals worth
 seeing once.
 
 ```bash

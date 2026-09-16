@@ -1,5 +1,14 @@
 /**
- * `POST/GET/DELETE /v1/tenant/api-keys` — a tenant issues and revokes its own machine keys.
+ * `POST/GET/DELETE /v1/tenant/api-keys` — a tenant issues, pauses and revokes its own machine
+ * keys.
+ *
+ * # Off for now, and off for good, are different routes
+ *
+ * `POST .../{keyId}/disable` and `.../enable` move a reversible `disabledAt`. `DELETE` sets a
+ * one-way `revokedAt`. Both stop the key authenticating; only one of them can be undone, and
+ * that is the entire distinction (I4). A single switch would have to be either reversible — so
+ * a leaked secret could be turned back on — or permanent — so pausing an integration for an
+ * afternoon destroys the credential. Neither is acceptable, so there are two.
  *
  * Replaces the `501` this path used to return. D-007 deferred self-service while keys were
  * provider-managed; **D-050** records that they no longer are, because a tenant that cannot
@@ -29,13 +38,17 @@
  * a credential the provider can read back is one the provider can leak.
  */
 
-import { Body, Controller, Delete, Get, Inject, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post } from '@nestjs/common';
 
 import {
   createApiKeySchema,
+  disableApiKeySchema,
+  enableApiKeySchema,
   revokeApiKeySchema,
   type ApiKeySummary,
   type CreateApiKeyInput,
+  type DisableApiKeyInput,
+  type EnableApiKeyInput,
   type IssuedApiKeyResponse,
   type RevokeApiKeyInput,
 } from '@erly/adverse-contracts';
@@ -46,7 +59,7 @@ import { ApiException } from '../common/api-exception.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';
 import { validate } from '../common/zod-validation.pipe.js';
 import { requireTenant } from '../subjects/subjects.controller.js';
-import { ApiKeyService } from './api-key.service.js';
+import { ApiKeyError, ApiKeyService } from './api-key.service.js';
 import { EntitlementsService } from './entitlements.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -168,16 +181,26 @@ export class TenantApiKeysController {
         createdBy: record.createdBy,
         lastUsedAt: record.lastUsedAt?.toISOString() ?? null,
         expiresAt: record.expiresAt?.toISOString() ?? null,
+        disabledAt: record.disabledAt?.toISOString() ?? null,
+        disabledReason: record.disabledReason ?? null,
         revokedAt: record.revokedAt?.toISOString() ?? null,
         revokedReason: record.revokedReason,
         // Derived rather than stored: an expiry that passed while nothing was running still
         // expired, and a status field written at creation would say otherwise.
+        //
+        // A key can be in more than one of these states at once, and one field can only name
+        // one. The order is what the holder must do about it, most permanent first: revoked and
+        // expired both mean "issue a new one", disabled means "turn it back on". So a key that
+        // was paused and has since expired reads EXPIRED — enabling it would not make it work —
+        // and `disabledAt` above still says it was paused.
         status:
           record.revokedAt !== null
             ? 'REVOKED'
             : record.expiresAt !== null && record.expiresAt.getTime() <= now.getTime()
               ? 'EXPIRED'
-              : 'ACTIVE',
+              : (record.disabledAt ?? null) !== null
+                ? 'DISABLED'
+                : 'ACTIVE',
       })),
     };
   }
@@ -197,16 +220,107 @@ export class TenantApiKeysController {
     @Param('keyId') keyId: string,
     @Body(validate(revokeApiKeySchema)) body: RevokeApiKeyInput,
   ): Promise<{ keyId: string; revoked: true }> {
-    const tenantId = requireTenant(principal);
+    await this.assertOwned(principal, keyId);
 
+    await this.keys.revoke({ keyId, actor: principal.subject, reason: body.reason });
+    return { keyId, revoked: true };
+  }
+
+  /**
+   * Switch one of this tenant's keys off — reversibly (I4).
+   *
+   * This is the routine one: pausing an integration, parking a key during a rotation, taking
+   * something out of service while a question is answered. The key stops authenticating
+   * immediately, exactly as a revoked one does, and `POST .../enable` brings it back.
+   *
+   * **It is not for a leaked secret.** Anything that can be undone is the wrong answer to a
+   * credential someone else now holds — use `DELETE`, which cannot be. That is why the two are
+   * separate fields and separate routes rather than one switch with a flag.
+   *
+   * Idempotent, so a client that retries a timeout does not get an error for a state it already
+   * achieved; a revoked key answers **409**, because revocation is terminal and pretending to
+   * disable it would imply `enable` could undo it.
+   */
+  @Post(':keyId/disable')
+  // 200, not Nest's default 201 for a POST: nothing is created here. A `Created` on a route
+  // that only moves a flag is the kind of small untruth an integrator writes a branch around.
+  @HttpCode(200)
+  @RequirePermission('apikey:manage')
+  @RequireScope('admin:write')
+  async disable(
+    @CurrentPrincipal() principal: Principal,
+    @Param('keyId') keyId: string,
+    @Body(validate(disableApiKeySchema)) body: DisableApiKeyInput,
+  ): Promise<{ keyId: string; disabled: true }> {
+    const tenantId = await this.assertOwned(principal, keyId);
+
+    try {
+      await this.keys.disable({ keyId, actor: principal.subject, reason: body.reason });
+    } catch (error) {
+      this.rethrow(error, tenantId, keyId, 'disabled');
+    }
+    return { keyId, disabled: true };
+  }
+
+  /**
+   * Turn a disabled key back on. The same secret works again immediately.
+   *
+   * A revoked key answers **409** rather than coming back to life. The reason is recorded in the
+   * audit trail beside the disabling it undoes, so the pause reads as a pair of events with an
+   * actor on each rather than as a gap nobody can account for.
+   */
+  @Post(':keyId/enable')
+  @HttpCode(200)
+  @RequirePermission('apikey:manage')
+  @RequireScope('admin:write')
+  async enable(
+    @CurrentPrincipal() principal: Principal,
+    @Param('keyId') keyId: string,
+    @Body(validate(enableApiKeySchema)) body: EnableApiKeyInput,
+  ): Promise<{ keyId: string; disabled: false }> {
+    const tenantId = await this.assertOwned(principal, keyId);
+
+    try {
+      await this.keys.enable({ keyId, actor: principal.subject, reason: body.reason });
+    } catch (error) {
+      this.rethrow(error, tenantId, keyId, 'enabled');
+    }
+    return { keyId, disabled: false };
+  }
+
+  /**
+   * The key must be this tenant's, and saying so is the whole point of the lookup.
+   *
+   * Without it, a `keyId` from another tenant would be disabled — or enabled — by anyone who
+   * could guess one. A key that is not this tenant's answers `NOT_FOUND` rather than
+   * `FORBIDDEN`, because the second confirms it exists.
+   */
+  private async assertOwned(principal: Principal, keyId: string): Promise<string> {
+    const tenantId = requireTenant(principal);
     const owned = await this.keys.listForTenant(tenantId);
     if (!owned.some((record) => record.keyId === keyId)) {
       throw new ApiException('NOT_FOUND', 'No such API key.', {
         internalDetail: `tenant=${tenantId} keyId=${keyId} is not this tenant's`,
       });
     }
+    return tenantId;
+  }
 
-    await this.keys.revoke({ keyId, actor: principal.subject, reason: body.reason });
-    return { keyId, revoked: true };
+  /**
+   * The only `ApiKeyError` these two routes can raise after the ownership check is `REVOKED` —
+   * `UNKNOWN` is impossible, because the key was just found in this tenant's list. It is a 409
+   * rather than a 404 or a 403: the key exists and is yours, and the state it is in is the
+   * reason the call cannot be honoured.
+   */
+  private rethrow(error: unknown, tenantId: string, keyId: string, verb: string): never {
+    if (error instanceof ApiKeyError && error.rejection === 'REVOKED') {
+      throw new ApiException(
+        'ALREADY_TERMINAL',
+        `This key has been revoked. Revocation is permanent, so it cannot be ${verb}. ` +
+          'Issue a new key.',
+        { internalDetail: `tenant=${tenantId} keyId=${keyId} is revoked` },
+      );
+    }
+    throw error;
   }
 }

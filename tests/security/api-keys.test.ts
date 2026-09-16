@@ -25,6 +25,7 @@ import { loadConfig } from '../../apps/api/src/config/config.js';
 import {
   ApiKeyError,
   ApiKeyService,
+  type ApiKeyRejection,
   type IssuedApiKey,
   type KeyEnvironment,
 } from '../../apps/api/src/tenancy/api-key.service.js';
@@ -602,5 +603,327 @@ describe('self-service key issuance (D-050) cannot become a way to get more', ()
       .set('Authorization', `ApiKey ${analyst.secret}`)
       .send({ label: 'analyst trying to issue', roles: ['analyst'] })
       .expect(403);
+  });
+});
+
+/**
+ * I4 — a reversible off switch that is not revocation.
+ *
+ * The claim under test is a pair of opposites, and both halves have to hold at once:
+ * disabling stops a key exactly as revoking does, and unlike revoking it can be undone. If the
+ * two ever share a field, one of those halves breaks — either a leaked secret can be switched
+ * back on, or pausing an integration destroys the credential.
+ *
+ * So most of what follows is about the seam between them: that revocation survives every route
+ * which could plausibly reverse it, and that disabling reverses cleanly.
+ */
+describe('I4 — disable is reversible, revoke is not, and they are different fields', () => {
+  /** A tenant_admin key, which is what a tenant would hold to manage its own keys. */
+  async function tenantAdminKey(
+    tenantId = `tenant-${randomUUID()}`,
+  ): Promise<IssuedApiKey & { tenantId: string }> {
+    const issued = await apiKeys.create({
+      tenantId,
+      environment: 'sandbox',
+      label: 'tenant admin, disable/enable tests',
+      roles: ['tenant_admin'],
+      scopes: ['search:read', 'admin:read', 'admin:write'],
+      createdBy: 'operator@erly.test',
+      expiresAt: null,
+    });
+    return { ...issued, tenantId };
+  }
+
+  /** The rejection `verify` raises, or a failure if it accepted the key. */
+  async function rejectionFor(secret: string): Promise<ApiKeyRejection> {
+    try {
+      await apiKeys.verify(secret);
+    } catch (error) {
+      if (error instanceof ApiKeyError) {
+        return error.rejection;
+      }
+      throw error;
+    }
+    throw new Error('Expected the key to be refused, and it was accepted.');
+  }
+
+  it('refuses a disabled key, and says DISABLED rather than REVOKED', async () => {
+    const key = await issue();
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'paused' });
+
+    expect(await rejectionFor(key.secret)).toBe('DISABLED');
+
+    const response = await request(app.getHttpServer())
+      .get('/v1/searches')
+      .set('Authorization', `ApiKey ${key.secret}`);
+    // The caller still gets one opaque 401. The distinction is for the audit trail and the
+    // listing, not for whoever is holding the key.
+    expect(response.status).toBe(401);
+  });
+
+  it('brings the same secret back on enable, with no re-issue', async () => {
+    const key = await issue();
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'paused' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'resumed' });
+
+    // Same secret, same key id: a tenant configuration holding it needs no edit. This is the
+    // whole difference from revocation, which would force a new credential.
+    const principal = await apiKeys.verify(key.secret);
+    expect(principal.tenantId).toBe(key.tenantId);
+    expect(principal.subject).toBe(`api-key:${key.keyId}`);
+  });
+
+  it('leaves revokedAt untouched when disabling, and keeps the two fields apart', async () => {
+    const key = await issue();
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'paused' });
+
+    const keys = mongo.db().collection('apiKeyCredentials');
+    const disabled = await keys.findOne({ keyId: key.keyId });
+    expect(disabled?.['disabledAt']).toBeInstanceOf(Date);
+    expect(disabled?.['disabledReason']).toBe('paused');
+    // If this is ever not null, disable has become revoke and the reversible half is a lie.
+    expect(disabled?.['revokedAt']).toBeNull();
+
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'leaked after all' });
+    const revoked = await keys.findOne({ keyId: key.keyId });
+    // Revoking a paused key is a real sequence — "paused" turning out to be "compromised" — and
+    // it does not un-happen the pause.
+    expect(revoked?.['revokedAt']).toBeInstanceOf(Date);
+    expect(revoked?.['disabledAt']).toBeInstanceOf(Date);
+  });
+
+  it('will not enable a revoked key back into service', async () => {
+    const key = await issue();
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'leaked' });
+
+    await expect(
+      apiKeys.enable({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'we changed our minds' }),
+    ).rejects.toBeInstanceOf(ApiKeyError);
+
+    // And it is still refused, for the reason it was refused before.
+    expect(await rejectionFor(key.secret)).toBe('REVOKED');
+  });
+
+  it('will not disable a revoked key, because that would imply enable could undo it', async () => {
+    const key = await issue();
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'leaked' });
+
+    await expect(
+      apiKeys.disable({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'pause it' }),
+    ).rejects.toBeInstanceOf(ApiKeyError);
+  });
+
+  it('rotates a disabled key without turning it back on', async () => {
+    // Disable, replace the secret, enable is the ordinary rotation sequence. Rotation replaces
+    // a secret; it is neither an off switch nor an on switch.
+    const key = await issue();
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'rotating' });
+
+    const rotated = await apiKeys.rotate({
+      keyId: key.keyId,
+      actor: 'alice@erly.test',
+      reason: 'rotating',
+    });
+    expect(rotated.secret).not.toBe(key.secret);
+    expect(await rejectionFor(rotated.secret)).toBe('DISABLED');
+
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'rotation done' });
+    await expect(apiKeys.verify(rotated.secret)).resolves.toBeDefined();
+    // The pre-rotation secret is gone for good, enabled or not.
+    expect(await rejectionFor(key.secret)).toBe('BAD_SECRET');
+  });
+
+  it('is idempotent both ways, and does not audit a change that did not happen', async () => {
+    const key = await issue();
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'first' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'second' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'back on' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'back on again' });
+
+    const audit = await apiKeys.auditFor(key.keyId);
+    expect(audit.filter((entry) => entry.event === 'DISABLED')).toHaveLength(1);
+    expect(audit.filter((entry) => entry.event === 'ENABLED')).toHaveLength(1);
+    // The trail says when it actually went off, not when somebody last clicked.
+    expect(audit.find((entry) => entry.event === 'DISABLED')?.reason).toBe('first');
+  });
+
+  it('audits both events with an actor and a reason', async () => {
+    const key = await issue();
+    await apiKeys.disable({
+      keyId: key.keyId,
+      actor: 'alice@erly.test',
+      reason: 'integration paused',
+    });
+    await apiKeys.enable({
+      keyId: key.keyId,
+      actor: 'bob@erly.test',
+      reason: 'integration resumed',
+    });
+
+    const audit = await apiKeys.auditFor(key.keyId);
+    expect(audit.map((entry) => entry.event)).toEqual(['ENABLED', 'DISABLED', 'CREATED']);
+    expect(audit.find((entry) => entry.event === 'DISABLED')?.actor).toBe('alice@erly.test');
+    expect(audit.find((entry) => entry.event === 'ENABLED')?.actor).toBe('bob@erly.test');
+    expect(audit.find((entry) => entry.event === 'ENABLED')?.reason).toBe('integration resumed');
+  });
+
+  it('treats a key written before disabledAt existed as enabled, not as disabled', async () => {
+    // Records created by earlier versions have no `disabledAt` at all, and `undefined !== null`
+    // would refuse every one of them. This is the check that deploying I4 does not lock out
+    // every key already in the database.
+    const key = await issue();
+    await mongo
+      .db()
+      .collection('apiKeyCredentials')
+      .updateOne({ keyId: key.keyId }, { $unset: { disabledAt: '', disabledReason: '' } });
+
+    await expect(apiKeys.verify(key.secret)).resolves.toBeDefined();
+  });
+
+  it('disables and re-enables its own key over HTTP, and the listing says which it is', async () => {
+    const admin = await tenantAdminKey();
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'to be paused', roles: ['tenant_admin'] })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${created.body.keyId}/disable`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'integration paused for the afternoon' })
+      .expect(200);
+
+    expect(await rejectionFor(created.body.secret)).toBe('DISABLED');
+
+    const paused = await request(app.getHttpServer())
+      .get('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .expect(200);
+    const off = paused.body.items.find(
+      (item: { keyId: string }) => item.keyId === created.body.keyId,
+    );
+    expect(off.status).toBe('DISABLED');
+    expect(off.disabledAt).not.toBeNull();
+    expect(off.disabledReason).toBe('integration paused for the afternoon');
+    expect(off.revokedAt).toBeNull();
+
+    await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${created.body.keyId}/enable`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'integration resumed' })
+      .expect(200);
+
+    await expect(apiKeys.verify(created.body.secret)).resolves.toBeDefined();
+
+    const back = await request(app.getHttpServer())
+      .get('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .expect(200);
+    const on = back.body.items.find((item: { keyId: string }) => item.keyId === created.body.keyId);
+    expect(on.status).toBe('ACTIVE');
+    // Cleared, not left behind: a stale reason on a working key reads as though it were still
+    // off. The record of why it was paused lives in the audit trail, which keeps both events.
+    expect(on.disabledAt).toBeNull();
+    expect(on.disabledReason).toBeNull();
+  });
+
+  it('reports a key that is both expired and paused as EXPIRED, and still shows the pause', async () => {
+    // `status` can only name one reason, so it names the one the holder must act on: enabling
+    // an expired key would not make it work. `disabledAt` is still there to say it was paused.
+    const admin = await tenantAdminKey();
+    const expired = await issue({
+      tenantId: admin.tenantId,
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+    await apiKeys.disable({ keyId: expired.keyId, actor: 'alice@erly.test', reason: 'paused' });
+
+    const listed = await request(app.getHttpServer())
+      .get('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .expect(200);
+    const item = listed.body.items.find(
+      (candidate: { keyId: string }) => candidate.keyId === expired.keyId,
+    );
+    expect(item.status).toBe('EXPIRED');
+    expect(item.disabledAt).not.toBeNull();
+  });
+
+  it('answers 409 rather than reviving a revoked key, on both routes', async () => {
+    const admin = await tenantAdminKey();
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'to be revoked', roles: ['tenant_admin'] })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/v1/tenant/api-keys/${created.body.keyId}`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'secret pasted into a public ticket' })
+      .expect(200);
+
+    const enabled = await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${created.body.keyId}/enable`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'it was only a test ticket' })
+      .expect(409);
+    expect(enabled.body.code).toBe('ALREADY_TERMINAL');
+
+    const disabled = await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${created.body.keyId}/disable`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'trying the other route' })
+      .expect(409);
+    expect(disabled.body.code).toBe('ALREADY_TERMINAL');
+
+    expect(await rejectionFor(created.body.secret)).toBe('REVOKED');
+  });
+
+  it("will not disable another tenant's key, and does not confirm it exists", async () => {
+    const admin = await tenantAdminKey();
+    const somebodyElse = await issue();
+
+    const response = await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${somebodyElse.keyId}/disable`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'not mine to pause' })
+      .expect(404);
+
+    // NOT_FOUND rather than FORBIDDEN: the second confirms the key exists. Without this check a
+    // guessed keyId is an off switch for somebody else's production integration.
+    expect(response.body.code).toBe('NOT_FOUND');
+    await expect(apiKeys.verify(somebodyElse.secret)).resolves.toBeDefined();
+  });
+
+  it('refuses an anonymous caller, and one without apikey:manage', async () => {
+    const key = await issue();
+
+    await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${key.keyId}/disable`)
+      .send({ reason: 'nobody at all' })
+      .expect(401);
+
+    // An analyst key has no apikey:manage. Pausing a credential is not part of running searches.
+    const analyst = await issue();
+    await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${key.keyId}/disable`)
+      .set('Authorization', `ApiKey ${analyst.secret}`)
+      .send({ reason: 'analyst trying to pause a key' })
+      .expect(403);
+
+    await expect(apiKeys.verify(key.secret)).resolves.toBeDefined();
+  });
+
+  it('requires a reason, because a key that stopped working with no record is an outage', async () => {
+    const admin = await tenantAdminKey();
+
+    await request(app.getHttpServer())
+      .post(`/v1/tenant/api-keys/${admin.keyId}/disable`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({})
+      .expect(400);
   });
 });

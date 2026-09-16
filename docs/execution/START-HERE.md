@@ -9,7 +9,7 @@ of previous sessions. It is deliberately short.
 
 > **Phase I — Tenant self-service onboarding**
 >
-> Planned in full, **not started**. Read
+> **I4 is built. I1 is next, and nothing blocks it.** Read
 > [`phase-i-tenant-onboarding.md`](./phase-i-tenant-onboarding.md) — it is the brief, and it is
 > short.
 >
@@ -18,13 +18,24 @@ of previous sessions. It is deliberately short.
 > API: a customer registers, sets a password, logs in, and issues their own **sandbox and live**
 > keys with nobody at Erly involved.
 >
-> **Start with I4, not I1.** A reversible `disabledAt`, separate from the one-way `revokedAt`.
-> Small, independently useful, and it proves the key-state change before any signup machinery
-> depends on it. Do **not** conflate the two fields: either a leaked key becomes switch-back-on-able,
-> or a routine pause becomes irreversible.
+> **Done (2026-09-16): I4.** `POST /v1/tenant/api-keys/{keyId}/disable` and `.../enable` move a
+> reversible `disabledAt`, separate from the one-way `revokedAt` that `DELETE` sets. Recorded as
+> **D-054**. Do not let a later change merge the two fields: either a leaked key becomes
+> switch-back-on-able, or a routine pause becomes irreversible.
 >
-> **Get a decision on D-053 first** — open signup or invite-only. Ten minutes, and it shapes I1.
-> D-051 (Keycloak or our own password store; recommendation on file is Keycloak) blocks I2.
+> **Next: I1** — `POST /v1/signup` writing the tenant, entitlement, taxonomy and policy records in
+> **one transaction**, with a **generated** tenant id that the body can never name.
+>
+> **All three gating decisions are closed** (2026-09-16), so no session needs to stop and ask:
+>
+> - **D-053** — signup is **open**, no invite code, both key kinds from day one. Payment and
+>   live-key approval come later, and live issuance must read tenant state so that gate is not a
+>   retrofit.
+> - **D-051** — passwords live in **our own database as argon2id hashes**, not in Keycloak and not
+>   reversibly encrypted. I2 therefore owns reset, lockout, rotation, MFA and breach response.
+> - **D-052** — **email verification before a live key**; **no** per-tenant live budget yet. That
+>   leaves the shared SEC budget unprotected, which is why the fixed-feed fix below is now a
+>   prerequisite for handing out live keys rather than an optimisation.
 
 ### The previous phase, for context
 
@@ -77,11 +88,12 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today (2026-09-15): clean, clean, **829 passed, 29 passed, 12 passed**.
+Expected today (2026-09-16): clean, clean, **866 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**207 integration** tests, `pnpm test:security` **106 security** tests, and `pnpm test:e2e:api`
-**10 API end-to-end** tests over real HTTP, real SQS and a real worker.
+**215 integration** tests, `pnpm test:security` **129 security** tests, and `pnpm test:e2e:api`
+**10 API end-to-end** tests over real HTTP, real SQS and a real worker. All four figures were
+re-measured on 2026-09-16; the ones they replace had drifted by a session or two.
 
 Coverage is gated at 85/80 and currently reports 94.07% / 90.46% — but only under CI's own
 invocation, which is

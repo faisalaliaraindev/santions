@@ -27,6 +27,103 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (sixth) — Phase I step I4: `disabledAt`, and all three gating decisions closed
+
+**Did.**
+
+1. **I4 is built — a reversible off switch that is not revocation (recorded as D-054).**
+   - `ApiKeyRecord` gains `disabledAt` and `disabledReason`, **separate from `revokedAt`**, which
+     stays one-way. `ApiKeyService.disable()` and `.enable()` sit beside `revoke()`; both are
+     audited with an actor and a mandatory reason, and both are idempotent, so a second call
+     writes no second audit entry and the trail keeps saying when the key actually went off.
+   - `verify()` refuses a disabled key exactly as it refuses a revoked one — new rejection
+     `DISABLED`, still one opaque `401` to the caller.
+   - `POST /v1/tenant/api-keys/{keyId}/disable` and `.../enable`, both `@HttpCode(200)` because
+     nothing is created. Same ownership check as `DELETE`: another tenant's key answers `404`, not
+     `403`. A **revoked** key answers `409 ALREADY_TERMINAL` on both routes.
+   - The listing carries `disabledAt`, `disabledReason` and a `DISABLED` status. `status` names
+     one reason, ordered by what the holder must act on: `REVOKED` → `EXPIRED` → `DISABLED` →
+     `ACTIVE`. A key that was paused and has since expired reads `EXPIRED`, with `disabledAt`
+     still set to say it was also paused.
+   - Three things that are deliberate and are each tested: a **disabled key can be revoked**
+     ("paused" turning out to be "compromised"), a **disabled key can be rotated and stays
+     disabled** (disable → rotate → enable is the ordinary sequence), and a **revoked key can be
+     neither enabled nor disabled**.
+   - Records written before this field existed have no `disabledAt`. Every read goes through one
+     helper that reads a missing field as "not disabled" — without it, `undefined !== null` would
+     have refused every key already in the database on deploy. There is a test that plants exactly
+     that shape.
+
+2. **The three decisions are closed**, answered by the product owner this session. Full records in
+   `docs/decisions.md`; the table in `docs/open-decisions.md` is updated.
+   - **D-053 — open signup.** No invite code. Both sandbox and live key kinds from day one.
+     Payment and live-key approval come later.
+   - **D-051 — our own password store, in our database.** Against the recommendation on file,
+     which was Keycloak. I2 therefore owns reset, lockout, rotation, MFA and breach response.
+     **The instruction said "encrypted"; the decision is recorded as argon2id hashes** — anything
+     that can decrypt a password can produce it, which is the same reason API key secrets are
+     hashed here. If reversible storage was genuinely meant, that reopens D-051 deliberately.
+   - **D-052 — email verification before a live key; no per-tenant live budget.**
+
+3. **Postman and the operator script.** Added `5. Pause it` and `6. Turn it back on` to the full
+   collection's key folder (revoke renumbered to 7). `pnpm key:issue --list` now prints `disabled`
+   as its own state — it reported a paused key as `active`, which would send an operator looking
+   for a fault that is not there.
+
+**Verified.** The stack was already up; everything below actually ran.
+
+```
+lint            clean          typecheck       clean
+unit            866 passed     invariants      29 passed     evaluation   12 passed
+integration     215 passed     security        129 passed    e2e (API)    10 passed
+```
+
+Security was 114 before this session; the 15 new tests are the `I4 —` describe block in
+`tests/security/api-keys.test.ts`.
+
+**Both halves of the claim were proven by planting the violation, not by watching green:**
+
+- removed the `disabledAt` check from `verify()` → the suite fails;
+- let `enable` clear `revokedAt` and dropped its revoked guard → "will not enable a revoked key
+  back into service" and "answers 409 rather than reviving a revoked key" both fail.
+
+Each mutation was reverted immediately after.
+
+**Left half-done.** Nothing. I4 is complete; I1, I2, I3, I5 and I6 are untouched.
+
+**Found.**
+
+- **`POST` on a Nest route defaults to 201.** `disable` returned `201 Created` for a call that
+  creates nothing — caught by a test expecting 200, fixed with `@HttpCode(200)`. Worth remembering
+  for I1's sub-routes.
+- **START-HERE's expected test counts had drifted** — it said 829 unit / 106 security against an
+  actual 866 / 114 before this session's work. All four figures are now re-measured and updated. A
+  stale expected count is worse than none: the next session either "fixes" a phantom regression or
+  stops trusting the number.
+- **The main Postman collection still described `GET /v1/tenant/api-keys` as "Reserved endpoint →
+  501"**, which D-050 made untrue last session. Its test passed only because the collection's
+  analyst key lacks `apikey:manage`, so the 403 satisfied an assertion written for a 501. Renamed
+  and rewritten to assert the permission refusal it is actually demonstrating.
+- **D-052 turns the fixed-feed fetch into a prerequisite, not an optimisation.** With no
+  per-tenant budget, one self-signed-up tenant can spend the SEC's whole 120-request hour, and a
+  single search currently spends about 41 of them because a `FIXED_FEED` is fetched once per
+  planned query instead of once per run. This should land **before** live keys reach tenants
+  nobody at Erly has spoken to.
+
+**Next session should:** build **I1** — `POST /v1/signup` creating `tenants`,
+`tenantEntitlementVersions`, `taxonomyVersions` and `policyVersions` in **one transaction** via
+`TransactionRunner`, with a **generated** tenant id that the request body can never name, and
+`environments: ['sandbox', 'live']` on the entitlement. Have live-key issuance read its answer
+from tenant state (entitlement plus a verification flag) rather than being unconditional, so that
+D-053's later payment gate is a value written into that state and not a hunt for every tenant
+created while there was no gate.
+
+**Decisions touched:** **D-051, D-052, D-053 closed.** **D-054 opened and accepted** in the same
+session (disable/enable distinct from revoke). D-007 unchanged: plans, metering and billing are
+still deferred.
+
+---
+
 ## 2026-09-16 (fifth) — Phase I planned: tenant self-service onboarding
 
 **No code. This entry exists so the next session starts in the right place.**

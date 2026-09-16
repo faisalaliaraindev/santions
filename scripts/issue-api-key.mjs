@@ -222,7 +222,10 @@ async function main() {
         return;
       }
       for (const key of keys) {
-        const state = key.revokedAt ? 'REVOKED' : 'active';
+        // `disabled` and `REVOKED` are different states and the list has to say which: one is
+        // an off switch somebody can flip back, the other is permanent. Reporting a paused key
+        // as `active` would send an operator looking for a fault that is not there.
+        const state = key.revokedAt ? 'REVOKED' : key.disabledAt ? 'disabled' : 'active';
         log.info(
           `${key.keyId}  ${String(key.environment).padEnd(7)}  ${state.padEnd(7)}  ` +
             `roles=[${key.roles.join(', ')}]  ${key.label}`,

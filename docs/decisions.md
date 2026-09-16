@@ -1828,3 +1828,123 @@ issue the _first_ key for a new tenant — a tenant with no key cannot authentic
 The scope derivation both paths use now lives once, in `packages/domain`, because two copies of
 that would drift and the one that drifted would be the one issuing keys quietly wider than
 intended.
+
+---
+
+## D-054 — `disabledAt` is a separate, reversible field from `revokedAt`
+
+**Status:** Accepted and implemented 2026-09-16, as Phase I step **I4**.
+
+**Context.** A key had exactly one way to stop working: `revokedAt`, one-way by design, because a
+leaked secret must be permanently killable. That left no way to say "off for now" — a paused
+integration, a rotation window, a key somebody is unsure about — and the only tool to hand was the
+irreversible one.
+
+**Decision.** Two fields, two routes, and they never merge.
+
+| Action  | Field        | Route                                   | Reversible | For                              |
+| :------ | :----------- | :-------------------------------------- | :--------- | :------------------------------- |
+| Disable | `disabledAt` | `POST /v1/tenant/api-keys/{id}/disable` | Yes        | Pausing an integration, rotation |
+| Enable  | `disabledAt` | `POST /v1/tenant/api-keys/{id}/enable`  | —          | Turning it back on               |
+| Revoke  | `revokedAt`  | `DELETE /v1/tenant/api-keys/{id}`       | **No**     | A leaked or compromised secret   |
+
+**Why they cannot be one field.** A single switch has to be either reversible or permanent. If it
+is reversible, a leaked key can be turned back on and revocation stops meaning anything. If it is
+permanent, pausing an integration for an afternoon destroys the credential and the tenant has to
+re-issue and re-deploy. Both are wrong, in opposite directions, and no one field is right about
+both.
+
+**What follows from that, and is tested.**
+
+- `verify()` refuses a disabled key exactly as it refuses a revoked one — one opaque `401` either
+  way. The distinction is for the audit trail and the listing, not for whoever holds the key.
+- **A revoked key cannot be enabled**, and cannot be disabled either. Both answer `409
+ALREADY_TERMINAL`. Accepting a disable on a revoked key would imply enable could undo it.
+- **A disabled key can be revoked.** "Paused" turning out to be "compromised" is exactly the path
+  that has to work, and revoking does not clear `disabledAt` — it is a record of what happened.
+- **A disabled key can be rotated, and stays disabled.** Disable, replace the secret, enable is
+  the ordinary rotation sequence; refusing it would push the tenant to revoke and re-issue
+  instead, which changes the key id their configuration holds.
+- Both events are audited with an actor and a mandatory reason, and both are idempotent — a second
+  disable writes no second entry, so the trail says when the key actually went off rather than
+  when somebody last clicked.
+- Enabling clears `disabledReason` with `disabledAt`. A stale reason on a working key reads as
+  though it were still off; the history lives in the audit trail, which keeps both events.
+
+**`status` in the listing names one reason, and names the actionable one.** A key can be revoked,
+expired and disabled at once. The order is `REVOKED` → `EXPIRED` → `DISABLED` → `ACTIVE`, most
+permanent first, because that is what the holder must act on: revoked and expired both mean
+"issue a new one", disabled means "turn it back on". A key that was paused and has since expired
+reads `EXPIRED`, with `disabledAt` still set to say it was also paused.
+
+**Records written before this field existed have no `disabledAt`.** Every read goes through one
+helper that treats a missing field as "not disabled". Without it, `undefined !== null` would
+refuse every key already in the database the moment this deployed.
+
+---
+
+## D-051 — Customer passwords live in our own database, hashed
+
+**Status:** Decided 2026-09-16 by the product owner, **against** the recommendation on file.
+Closes D-051. Blocks nothing further in Phase I step I2, which can now be built.
+
+**The recommendation was Keycloak** — this service has never stored a password, human identity is
+OIDC end to end, and its security story is that it holds no credentials. The decision is to store
+customer credentials ourselves rather than operate Keycloak for customer identity.
+
+**What we therefore now own**, and each is work that belongs in the I2 estimate rather than
+appearing later as a surprise: password reset, lockout and rate limiting on failed attempts,
+rotation, MFA if it is ever wanted, and breach response for a credential store that now exists.
+
+**One thing the wording of the decision must not become.** The instruction said "database
+encrypted". Encryption is reversible — anything that can decrypt a password can produce it, and a
+store the provider can read back is a store the provider can leak, which is the same reason API
+key secrets are hashed rather than encrypted here. So passwords are stored as **argon2id hashes**,
+which is the one-way version of the same intent, and the API key rule that only a hash is
+persisted holds for human credentials too. If reversible storage was genuinely meant, that is a
+different decision and needs reopening deliberately.
+
+Unlike an API key secret — 32 bytes of CSPRNG output, where a slow hash would only add latency —
+a password is low-entropy human input, so the slow memory-hard hash is exactly right here.
+
+---
+
+## D-052 — Email verification before a live key; no per-tenant live budget yet
+
+**Status:** Decided 2026-09-16 by the product owner. Closes D-052.
+
+**Decision.** A self-signed-up tenant gets a **sandbox key immediately** and a **live key once the
+email address is confirmed**. The per-tenant live budget the brief proposed is **not** built in
+this phase.
+
+**What that leaves standing.** A verified address is a low bar, and the unmitigated consequence is
+the one the brief states plainly: the SEC's free tier is **120 requests an hour for the whole
+service**, a single search currently spends about 41 of them, and nothing yet stops one tenant
+spending the hour. Our contact URL is in the publisher's logs, so the complaint arrives at us.
+
+**So the fixed-feed fetch stops being an efficiency fix and becomes a prerequisite.** A `FIXED_FEED`
+is currently fetched once per planned query rather than once per run. Fixing it cuts the spend of
+a search by roughly forty times, and it is the cheapest thing standing between open signup and a
+shared budget somebody exhausts. It should land before live keys are issued to tenants nobody at
+Erly has spoken to.
+
+---
+
+## D-053 — Signup is open, with both key kinds from day one
+
+**Status:** Decided 2026-09-16 by the product owner. Closes D-053.
+
+**Decision.** Signup is **open to anyone** — no invite code. A new tenant may create **both**
+sandbox and live keys, subject to the email verification in D-052. Payment and an approval step
+before a live key are **deliberately later**, not now.
+
+**What this means for I1.** `POST /v1/signup` grants `environments: ['sandbox', 'live']` and has
+no gate beyond email verification. The tenant id is **generated, never taken from the body** — an
+attacker-chosen id is how a signup collides with, or impersonates, an existing tenant.
+
+**What has to be built so the later gate is not a retrofit.** The thing that is expensive to add
+afterwards is not the check; it is adding it around tenants that already exist with live keys
+issued under no gate. So live-key issuance reads its answer from tenant state — the entitlement
+and the verification flag — rather than being unconditional in the route. Turning the gate on
+later then means writing a different value into that state, not finding every tenant that was
+created while there was no gate.

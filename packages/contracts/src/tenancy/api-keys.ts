@@ -105,9 +105,22 @@ export const apiKeySummarySchema = z
     /** Null until the key is first used. This is what makes an unused key identifiable. */
     lastUsedAt: z.string().nullable(),
     expiresAt: z.string().nullable(),
+    /** Set while the key is switched off. Reversible — see `disableApiKeySchema`. */
+    disabledAt: z.string().nullable(),
+    disabledReason: z.string().nullable(),
     revokedAt: z.string().nullable(),
     revokedReason: z.string().nullable(),
-    status: z.enum(['ACTIVE', 'EXPIRED', 'REVOKED']),
+    /**
+     * Why the key is not usable right now, or `ACTIVE`.
+     *
+     * One field, so it can only name one reason, and a key can be more than one of these at
+     * once. The order is **what the holder must do about it**, most permanent first:
+     * `REVOKED` (gone — issue a new one), `EXPIRED` (issue a new one), `DISABLED` (turn it back
+     * on), `ACTIVE`. A key that was disabled and has since expired therefore reads `EXPIRED`,
+     * because enabling it would not make it work — and `disabledAt` is still there, unchanged,
+     * to say it was also paused.
+     */
+    status: z.enum(['ACTIVE', 'EXPIRED', 'DISABLED', 'REVOKED']),
   })
   .strict();
 
@@ -121,3 +134,35 @@ export const revokeApiKeySchema = z
   .strict();
 
 export type RevokeApiKeyInput = z.infer<typeof revokeApiKeySchema>;
+
+/**
+ * Disabling is a **reversible** off switch, and it is deliberately not revocation.
+ *
+ * The two must never share a field. If they did, then either a leaked secret could be switched
+ * back on — which is the one thing revocation exists to prevent — or pausing an integration for
+ * an afternoon would destroy the credential. Both are wrong, in opposite directions, and a
+ * single `revokedAt` cannot be right about both.
+ *
+ * So: `disabledAt` for "off for now", `revokedAt` for "never again". A disabled key is refused
+ * by `verify()` exactly as a revoked one is; the difference is only in what can undo it.
+ *
+ * The reason is mandatory here for the same reason it is on revocation: a credential that
+ * stopped working with no recorded explanation is indistinguishable from an outage to whoever
+ * investigates it a month later.
+ */
+export const disableApiKeySchema = z
+  .object({
+    reason: z.string().min(3).max(500),
+  })
+  .strict();
+
+export type DisableApiKeyInput = z.infer<typeof disableApiKeySchema>;
+
+/** Turning a disabled key back on. Audited with an actor and a reason, like every other change. */
+export const enableApiKeySchema = z
+  .object({
+    reason: z.string().min(3).max(500),
+  })
+  .strict();
+
+export type EnableApiKeyInput = z.infer<typeof enableApiKeySchema>;

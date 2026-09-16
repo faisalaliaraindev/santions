@@ -1016,7 +1016,11 @@ function buildPaths(): Record<string, SchemaObject> {
         description:
           'Every key this tenant holds, with no secret and no hash of one. `status` is derived ' +
           'at read time rather than stored, so a key whose expiry passed while nothing was ' +
-          'running still reads as `EXPIRED`.',
+          'running still reads as `EXPIRED`.\n\n' +
+          '`status` names one reason a key is unusable, ordered by what you would have to do ' +
+          'about it: `REVOKED` and `EXPIRED` mean issue a new one, `DISABLED` means enable it. ' +
+          'A key that was disabled and has since expired therefore reads `EXPIRED`, with ' +
+          '`disabledAt` still set to say it was also paused.',
         responses: {
           '401': errorRef(401),
           '403': errorRef(403),
@@ -1068,6 +1072,91 @@ function buildPaths(): Record<string, SchemaObject> {
           '401': errorRef(401),
           '403': errorRef(403),
           '404': errorRef(404),
+        },
+      },
+    },
+    '/v1/tenant/api-keys/{keyId}/disable': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'disableApiKey',
+        summary: 'Switch one of your keys off, reversibly',
+        description:
+          'The key stops authenticating immediately, and `POST .../enable` brings it back with ' +
+          'the same secret and the same key id.\n\n' +
+          '**This is not the one to use for a leaked secret.** Anything reversible is the wrong ' +
+          'answer to a credential somebody else now holds — use `DELETE`, which is permanent. ' +
+          'Disabling is for a paused integration, a rotation window, or a key you want out of ' +
+          'service while a question is answered.\n\n' +
+          'Idempotent: disabling an already-disabled key succeeds and writes no second audit ' +
+          'entry. A **revoked** key answers `409 ALREADY_TERMINAL` — revocation cannot be ' +
+          'undone, and accepting this call would suggest it could.\n\n' +
+          'The reason is mandatory and is audited with the actor. A key belonging to another ' +
+          'tenant answers **404**, not 403.',
+        parameters: [{ name: 'keyId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('DisableApiKeyRequest') } },
+        },
+        responses: {
+          '200': {
+            description: 'Disabled. The key is refused until it is enabled again.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['keyId', 'disabled'],
+                  properties: {
+                    keyId: { type: 'string' },
+                    disabled: { type: 'boolean', enum: [true] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+          '409': errorRef(409),
+        },
+      },
+    },
+    '/v1/tenant/api-keys/{keyId}/enable': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'enableApiKey',
+        summary: 'Turn a disabled key back on',
+        description:
+          'The same secret works again the moment this returns — nothing is re-issued and the ' +
+          'key id does not change, so a tenant configuration that still holds it needs no edit.' +
+          '\n\nIdempotent on a key that is already on. A **revoked** key answers ' +
+          '`409 ALREADY_TERMINAL`: `revokedAt` is one-way and this route cannot touch it.\n\n' +
+          'An expired key can be enabled, and will still be refused — expiry is a different ' +
+          'reason, and the listing reports it as `EXPIRED` rather than `DISABLED`.',
+        parameters: [{ name: 'keyId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('EnableApiKeyRequest') } },
+        },
+        responses: {
+          '200': {
+            description: 'Enabled.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['keyId', 'disabled'],
+                  properties: {
+                    keyId: { type: 'string' },
+                    disabled: { type: 'boolean', enum: [false] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+          '409': errorRef(409),
         },
       },
     },

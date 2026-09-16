@@ -1,6 +1,7 @@
 # Phase I — Tenant self-service onboarding
 
-**Status: planned, not started.** Written 2026-09-16 to be executed in a following session.
+**Status: I4 built, 2026-09-16. I1-I3, I5, I6 not started.** Written 2026-09-16, and the
+three decisions it raised (D-051, D-052, D-053) are now all closed — see section 7.
 
 Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-running the
 bootstrap. That is provisioning by redeploy, and it is not an onboarding process.
@@ -49,7 +50,22 @@ stops being is the _only_ way.
 
 ### I2 — Where the password lives
 
-**Recommendation: Keycloak, not us.**
+**Decided 2026-09-16: our own store, in our database. D-051 is closed, against the
+recommendation below.**
+
+What that buys the estimate for this step: password reset, lockout and rate limiting on failed
+attempts, rotation, MFA if it is ever wanted, and breach response for a credential store that now
+exists. None of that is hard; all of it is work that has to be named rather than discovered.
+
+**Passwords are stored as argon2id hashes, not encrypted.** The instruction said "encrypted", and
+encryption is reversible — anything that can decrypt a password can produce it, and a store the
+provider can read back is a store the provider can leak. That is the same reason API key secrets
+are hashed here. Argon2id is the one-way version of the same intent, and the slow memory-hard hash
+is right for low-entropy human input in a way it is not for a 32-byte random API secret.
+
+The recommendation that was not taken, kept because the reasoning still describes what we now own:
+
+**Recommendation was Keycloak, not us.**
 
 This service has never stored a password. Human identity is OIDC end to end: `auth.controller.ts`
 reads roles from `realm_access.roles` on a verified token, and the control panel holds no secrets
@@ -74,7 +90,16 @@ the customer's own backend can obtain and use. Either:
 The second is likelier to be what an integrator expects. It must not become a second
 authentication system: one verifier, one session store, one set of rules.
 
-### I4 — Enable and disable, distinct from revoke
+### I4 — Enable and disable, distinct from revoke — **BUILT 2026-09-16**
+
+Implemented as **D-054**. `POST /v1/tenant/api-keys/{keyId}/disable` and `.../enable` move a
+reversible `disabledAt`; `DELETE` still sets the one-way `revokedAt`. `verify()` refuses a
+disabled key exactly as it refuses a revoked one, the listing reports `DISABLED` as its own
+status, and both events are audited with an actor and a mandatory reason. A revoked key answers
+`409 ALREADY_TERMINAL` on both routes rather than coming back to life; a disabled key can still be
+revoked, and can be rotated without being turned back on. Fifteen tests in
+`tests/security/api-keys.test.ts`, and the two obvious ways to break it — dropping the `verify()`
+check, and letting `enable` clear `revokedAt` — were each planted and watched to fail.
 
 Today `revokedAt` is one-way, and deliberately so: a leaked key must be permanently killable.
 
@@ -131,15 +156,20 @@ After this phase, anyone with an email address can. Three consequences worth sta
 3. **Every first-contact approval was given on an assumption about use** that open signup
    changes.
 
-**The instruction is to allow both sandbox and live from day one, and this plan does that.** But
-it should carry two cheap mitigations, neither of which blocks a legitimate customer:
+**The instruction is to allow both sandbox and live from day one, and this plan does that.**
 
-- **Email verification before a live key** — sandbox immediately, live after the address is
+**Decided 2026-09-16 (D-052):** one of the two proposed mitigations is in.
+
+- **Email verification before a live key — yes.** Sandbox immediately, live once the address is
   confirmed. Costs a real customer one click.
-- **A per-tenant live budget** under the shared source budget, so one tenant cannot spend the
-  whole hour.
+- **A per-tenant live budget — not in this phase.**
 
-Recorded as **D-052**. Not a blocker; a thing to say yes to on purpose.
+**So consequence 2 above is unmitigated, and that makes the fixed-feed fetch a prerequisite rather
+than an efficiency fix.** A `FIXED_FEED` is fetched once per planned query instead of once per
+run, so one search spends about 41 of the SEC's 120 hourly requests. Fixing it cuts that by
+roughly forty times. It should land **before** live keys are issued to tenants nobody at Erly has
+spoken to, because until then a single self-signed-up tenant can exhaust the whole service's
+hour.
 
 ---
 
@@ -147,9 +177,9 @@ Recorded as **D-052**. Not a blocker; a thing to say yes to on purpose.
 
 | #   | Step                                      | Why here                                                              |
 | :-- | :---------------------------------------- | :-------------------------------------------------------------------- |
-| 1   | **I4** disable/enable                     | Smallest, self-contained, valuable on its own. Warms up the key model |
+| 1   | ~~**I4** disable/enable~~ **done**        | Smallest, self-contained, valuable on its own. Warms up the key model |
 | 2   | **I1** tenant creation in one transaction | The core. Everything else needs a tenant to exist                     |
-| 3   | **I2** Keycloak user creation             | Blocked on D-051                                                      |
+| 3   | **I2** user creation, own store           | D-051 closed: our database, argon2id hashes                           |
 | 4   | **I3** login returning a session          | Needs I2                                                              |
 | 5   | **I5/I6** both keys, one response         | Mostly assembly once the above stand                                  |
 | 6   | Per-tenant live budget                    | The D-052 mitigation                                                  |
@@ -187,12 +217,17 @@ attacker-chosen id is how a signup ends up colliding with, or impersonating, an 
 
 ## 7. Open decisions this phase raises
 
-| ID        | Decision                                                                | Owner                 |
-| :-------- | :---------------------------------------------------------------------- | :-------------------- |
-| **D-051** | Keycloak for customer identity, or our own password store               | Engineering + product |
-| **D-052** | Whether live access needs email verification, and the mitigations above | Product + compliance  |
-| **D-053** | Whether signup is open to anyone, or invite-only at first               | Product               |
+All three were closed on 2026-09-16. Full records in [`../decisions.md`](../decisions.md).
 
-D-053 is worth ten minutes before I1 is written. "Open to anyone" and "invite-only" produce the
-same endpoint with a different check, but they produce very different abuse surfaces, and
-retrofitting the check after launch means retrofitting it around tenants that already exist.
+| ID        | Decision                     | Closed as                                                                          |
+| :-------- | :--------------------------- | :--------------------------------------------------------------------------------- |
+| **D-051** | Where the password lives     | **Our own database**, argon2id hashes. Not Keycloak, and not reversible encryption |
+| **D-052** | Verification and live budget | **Email verification before a live key.** No per-tenant budget in this phase       |
+| **D-053** | Open signup or invite-only   | **Open**, no invite code, both key kinds from day one                              |
+
+**What I1 has to do so the later gate is not a retrofit.** Payment and live-key approval are
+deliberately later. The expensive part of adding them afterwards is not the check — it is adding
+it around tenants that already exist with live keys issued under no gate. So live-key issuance
+reads its answer from tenant state (the entitlement, the verification flag) rather than being
+unconditional in the route. Turning the gate on later is then writing a different value into that
+state, not finding every tenant created while there was none.

@@ -379,10 +379,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Testing complete\"\n}"
-            },
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Testing complete\"\n}" },
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch/release",
               "host": ["{{baseUrl}}"],
@@ -474,7 +471,7 @@
           ]
         },
         {
-          "name": "Reserved endpoint → 501",
+          "name": "Key management without the permission → 403",
           "request": {
             "method": "GET",
             "header": [],
@@ -483,7 +480,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["v1", "tenant", "api-keys"]
             },
-            "description": "Deliberate. Decision **D-007** defers the commercial self-service layer, so keys are provider-managed this phase — use `pnpm key:issue`.\n\nIt returns 501 with a documented reason rather than 404, so the gap is visible to an integrator instead of looking like something to work around."
+            "description": "This endpoint is no longer reserved: decision **D-050** replaced the 501 with real self-service issuance, and I4 added the reversible `disable`/`enable` beside the one-way revoke. See the *Tenant: your own API keys* folder in the full collection.\n\nThe key this collection uses is an analyst key, which does not hold `apikey:manage` - issuing credentials is not part of running searches. So the refusal you get here is a permission one, and it is the correct one."
           },
           "event": [
             {
@@ -491,7 +488,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('reserved, and says so', () => pm.expect([403, 501]).to.include(pm.response.code));"
+                  "pm.test('refused, because an analyst key does not manage keys', () => pm.expect(pm.response.code).to.eql(403));"
                 ]
               }
             }

@@ -39,10 +39,18 @@ pnpm key:issue --role tenant_admin --label "Zquence production"
 with no provider involvement:
 
 ```http
-POST /v1/tenant/api-keys      issue    (secret returned once)
-GET  /v1/tenant/api-keys      list     (no secrets, ever)
-DELETE /v1/tenant/api-keys/{keyId}   revoke   (reason mandatory)
+POST /v1/tenant/api-keys                     issue    (secret returned once)
+GET  /v1/tenant/api-keys                     list     (no secrets, ever)
+POST /v1/tenant/api-keys/{keyId}/disable     pause    (reversible, reason mandatory)
+POST /v1/tenant/api-keys/{keyId}/enable      resume   (same secret, same key id)
+DELETE /v1/tenant/api-keys/{keyId}           revoke   (permanent, reason mandatory)
 ```
+
+**Pause and revoke are not the same thing, and the difference is the point.** `disable` stops the
+key and can be undone — use it for a paused integration or while you rotate. `DELETE` cannot be
+undone — use it for a secret that has leaked. A revoked key answers `409` on both of the other two
+rather than coming back to life. The listing tells you which state a key is in: `ACTIVE`,
+`DISABLED`, `EXPIRED` or `REVOKED`.
 
 Ask for `tenant_admin` on that first key, or you will be back to the provider for the second.
 

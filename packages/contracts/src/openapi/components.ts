@@ -16,6 +16,8 @@ import { z } from 'zod';
 import {
   apiKeySummarySchema,
   createApiKeySchema,
+  disableApiKeySchema,
+  enableApiKeySchema,
   issuedApiKeySchema,
   revokeApiKeySchema,
 } from '../tenancy/api-keys.js';
@@ -98,6 +100,8 @@ export const COMPONENT_SCHEMAS = {
   IssuedApiKey: issuedApiKeySchema,
   ApiKeySummary: apiKeySummarySchema,
   RevokeApiKeyRequest: revokeApiKeySchema,
+  DisableApiKeyRequest: disableApiKeySchema,
+  EnableApiKeyRequest: enableApiKeySchema,
   CreateSubjectRequest: createSubjectSchema,
   SubjectVersion: subjectVersionSchema,
 
