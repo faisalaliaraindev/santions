@@ -25,32 +25,43 @@ pnpm dev:api      # terminal 1
 pnpm dev:worker   # terminal 2
 ```
 
-## 3. Issue an API key
+## 3. Get your first API key
+
+One command, once. **Every key after this one is issued from Postman**, through the API.
 
 ```bash
-pnpm key:issue
+pnpm key:issue --role tenant_admin --label "postman, your name"
 ```
 
-It prints the secret **once**. Only a hash is stored, and there is no recovery path — a
-credential the provider can read back is one the provider can leak. Copy it, or issue another.
+Ask for `tenant_admin`: it carries `apikey:manage`, which is what lets you issue the rest
+yourself. It prints the secret **once** — only a hash is stored, and there is no recovery path,
+because a credential the provider can read back is one the provider can leak.
 
-Other roles when you need them:
+**Why this one is a command.** A key is what authenticates you, so a tenant holding none cannot
+call an endpoint to ask for one. That is the only thing the script is for. In production the
+provider runs it once, when a customer is onboarded.
 
-```bash
-pnpm key:issue --role source_admin --label "postman admin"
-pnpm key:issue --list --tenant tenant-alpha
-pnpm key:issue --revoke <keyId> --reason "rotated"
-```
+### From here on, use folder 12
 
-**Scopes are derived from the roles**, and the script prints them. Scopes narrow a machine key
-_below_ its roles and never widen it, so a key with no scopes is refused on every scope-gated
-route — `POST /v1/searches` needs `search:write`, the admin routes need `admin:read` /
-`admin:write`. Pass `--scope` only when you want a key that can do less than its role allows.
+**`12 — Tenant: your own API keys`** (decision **D-050**) replaces the script:
 
-> **A tenant issues its own keys** through `POST /v1/tenant/api-keys` (decision **D-050**).
-> This used to return 501 under D-007; it no longer does. The script above is still how the
-> _first_ key for a new tenant is issued, because a tenant with no key cannot authenticate to
-> ask for one. See folder **12 — Tenant: your own API keys**.
+| Instead of                      | Send                                 |
+| :------------------------------ | :----------------------------------- |
+| `pnpm key:issue --role analyst` | `POST /v1/tenant/api-keys`           |
+| `pnpm key:issue --list`         | `GET /v1/tenant/api-keys`            |
+| `pnpm key:issue --revoke <id>`  | `DELETE /v1/tenant/api-keys/{keyId}` |
+
+This is the path your customers use, so it is the one worth knowing. It also does two things the
+script cannot: set an expiry, and show you which keys have never been used and are therefore safe
+to revoke.
+
+You can only grant roles you already hold, and a `live` key additionally needs your tenant to be
+entitled to live. Both refusals have a request in folder 12 — worth running once.
+
+**Scopes are derived from the roles** either way. Scopes narrow a machine key _below_ its roles
+and never widen it, so a key with no scopes is refused on every scope-gated route: `POST
+/v1/searches` needs `search:write`, the admin routes need `admin:read` / `admin:write`. Send an
+explicit `scopes` list only when you want a key that can do **less** than its roles allow.
 
 ## 4. Import into Postman
 

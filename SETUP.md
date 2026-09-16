@@ -92,24 +92,48 @@ Leave this running. Check it:
 curl http://127.0.0.1:3000/health/ready     # expect {"status":"ok"}
 ```
 
-## Step 6 — Issue yourself an API key
+## Step 6 — Get your first API key
+
+**Run this command once. After that you never need it again** — every further key is issued
+through the API, from Postman.
 
 ```bash
-pnpm key:issue --role analyst --label "your name, local dev"
+pnpm key:issue --role tenant_admin --label "your name, local dev"
 ```
 
-**The secret prints once and is never recoverable** — only a hash is stored. Copy it now. If you
-lose it, issue another; there is no "show me the key again".
+**Ask for `tenant_admin`.** That role carries `apikey:manage`, which is what lets you issue your
+own keys from then on. Start with a narrower role and you will be back at the command line for the
+second one.
 
-Roles you may want:
+**The secret prints once and is never recoverable** — only a hash is stored. Copy it now.
 
-```bash
-pnpm key:issue --role analyst            # create subjects, run searches, read results
-pnpm key:issue --role source_admin       # the source registry
-pnpm key:issue --role platform_operator  # source health only
-pnpm key:issue --list --tenant tenant-alpha
-pnpm key:issue --revoke <keyId> --reason "rotated"
+### Why this one is a command and not a request
+
+A key is what authenticates you. A tenant that holds no key cannot call an endpoint to ask for one,
+so the very first key has to come from outside the API. That is the only thing this script is for.
+
+In production, it is the provider who runs it, once, when a customer is onboarded.
+
+### Everything after that is Postman
+
+Once you hold that first key, use folder **`12 — Tenant: your own API keys`**:
+
+| Instead of                      | Use                                  |
+| :------------------------------ | :----------------------------------- |
+| `pnpm key:issue --role analyst` | `POST /v1/tenant/api-keys`           |
+| `pnpm key:issue --list`         | `GET /v1/tenant/api-keys`            |
+| `pnpm key:issue --revoke <id>`  | `DELETE /v1/tenant/api-keys/{keyId}` |
+
+```json
+POST /v1/tenant/api-keys
+{ "label": "ci pipeline", "roles": ["analyst"], "expiresInDays": 90 }
 ```
+
+This is the path your customers use, so it is the one worth learning. It also does things the
+script cannot: expiry dates, and a listing that shows which keys have never been used and are
+therefore safe to revoke.
+
+You can only grant roles you already hold — see Part 3b.
 
 **No single key covers everything, on purpose.** Source health is deliberately not readable by a
 `source_admin` — see `postman/TESTING-GUIDE.md`.
@@ -253,8 +277,12 @@ Entitlement to the live environment is granted **per tenant**, and `tenant-alpha
 `pnpm local:bootstrap` seeds `tenant-live` for this. Then:
 
 ```bash
-pnpm key:issue --tenant tenant-live --env live --role analyst --label "live testing"
+pnpm key:issue --tenant tenant-live --env live --role tenant_admin --label "live testing"
 ```
+
+This is the script again rather than the API, and for the same reason as Step 6: `tenant-live` is
+a different tenant, and a new tenant holds no key it could authenticate with. Once it has this
+one, it issues its own live keys through the API like any other.
 
 A live key on a sandbox tenant is refused with `SANDBOX_CANNOT_ACCESS_LIVE`, which reads like a
 broken key and is not one.
