@@ -1,6 +1,6 @@
 # Phase I — Tenant self-service onboarding
 
-**Status: I4 built, 2026-09-16. I1-I3, I5, I6 not started.** Written 2026-09-16, and the
+**Status: I4 and I1 built, 2026-09-16. I2, I3, I5, I6 not started.** Written 2026-09-16, and the
 three decisions it raised (D-051, D-052, D-053) are now all closed — see section 7.
 
 Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-running the
@@ -30,7 +30,32 @@ Steps 4–7 largely exist (D-050). **Steps 1–3 are the new work**, plus splitt
 
 ## 2. What has to be built
 
-### I1 — Tenant creation as an API, not a seed
+### I1 — Tenant creation as an API, not a seed — **BUILT 2026-09-16**
+
+Implemented as `POST /v1/signup`, with **D-055** (live access is a value on the tenant record,
+not a condition in the issuing route) and **D-056** (signup is bounded per client address).
+
+What was built, beyond what this section asked for:
+
+- `buildTenantProvisioning` is the **one** definition of what a tenant is made of, and
+  `scripts/bootstrap/seed-data.mjs` now imports it. The seed file no longer carries its own copy
+  of the seventeen categories, the country list, the languages or the policy defaults, so the
+  local stack cannot drift from what a real customer is provisioned with.
+- `decideLiveAccess(tenant, entitlement)` is the only thing that decides whether a tenant may hold
+  a live credential. Key issuance calls it; the signup response reports what it said. **A missing
+  flag means allowed**, so the gate does not take live access away from tenants a person
+  onboarded before the field existed.
+- All four records carry `mode` (T55), not just the tenant.
+- Fourteen tests in `tests/security/signup.test.ts` and thirteen in
+  `apps/api/test/tenant-provisioning.test.ts`. Both load-bearing claims were proven by planting
+  the violation: dropping the `decideLiveAccess` check makes the live-gate test fail, and writing
+  the four records outside the session makes the rollback test fail.
+
+**What I1 deliberately does not do.** It issues no credential and creates no user — that is I2 and
+I3 — so a tenant that signs itself up still needs its first key from `pnpm key:issue`. And
+**nothing yet sets `emailVerifiedAt`**, so a self-signed-up tenant cannot obtain a live key at
+all until the verification flow lands with I2. That ordering is deliberate: with no per-tenant
+live budget (D-052), one unverified tenant can spend the SEC's whole hour.
 
 `POST /v1/signup` creates, **in one transaction**, the four records `local-bootstrap` writes today:
 
@@ -175,14 +200,14 @@ hour.
 
 ## 4. Order of work
 
-| #   | Step                                      | Why here                                                              |
-| :-- | :---------------------------------------- | :-------------------------------------------------------------------- |
-| 1   | ~~**I4** disable/enable~~ **done**        | Smallest, self-contained, valuable on its own. Warms up the key model |
-| 2   | **I1** tenant creation in one transaction | The core. Everything else needs a tenant to exist                     |
-| 3   | **I2** user creation, own store           | D-051 closed: our database, argon2id hashes                           |
-| 4   | **I3** login returning a session          | Needs I2                                                              |
-| 5   | **I5/I6** both keys, one response         | Mostly assembly once the above stand                                  |
-| 6   | Per-tenant live budget                    | The D-052 mitigation                                                  |
+| #   | Step                                | Why here                                                              |
+| :-- | :---------------------------------- | :-------------------------------------------------------------------- |
+| 1   | ~~**I4** disable/enable~~ **done**  | Smallest, self-contained, valuable on its own. Warms up the key model |
+| 2   | ~~**I1** tenant creation~~ **done** | The core. Everything else needs a tenant to exist                     |
+| 3   | **I2** user creation, own store     | D-051 closed: our database, argon2id hashes                           |
+| 4   | **I3** login returning a session    | Needs I2                                                              |
+| 5   | **I5/I6** both keys, one response   | Mostly assembly once the above stand                                  |
+| 6   | Per-tenant live budget              | The D-052 mitigation                                                  |
 
 **I4 first is deliberate.** It is independently useful, ships without any of the signup
 machinery, and proves the key-state changes before anything depends on them.
@@ -202,6 +227,8 @@ Existing properties this phase must not quietly break — each has a test today:
 
 Signup adds one more: **a new tenant must not be able to name its own tenant id.** An
 attacker-chosen id is how a signup ends up colliding with, or impersonating, an existing tenant.
+Held by the strict schema — there is no field — and tested both through the route and against the
+generated id's shape.
 
 ---
 

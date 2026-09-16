@@ -1948,3 +1948,64 @@ issued under no gate. So live-key issuance reads its answer from tenant state �
 and the verification flag — rather than being unconditional in the route. Turning the gate on
 later then means writing a different value into that state, not finding every tenant that was
 created while there was no gate.
+
+---
+
+## D-055 — Live access is a value on the tenant record, not a condition in the issuing route
+
+**Status:** Accepted and implemented 2026-09-16, as Phase I step **I1**.
+
+**Context.** D-053 grants a self-signed-up tenant `environments: ['sandbox', 'live']` from the
+first minute, and D-052 holds the live key behind a confirmed contact address. Payment and an
+approval step are deliberately later. So there is a gate now and there will be more of them, and
+the question is where they live.
+
+**Decision.** One pure function, `decideLiveAccess(tenant, entitlement)`, is the only thing that
+answers "may this tenant hold a live credential". `POST /v1/tenant/api-keys` calls it; the signup
+response reports what it said. Nothing else decides.
+
+**Why not an `if` in the route.** The expensive part of adding a gate later is never the check —
+it is applying it to the tenants that already exist, with live keys issued while there was none.
+A route-level condition leaves those tenants outside it and turns a future payment gate into a
+migration and a hunt. A state-level condition judges every tenant, old and new, on the next call,
+so turning a gate on is writing a different value.
+
+**A missing flag means allowed, and that is deliberate.** Tenants provisioned before signup
+existed carry no `createdVia` and no `emailVerifiedAt`. Reading that absence as "not verified"
+would take live access away from every hand-onboarded customer on deploy — with no verification
+email to re-send, because the address was never collected. The gate therefore applies to tenants
+marked `createdVia: 'SIGNUP'`, which is exactly the population D-052 was reasoning about: nobody
+at Erly has spoken to them. Same shape, and same reason, as `disabledAtOf` in D-054.
+
+**Entitlement is checked first.** A tenant that was never sold live is told that, not told to
+check their email — the second describes a route to live access that verifying will not open.
+
+---
+
+## D-056 — Signup is bounded per client address, and the bound is not the abuse answer
+
+**Status:** Accepted and implemented 2026-09-16, as Phase I step **I1**.
+
+**Context.** `POST /v1/signup` is the only route in the service that writes to the database with
+no credential. D-053 made it open to anyone.
+
+**Decision.** Attempts are counted per client address in a `signupAttempts` collection with a
+one-hour TTL; past five in that window the answer is `429 RATE_LIMITED`, which is the one code in
+the contract that promises the same request may work later. The attempt is recorded **before**
+the check, so failed signups count too — otherwise a loop sending invalid bodies is unbounded,
+which is the cheaper attack. The stored key is an HMAC of the address under the deployment
+secret, not the address: a bare SHA-256 of an IPv4 address is four billion values and a laptop
+walks it in seconds.
+
+**What this is not.** It is a floor under an open door. It is **not** the per-tenant live budget
+D-052 deferred, and it does nothing about the SEC's shared 120-requests-an-hour free tier.
+
+**Two operational consequences, stated rather than discovered.**
+
+1. **Behind a proxy, `req.ip` is the proxy.** Express is not configured to trust one, on purpose —
+   `X-Forwarded-For` is whatever the caller typed, and a limiter keyed on a caller-chosen value is
+   a limiter the caller opts out of. A deployment behind a load balancer must set `trust proxy`
+   **before** this route is exposed, or every customer shares one bucket of five an hour.
+2. **A contact address is not unique.** One person may legitimately own two tenants, the thing
+   that must be unique is the user credential I2 introduces, and refusing a duplicate would tell
+   an anonymous caller which addresses are already customers.

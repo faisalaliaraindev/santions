@@ -21,6 +21,7 @@ import {
   issuedApiKeySchema,
   revokeApiKeySchema,
 } from '../tenancy/api-keys.js';
+import { liveAccessBlockSchema, signupResultSchema, signupSchema } from '../tenancy/signup.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { apiErrorSchema, ERROR_CODES, ERROR_STATUS, type ErrorCode } from '../errors/errors.js';
@@ -96,6 +97,9 @@ export const COMPONENT_SCHEMAS = {
   CompanyIdentifier: companyIdentifierSchema,
   ScreeningPurpose: screeningPurposeSchema,
   NameFrequencyPrior: nameFrequencyPriorSchema,
+  SignupRequest: signupSchema,
+  SignupResult: signupResultSchema,
+  LiveAccessBlock: liveAccessBlockSchema,
   CreateApiKeyRequest: createApiKeySchema,
   IssuedApiKey: issuedApiKeySchema,
   ApiKeySummary: apiKeySummarySchema,

@@ -27,6 +27,108 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (seventh) — Phase I step I1: `POST /v1/signup`, and one definition of a tenant
+
+**Did.**
+
+1. **I1 is built — a tenant creates itself, whole, in one transaction.**
+   - `POST /v1/signup` takes `organisationName` and `contactEmail`, and nothing else. It writes
+     `tenants`, `tenantEntitlementVersions`, `taxonomyVersions` and `policyVersions` plus the
+     tenant's first audit entry through `TransactionRunner` — all five, or none. Three of four
+     records is a tenant whose first search is refused with `INVALID_POLICY`, which reads as a
+     defect in search rather than as a signup that stopped halfway.
+   - **The tenant id is generated and cannot be requested.** There is no field for one, the schema
+     is `.strict()`, so `tenantId` in the body answers `400 UNKNOWN_FIELD` rather than being
+     ignored. The id is `tenant-<uuid>` and is not derived from the organisation name.
+   - The route is `@Public()` — the only unauthenticated **write** in the service. A customer
+     cannot authenticate before they have a tenant.
+   - The entitlement grants `['sandbox', 'live']` from the first minute (D-053), and the response
+     says plainly that live is not usable yet.
+
+2. **`buildTenantProvisioning` is now the one definition of what a tenant is made of**
+   (`apps/api/src/tenancy/provisioning.ts`, pure, no I/O, no clock). `scripts/bootstrap/
+seed-data.mjs` imports it from `dist` and no longer carries its own copy of the seventeen
+   categories, the enabled countries, the unmeasured languages, the lexicon or the policy
+   defaults. **Verified by re-running `pnpm local:bootstrap` and diffing the three seeded tenants
+   field by field: identical to before the refactor.**
+
+3. **Live access is a value on the tenant record, not a condition in the route (D-055).**
+   `decideLiveAccess(tenant, entitlement)` is the only thing that answers "may this tenant hold a
+   live credential". `POST /v1/tenant/api-keys` calls it after the entitlement check; the signup
+   response reports what it said. **A missing flag means allowed** — tenants a person onboarded
+   have no `createdVia` and no `emailVerifiedAt`, and reading that absence as "unverified" would
+   take live access away from every existing live customer on deploy, with no verification email
+   to re-send for an address never collected. Same shape, same reason, as `disabledAtOf` in I4.
+
+4. **Signup is bounded per client address (D-056).** `signupAttempts`, keyed on an HMAC of
+   `req.ip` under the deployment secret, with a one-hour TTL; the sixth attempt in an hour answers
+   `429 RATE_LIMITED`, which is retryable. The attempt is recorded **before** the check so failed
+   signups count — otherwise a loop sending invalid bodies is unbounded. `X-Forwarded-For` is
+   deliberately not read.
+
+5. **All four records carry `mode`** (`MOCK` on a fixture-mode service), not just the tenant —
+   found by T01 failing, which is the check doing its job.
+
+6. Postman gained folder `13 - Tenant: signing yourself up` (sign up; naming your own id is
+   refused). `SETUP.md` gained Part 3c, and the integrator guide a "Getting a tenant" section.
+   OpenAPI regenerated; `/v1/signup` documents `security: []`.
+
+**Verified.** The stack was already up; everything below actually ran.
+
+```
+lint            clean          typecheck       clean
+unit            879 passed     invariants      29 passed     evaluation   12 passed
+integration     215 passed     security        143 passed    e2e (API)    10 passed
+```
+
+Unit was 866 (+13 in `apps/api/test/tenant-provisioning.test.ts`); security was 129 (+14 in
+`tests/security/signup.test.ts`).
+
+**Both load-bearing claims were proven by planting the violation, not by watching green:**
+
+- disabled the `decideLiveAccess` check in the key route → "refuses a live key to a self-signed-up
+  tenant with an unconfirmed address" fails;
+- wrote the four records without the transaction's `session` → "leaves nothing behind when a write
+  inside the transaction fails" fails, finding the four orphans it is there to catch.
+
+Each mutation was reverted immediately after, and the orphan rows the second one left were removed.
+
+**Left half-done.** Nothing in I1. I2, I3, I5 and I6 are untouched.
+
+**Found.**
+
+1. **`emitDecoratorMetadata` is on, but a controller constructor still needs `@Inject`.** A
+   plainly-typed `constructor(private readonly signups: SignupService)` resolved to `undefined` at
+   runtime and every request answered 500. Every other controller in this codebase injects by
+   token; the new one now does too.
+2. **`packages/contracts/test/openapi.test.ts` asserts the exact list of unauthenticated routes**,
+   and failed the moment `/v1/signup` was documented. That is the test working — the list is meant
+   to be hard to grow — and it now names signup with the reason it is there.
+3. **T01 counts records not labelled `MOCK`.** Signup stamped the tenant and not the other three,
+   so the integration suite failed on 60 unlabelled taxonomy versions. Fixed at the source, and
+   the test file now cleans up the tenants it creates: a suite that writes to the shared database
+   and leaves litter eventually fails a _different_ suite, and whoever debugs that wrote neither.
+4. **The rate limiter is per address, and behind a load balancer every customer is one address.**
+   Express is not configured to trust a proxy, on purpose. A deployment behind one must set
+   `trust proxy` **before** this route is exposed, or the whole service shares one bucket of five
+   signups an hour. Recorded in D-056; it is a deployment prerequisite, not a code gap.
+5. **Signup issues no credential, and nothing yet sets `emailVerifiedAt`.** So a self-signed-up
+   tenant today has sandbox only, and still needs its first key from `pnpm key:issue`. Both are
+   I2's and I3's work, and the ordering is deliberate: with no per-tenant live budget (D-052), one
+   unverified tenant can spend the SEC's whole 120-request hour.
+
+**Next session should:** build **I2** — the customer credential store in our own database,
+argon2id (D-051). It owns password reset, lockout, rotation, and the **email verification that
+writes `emailVerifiedAt`** — the flag I1 left unset, and the only thing standing between a
+self-signed-up tenant and a live key. Note the standing prerequisite from the session before: the
+`FIXED_FEED` fetch (once per run, not once per planned query) should land before any live key
+reaches a tenant nobody at Erly has spoken to.
+
+**Decisions touched:** **D-055 and D-056 opened and accepted** in this session. D-051, D-052 and
+D-053 unchanged and still closed; D-007 unchanged — plans, metering and billing still deferred.
+
+---
+
 ## 2026-09-16 (sixth) — Phase I step I4: `disabledAt`, and all three gating decisions closed
 
 **Did.**

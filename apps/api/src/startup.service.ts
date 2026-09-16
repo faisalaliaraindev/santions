@@ -15,6 +15,7 @@ import { SourceDocumentService } from './persistence/source-document.service.js'
 import { StageExecutionService } from './persistence/stage-execution.service.js';
 import { IndexerService } from './search-index/indexer.service.js';
 import { ApiKeyService } from './tenancy/api-key.service.js';
+import { SignupService } from './tenancy/signup.service.js';
 import { SearchesService } from './searches/searches.service.js';
 import { DomainHealthService } from './sources/domain-health.service.js';
 import { assertOutboundUserAgent } from './sources/egress-identity.js';
@@ -44,6 +45,7 @@ export class StartupService implements OnModuleInit {
   constructor(
     private readonly sessions: SessionService,
     private readonly apiKeys: ApiKeyService,
+    private readonly signups: SignupService,
     private readonly subjects: SubjectsService,
     private readonly nameFrequency: NameFrequencyService,
     private readonly receipts: InboxReceiptService,
@@ -76,6 +78,7 @@ export class StartupService implements OnModuleInit {
     await Promise.all([
       this.sessions.ensureIndexes(),
       this.apiKeys.ensureIndexes(),
+      this.signups.ensureIndexes(),
       this.subjects.ensureIndexes(),
       this.nameFrequency.ensureIndexes(),
       this.receipts.ensureIndexes(),

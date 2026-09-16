@@ -25,8 +25,12 @@
  * There is no tenant field in the request body to ignore, and `requireTenant` fails closed on a
  * principal without one rather than treating it as "any tenant" (SEC-01).
  *
- * **3. A way into the live environment.** Two independent conditions, both required: the
- * tenant's entitlement must include `live`, and the calling credential must itself be live.
+ * **3. A way into the live environment.** Three independent conditions, all required: the
+ * tenant's entitlement must include `live`, the calling credential must itself be live, and the
+ * tenant's own state must permit live today — which for a self-signed-up tenant means the
+ * contact address has been confirmed (D-052). That third condition is read from tenant state by
+ * `decideLiveAccess` rather than written into this route, so the payment gate D-053 defers can
+ * be turned on by writing a value instead of by finding every tenant created before it existed.
  * Entitlement is a commercial act by the provider — self-service issues credentials *within*
  * what was sold; it does not sell. The second condition stops a sandbox credential minting a
  * live one, which would make the sandbox/live split a formality (T62).
@@ -61,6 +65,7 @@ import { validate } from '../common/zod-validation.pipe.js';
 import { requireTenant } from '../subjects/subjects.controller.js';
 import { ApiKeyError, ApiKeyService } from './api-key.service.js';
 import { EntitlementsService } from './entitlements.service.js';
+import { decideLiveAccess } from './live-access.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -108,11 +113,25 @@ export class TenantApiKeysController {
       }
       // And the tenant must actually be sold the live environment. This throws
       // SANDBOX_CANNOT_ACCESS_LIVE with a message naming the entitlement.
-      await this.entitlements.assertCapability({
+      const entitlement = await this.entitlements.assertCapability({
         tenantId,
         capability: 'adverse_media',
         environment: 'live',
       });
+
+      // Then the tenant's own state has to permit it (I1). The entitlement says what was
+      // granted; this says whether the tenant has done what the grant is conditional on — today
+      // that is D-052's confirmed contact address, and a later payment gate is another value
+      // read by the same function. Deliberately not an `if` written here: a gate added to this
+      // route later would have to be applied retrospectively to every tenant issued a live key
+      // while there was none, and that hunt is the expensive part, not the check.
+      const tenant = await this.entitlements.findTenant(tenantId);
+      const liveAccess = decideLiveAccess({ tenant, entitlement });
+      if (!liveAccess.granted) {
+        throw new ApiException('SANDBOX_CANNOT_ACCESS_LIVE', liveAccess.detail, {
+          internalDetail: `tenant=${tenantId} live refused: ${liveAccess.blockedBy}`,
+        });
+      }
     }
 
     // Scopes narrow a key below its roles and never widen it, so an explicit list is intersected

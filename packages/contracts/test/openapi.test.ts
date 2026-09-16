@@ -87,16 +87,26 @@ describe('the OpenAPI document', () => {
     }
   });
 
-  it('marks the public probes and the sign-in redirects as unauthenticated, and nothing else', () => {
+  it('marks the probes, the sign-in redirects and signup as unauthenticated, and nothing else', () => {
     const publicOperations = operations()
       .filter(({ operation }) => Array.isArray(operation['security']))
       .map(({ path }) => path);
 
+    // This list is meant to be hard to grow. Every entry is a route reachable with no
+    // credential, and adding one is a decision somebody should have to make deliberately —
+    // which is why this test exists and why it fails when a new `@Public()` route is
+    // documented.
+    //
+    // `/v1/signup` is the newest and the only one that **writes** (phase I, I1). It is
+    // deliberate: a customer cannot authenticate before they have a tenant. What pays for it is
+    // that the route reads no principal, generates the tenant id itself, and is bounded per
+    // client address.
     expect(publicOperations.toSorted()).toEqual([
       '/auth/callback',
       '/auth/login',
       '/health/live',
       '/health/ready',
+      '/v1/signup',
     ]);
   });
 

@@ -9,11 +9,6 @@
  * Idempotent throughout: every write is an upsert keyed on a stable id.
  */
 
-// The FR-03 seed lexicon is imported from the built domain package rather than copied here.
-// Copying it would put a second term list beside the one `auditLexicon` gates in CI (T79), and
-// the copy is the one that acquires a protected-characteristic term nobody checks. `pnpm
-// local:bootstrap` builds first, so the import always resolves.
-import { SEED_LEXICON } from '../../packages/domain/dist/index.js';
 // The rung 2 and rung 4 discovery templates, imported from the built API package for the same
 // reason the lexicon is imported above: a second copy of a registry record is a second thing to
 // keep in step, and the copy that drifts is the one nobody is reading.
@@ -21,6 +16,10 @@ import {
   BING_NEWS_RSS_TEMPLATE,
   GOOGLE_NEWS_RSS_TEMPLATE,
 } from '../../apps/api/dist/sources/registry/discovery-rungs.js';
+// The four records a tenant is made of, from the one place that defines them. `POST /v1/signup`
+// builds a tenant with this same function, so the bootstrap cannot drift from what a real
+// customer is provisioned with.
+import { buildTenantProvisioning } from '../../apps/api/dist/tenancy/provisioning.js';
 
 import { log, waitFor } from '../lib/local-guard.mjs';
 import { loadNameFrequency } from './name-frequency.mjs';
@@ -51,70 +50,20 @@ const TENANTS = [
 const CAPABILITIES = [{ capabilityId: 'adverse_media', name: 'Adverse media search' }];
 
 /**
- * Taxonomy version 1 — all seventeen categories enabled (decision D-009 closes D3).
+ * What the seeded taxonomy and policy contain no longer lives here.
  *
- * All-on is the right default for a first deployment: it is far easier to notice an
- * irrelevant finding and switch a category off than to discover months later that a whole
- * class of conduct was never searched for. The FR-03 exclusion list still applies at
- * classification time regardless, so 'all categories' never means 'anything goes'.
+ * `buildTenantProvisioning` is the one definition of what a tenant is made of, and it is the
+ * same function `POST /v1/signup` uses (phase I, I1). Two copies of "all seventeen categories,
+ * these countries, this retention" are two things to keep in step, and the copy that drifts is
+ * the one a real customer gets provisioned from while the local stack looks fine. Imported from
+ * the built API package for the same reason the discovery templates above are: `pnpm
+ * local:bootstrap` builds first, so the import always resolves.
+ *
+ * The country list, the seventeen categories, the unmeasured languages, the thirty-day
+ * retention and the FR-02 traversal bounds — with the reasoning for each — are in
+ * `apps/api/src/tenancy/provisioning.ts`.
  */
-const SEED_TAXONOMY_CATEGORIES = [
-  'FRAUD_FINANCIAL_CRIME',
-  'MONEY_LAUNDERING_TF',
-  'BRIBERY_CORRUPTION',
-  'MARKET_ABUSE',
-  'SANCTIONS_EVASION_EXPORT_CONTROL',
-  'TAX_OFFENCES',
-  'ORGANISED_CRIME',
-  'DRUG_OFFENCES',
-  'HUMAN_TRAFFICKING_MODERN_SLAVERY',
-  'TERRORISM_VIOLENT_EXTREMISM',
-  'VIOLENT_CRIME',
-  'CYBERCRIME',
-  'REGULATORY_PROFESSIONAL_MISCONDUCT',
-  'ENVIRONMENTAL_HEALTH_SAFETY',
-  'CONSUMER_HARM_MISSELLING',
-  'INSOLVENCY_MISCONDUCT',
-  'GOVERNANCE_INTEGRITY',
-];
 
-/**
- * Countries the seeded taxonomy enables categories for.
- *
- * D-010 closed D1 as Costa Rica first; **D-044 revised the scope to worldwide**, and this is
- * where that stops being an abstraction. A taxonomy enables categories per country, and a source
- * whose countries the pinned taxonomy enables nothing for is refused with
- * `JURISDICTION_NOT_ENABLED` — so a source can be approved, active, on the ladder, and still
- * unreachable because no category is enabled where it operates.
- *
- * `US` is here because the first source approved for live use (the SEC litigation-releases feed,
- * D17) is American. Without it, taking that source live produces a search that refuses itself for
- * a reason that reads like a bug.
- *
- * Adding a country is a **taxonomy admin's** act through the approval lifecycle, not a
- * deployment. This list is only what a fresh local stack starts from.
- */
-const SEED_COUNTRIES = ['CR', 'US'];
-
-/**
- * Requested languages. NOT the same as enabled languages.
- *
- * FR-03: a language is enabled only once it carries a measured recall figure from the
- * evaluation set. Neither Spanish nor English has one yet, so both are seeded with
- * measuredRecall null and every coverage statement must declare them unmeasured. Phase H
- * (G10) measures them; until then this records intent, not capability.
- */
-const SEED_LANGUAGES = ['es', 'en'];
-
-/**
- * Evidence retention, in days (decision D-012 closes D8).
- *
- * Configurable per policy version rather than compiled in, so it can be revised without a
- * deployment. Thirty days is the agreed starting figure, not a legal conclusion: a legal
- * hold overrides it, and deletion must propagate to the search index and to exports, not
- * only to the primary record (SEC-05).
- */
-const SEED_EVIDENCE_RETENTION_DAYS = 30;
 /**
  * Source registry entries pointing at the local fixture server only. No live source is
  * configured, and none may be activated without the Phase H (G10) measurement.
@@ -403,90 +352,52 @@ export async function seedData(db) {
   }
 
   for (const tenant of TENANTS) {
-    await upsert('tenants', { tenantId: tenant.tenantId }, tenant);
+    // The same builder `POST /v1/signup` uses, so a seeded tenant and a self-signed-up one are
+    // made of the same four records. When they differ, the local stack stops being a rehearsal
+    // of what a customer gets — and the difference is found by a customer.
+    const provisioned = buildTenantProvisioning({
+      tenantId: tenant.tenantId,
+      name: tenant.name,
+      // A sandbox tenant is entitled to sandbox only. A live tenant keeps sandbox too, because
+      // taking live away would mean a customer provisioned for live could no longer rehearse.
+      environments: tenant.environment === 'live' ? ['sandbox', 'live'] : ['sandbox'],
+      provisionedBy: 'bootstrap',
+      // FR-02: a former-director search is selectable only under an **approved** historical
+      // scope, and this is that approval. Granted to exactly one seeded tenant on purpose, so
+      // both paths are exercised against the bootstrapped stack — granting it to both would
+      // leave the refusal untested, and the refusal is the half that matters. A tenant who asks
+      // for history and is silently given current-only has been answered a narrower question
+      // than the one they asked, with nothing saying so.
+      historicalScopeApproved: tenant.tenantId === 'tenant-beta',
+      decisionRef:
+        'Categories: all seventeen (D-009). Jurisdiction: Costa Rica (D-010), widened to ' +
+        'worldwide by D-044 with CR and US enabled. Languages es+en requested but NOT enabled ' +
+        'until measured at G10.',
+      now: new Date(now),
+    });
+
+    // The tenant record keeps the seeded `environment` marker rather than the builder's
+    // default: these three exist to be the fixtures other suites reason about, and `tenant-live`
+    // saying `sandbox` would make the seed file lie about what it provisioned.
+    await upsert(
+      'tenants',
+      { tenantId: tenant.tenantId },
+      { ...provisioned.tenant, environment: tenant.environment },
+    );
 
     await upsert(
       'tenantEntitlementVersions',
       { tenantId: tenant.tenantId, version: 1 },
-      {
-        tenantId: tenant.tenantId,
-        version: 1,
-        capabilities: ['adverse_media'],
-        // A sandbox tenant is entitled to sandbox only. A live tenant keeps sandbox too, because
-        // taking live away would mean a customer provisioned for live could no longer rehearse.
-        environments: tenant.environment === 'live' ? ['sandbox', 'live'] : ['sandbox'],
-        status: 'ACTIVE',
-        activatedAt: now,
-      },
+      provisioned.entitlement,
     );
 
     await upsert(
       'taxonomyVersions',
       { tenantId: tenant.tenantId, version: 1 },
-      {
-        tenantId: tenant.tenantId,
-        version: 1,
-        status: 'ACTIVE',
-        categories: SEED_TAXONOMY_CATEGORIES.map((category) => ({
-          category,
-          severityWeight: 3,
-          enabledCountries: [...SEED_COUNTRIES],
-        })),
-        // FR-03: a language is enabled only with a measured recall figure. Neither is measured
-        // yet, so both carry null and every coverage statement must declare them unmeasured.
-        // Phase H (G10) fills these in.
-        languages: SEED_LANGUAGES.map((language) => ({
-          language,
-          measuredRecall: null,
-          measuredByEvaluationRunId: null,
-        })),
-        // The D6 term list. Every term is `UNREVIEWED_AUTHORED` and nothing is machine
-        // translated: no Spanish reader has reviewed the `es` half, the coverage statement says
-        // so on every run that searches in Spanish, and `packages/domain/src/taxonomy/
-        // seed-lexicon.ts` says what a reviewer should check first. See D-033.
-        lexicon: SEED_LEXICON,
-        proposedBy: 'bootstrap',
-        approvedBy: 'bootstrap',
-        decisionRef:
-          'Categories: all seventeen (D-009). Jurisdiction: Costa Rica (D-010). Languages es+en requested but NOT enabled until measured at G10.',
-        activatedAt: now,
-      },
+      provisioned.taxonomy,
     );
 
-    await upsert(
-      'policyVersions',
-      { tenantId: tenant.tenantId, version: 1 },
-      {
-        tenantId: tenant.tenantId,
-        version: 1,
-        status: 'ACTIVE',
-        // FR-02: a former-director search is selectable only under an **approved** historical
-        // scope, and this is that approval. Granted to exactly one seeded tenant on purpose, so
-        // both paths are exercised against the bootstrapped stack — granting it to both would
-        // leave the refusal untested, and the refusal is the half that matters. A tenant who
-        // asks for history and is silently given current-only has been answered a narrower
-        // question than the one they asked, with nothing saying so.
-        historicalScopeApproved: tenant.tenantId === 'tenant-beta',
-        queryPlanCap: 200,
-        // The FR-02 one-hop traversal bounds (Phase D step D4). Configuration, not constants:
-        // a customer screening shell-company networks can have these raised through the D1
-        // approval lifecycle without a deployment, and the run pins the version it used so an
-        // old report keeps explaining its own truncation. `resolveGraphBounds` validates them
-        // and falls back to documented defaults rather than failing a search over a typo.
-        associationBounds: {
-          maxOfficerCandidates: 25,
-          maxCompaniesPerOfficer: 50,
-          maxEdgesPerSnapshot: 500,
-        },
-        outcomeUnknownAfterDays: 180,
-        // D-012: configurable, revisable without a deployment. A legal hold overrides it.
-        evidenceRetentionDays: SEED_EVIDENCE_RETENTION_DAYS,
-        archiveHorizon: null,
-        assumption:
-          'Archive horizon is null because no source has been measured. Open decision D2 closes at G10.',
-        activatedAt: now,
-      },
-    );
+    await upsert('policyVersions', { tenantId: tenant.tenantId, version: 1 }, provisioned.policy);
   }
 
   for (const source of SEED_SOURCES) {

@@ -25,6 +25,29 @@ users, and what this service deliberately will not tell you.
 another tenant, and you cannot read another tenant's searches — there is a request in
 `10 — Refusals worth seeing` that proves it.
 
+### Getting a tenant
+
+**You create your own tenant** (decision **D-053**, phase I step I1). No invite code, no
+credential, nobody at Erly involved:
+
+```http
+POST /v1/signup     { "organisationName": "...", "contactEmail": "..." }
+```
+
+Three things about that call are worth knowing before you make it:
+
+- **The tenant id is generated, and you cannot ask for one.** There is no field for it, and
+  sending `tenantId` is refused rather than ignored.
+- **Everything your tenant needs is created together** — the tenant, its entitlement, its
+  taxonomy version and its policy version, in one transaction. The response returns the version
+  numbers; keep them, because they are what a support conversation starts from.
+- **Live is granted but not yet available.** The entitlement includes `live` from the first
+  minute, and a live key waits until your contact address is confirmed (decision **D-052**). The
+  `liveAccess` object in the response says which state you are in and what would change it.
+  Sandbox works immediately and behaves identically against fixture sources.
+
+Signups are bounded per client address; the sixth in an hour answers `429`, which is retryable.
+
 ### Getting a key
 
 **Your first key comes from the provider.** A tenant with no key cannot authenticate to ask for
@@ -33,6 +56,10 @@ one, so the provider issues it:
 ```bash
 pnpm key:issue --role tenant_admin --label "Zquence production"
 ```
+
+(Signup does not hand out a key: it creates no user and no credential. A tenant that signs itself
+up still needs that first key from the provider until phase I steps I2 and I3 — a password and a
+session — are built.)
 
 **Every key after that, you issue yourself** (decision **D-050**). If that first key carries
 `apikey:manage` — which `tenant_admin` has — your platform mints and rotates its own credentials

@@ -230,9 +230,43 @@ curl -X POST http://127.0.0.1:3000/v1/tenant/api-keys \
 - **It will not cross a tenant boundary.** The tenant comes from your credential; there is no
   field in the body to put one in. Revoking another tenant's key answers `404`, not `403` — the
   second would confirm it exists.
-- **It will not sell you live access.** An `environment: "live"` key needs your tenant to be
-  entitled to live **and** your own credential to be live. Entitlement is a commercial act by the
-  provider; self-service issues within what was sold.
+- **It will not sell you live access.** An `environment: "live"` key needs three things, not two:
+  your tenant entitled to live, your own credential live, and your tenant's state permitting live
+  today. For a tenant that signed itself up, the third means a confirmed contact address
+  (D-052). Entitlement is a commercial act by the provider; self-service issues within what was
+  sold.
+
+---
+
+# Part 3c — Creating a tenant without an operator
+
+A tenant no longer has to be added to `scripts/bootstrap/seed-data.mjs` and bootstrapped in. It
+can create itself (D-053, phase I step I1):
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/signup   -H "Content-Type: application/json"   -d '{"organisationName":"Acme Compliance Ltd","contactEmail":"compliance@acme.example"}'
+```
+
+No credential — this is the only route in the service that writes without one. What it does:
+
+- Creates the **four** records a usable tenant needs — tenant, entitlement, taxonomy version,
+  policy version — **in one transaction**. All four or none. A tenant missing its taxonomy fails
+  at its first search with `INVALID_POLICY`, which reads like a defect in search rather than a
+  signup that stopped halfway.
+- **Generates the tenant id.** There is no field for one; sending `tenantId` answers
+  `400 UNKNOWN_FIELD` rather than being ignored.
+- Grants **both** environments, and reports in `liveAccess` that live is not usable yet: a
+  self-signed-up tenant confirms its contact address before a live key (D-052). Sandbox works
+  immediately.
+- Is **bounded per client address** — the sixth signup in an hour answers `429`, retryably.
+
+**It issues no credential.** Signup creates no user and no key, so a tenant created this way still
+needs its first key from `pnpm key:issue` until steps I2 and I3 (a password, then a session) are
+built. `local:bootstrap` still seeds `tenant-alpha`, `tenant-beta` and `tenant-live` — what it
+stops being is the only way.
+
+**Behind a load balancer**, set Express's `trust proxy` before exposing this route, or every
+customer shares one bucket of five signups an hour — see D-056.
 
 ---
 

@@ -24,6 +24,22 @@ export interface TenantRecord {
   readonly name: string;
   readonly environment: 'sandbox' | 'live';
   readonly mode?: string;
+
+  /**
+   * The three fields self-service signup adds (phase I, I1). All optional, because a tenant
+   * provisioned before signup existed has none of them, and a field added today must not change
+   * what a record written yesterday means.
+   *
+   * `createdVia` is the one that decides: `SIGNUP` marks a tenant that created itself, which is
+   * the population D-052's live gate is about. Its absence means a person onboarded this tenant
+   * by hand, and a tenant a person vouched for is not held behind an address nobody collected.
+   * See `decideLiveAccess`.
+   */
+  readonly createdVia?: string | undefined;
+  readonly contactEmail?: string | null | undefined;
+  /** Null until the contact address is confirmed. A live key waits on it (D-052). */
+  readonly emailVerifiedAt?: string | null | undefined;
+  readonly createdAt?: string | undefined;
 }
 
 export interface EntitlementVersionRecord {
@@ -33,6 +49,8 @@ export interface EntitlementVersionRecord {
   readonly environments: readonly ('sandbox' | 'live')[];
   readonly status: 'ACTIVE' | 'SUSPENDED' | 'SUPERSEDED';
   readonly activatedAt: string;
+  /** `MOCK` or `LIVE`, stamped by whatever wrote the record (T55). Absent on older records. */
+  readonly mode?: string | undefined;
 }
 
 export interface PinnedVersions {

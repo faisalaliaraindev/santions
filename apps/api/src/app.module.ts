@@ -72,6 +72,8 @@ import { SubjectsController } from './subjects/subjects.controller.js';
 import { SubjectsService } from './subjects/subjects.service.js';
 import { StartupService } from './startup.service.js';
 import { ApiKeyService } from './tenancy/api-key.service.js';
+import { SignupController } from './tenancy/signup.controller.js';
+import { SignupService } from './tenancy/signup.service.js';
 import { TenantApiKeysController } from './tenancy/tenant-api-keys.controller.js';
 import { EntitlementsService } from './tenancy/entitlements.service.js';
 import { PolicyService } from './tenancy/policy.service.js';
@@ -100,6 +102,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
     // registration order, and AdminController's `/v1/admin/:collection` would otherwise shadow
     // the reserved `/v1/admin/plans`, turning a documented 501 into a 403 from a permission
     // check on a route that was never meant to exist (FR-15, decision D-007).
+    SignupController,
     TenantApiKeysController,
     ReservedController,
     AdminController,
@@ -149,6 +152,16 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       provide: EntitlementsService,
       useFactory: (db: Db) => new EntitlementsService(db),
       inject: [MONGO_DB],
+    },
+    {
+      provide: SignupService,
+      useFactory: (
+        db: Db,
+        transactions: TransactionRunner,
+        audit: AuditService,
+        config: AppConfig,
+      ) => new SignupService(db, transactions, audit, config),
+      inject: [MONGO_DB, TransactionRunner, AuditService, APP_CONFIG],
     },
     {
       provide: InboxReceiptService,
@@ -635,6 +648,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       useFactory: (
         sessions: SessionService,
         apiKeys: ApiKeyService,
+        signups: SignupService,
         subjects: SubjectsService,
         nameFrequency: NameFrequencyService,
         receipts: InboxReceiptService,
@@ -655,6 +669,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         new StartupService(
           sessions,
           apiKeys,
+          signups,
           subjects,
           nameFrequency,
           receipts,
@@ -675,6 +690,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       inject: [
         SessionService,
         ApiKeyService,
+        SignupService,
         SubjectsService,
         NameFrequencyService,
         InboxReceiptService,

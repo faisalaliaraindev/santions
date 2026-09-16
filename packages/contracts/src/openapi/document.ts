@@ -55,6 +55,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
       { name: 'auth', description: 'Browser sign-in and the backend-for-frontend session' },
       { name: 'subjects', description: 'FR-01 identity snapshots' },
       { name: 'searches', description: 'Search creation and the result dimensions' },
+      { name: 'Tenant', description: 'Self-service signup and a tenant’s own API keys' },
       { name: 'reserved', description: 'Documented, deliberately not implemented (FR-15, D-007)' },
     ],
     security: [{ sessionCookie: [] }, { machineToken: [] }, { apiKey: [] }],
@@ -979,6 +980,46 @@ function buildPaths(): Record<string, SchemaObject> {
       'reservedTenantUsage',
       'Tenant usage reporting is deferred by decision D-007.',
     ),
+    '/v1/signup': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'signUp',
+        summary: 'Create a tenant',
+        // The only unauthenticated write in the service. Declared with an empty `security` so a
+        // generated client does not attach a credential nobody has yet.
+        security: [],
+        description:
+          'Open signup (decision **D-053**): no invite code, and both key kinds are granted ' +
+          'from day one.\n\n' +
+          'Creates four records in **one transaction** — the tenant, its entitlement, its ' +
+          'taxonomy version and its policy version. All four or none: a tenant missing its ' +
+          'taxonomy is one whose first search fails with `INVALID_POLICY`, which reads as a ' +
+          'defect in search rather than as a signup that stopped halfway.\n\n' +
+          '**The tenant id is generated and cannot be requested.** There is no field for one ' +
+          'and the schema is strict, so sending `tenantId` is refused with `UNKNOWN_FIELD` ' +
+          'rather than ignored. A caller who could name their own id could name somebody ' +
+          "else's.\n\n" +
+          '**A live key is not available immediately.** The entitlement grants `live`, but a ' +
+          'self-signed-up tenant must confirm its contact address first (decision **D-052**) ' +
+          "— live searches reach real publishers under the provider's identity, against a " +
+          'rate budget shared across every tenant. The `liveAccess` object in the response ' +
+          'says whether live is available and, if not, what would change that.\n\n' +
+          'Signups are bounded per client address. Past that bound the answer is `429`, which ' +
+          'is retryable: the same request succeeds once the window has passed.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('SignupRequest') } },
+        },
+        responses: {
+          '201': {
+            description: 'The tenant, its versions, and whether it may hold a live key.',
+            content: { 'application/json': { schema: ref('SignupResult') } },
+          },
+          '400': errorRef(400),
+          '429': errorRef(429),
+        },
+      },
+    },
     '/v1/tenant/api-keys': {
       post: {
         tags: ['Tenant'],
