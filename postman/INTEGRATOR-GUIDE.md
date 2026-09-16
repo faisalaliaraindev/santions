@@ -31,7 +31,7 @@ another tenant, and you cannot read another tenant's searches — there is a req
 credential, nobody at Erly involved:
 
 ```http
-POST /v1/signup     { "organisationName": "...", "contactEmail": "..." }
+POST /v1/signup     { "organisationName": "...", "contactEmail": "...", "password": "..." }
 ```
 
 Three things about that call are worth knowing before you make it:
@@ -57,9 +57,28 @@ one, so the provider issues it:
 pnpm key:issue --role tenant_admin --label "Zquence production"
 ```
 
-(Signup does not hand out a key: it creates no user and no credential. A tenant that signs itself
-up still needs that first key from the provider until phase I steps I2 and I3 — a password and a
-session — are built.)
+The password creates your tenant's **administrator** in the same transaction. It is stored as an
+argon2id hash and no endpoint returns it. Twelve characters minimum, no rules about capitals or
+symbols, and it may not contain your address or your organisation name.
+
+Confirming the address is a call, not a formality:
+
+```http
+POST /v1/signup/verify                  { "token": "..." }   ← from the email. Unlocks live keys
+POST /v1/signup/resend-verification     { "email": "..." }   ← 202 for every address
+POST /v1/account/password-reset         { "email": "..." }   ← 202 for every address
+POST /v1/account/password-reset/confirm { "token": "...", "newPassword": "..." }
+```
+
+Two things worth knowing before you build against these:
+
+- **The two `202` routes tell you nothing.** Same status, same body, whether or not the address
+  has an account. Do not build a "no such account" message on top of them — there is no signal
+  there to read.
+- **A reset ends every session that user holds**, and says how many. A reset may be an account
+  being taken back, so leaving other sessions signed in would make it cosmetic.
+
+(Signup still hands out no API key.)
 
 **Every key after that, you issue yourself** (decision **D-050**). If that first key carries
 `apikey:manage` — which `tenant_admin` has — your platform mints and rotates its own credentials

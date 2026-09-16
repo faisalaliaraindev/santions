@@ -97,16 +97,24 @@ describe('the OpenAPI document', () => {
     // which is why this test exists and why it fails when a new `@Public()` route is
     // documented.
     //
-    // `/v1/signup` is the newest and the only one that **writes** (phase I, I1). It is
-    // deliberate: a customer cannot authenticate before they have a tenant. What pays for it is
-    // that the route reads no principal, generates the tenant id itself, and is bounded per
-    // client address.
+    // `/v1/signup` is the only one that writes a tenant (phase I, I1). It is deliberate: a
+    // customer cannot authenticate before they have a tenant. What pays for it is that the route
+    // reads no principal, generates the tenant id itself, and is bounded per client address.
+    //
+    // The four account routes (I2) are public for the same structural reason: a customer
+    // confirming an address or recovering a lost password has no credential to present. What
+    // replaces it is a single-use, expiring token that was emailed to the address in question,
+    // and two of the four answer identically whether or not that address is a customer.
     expect(publicOperations.toSorted()).toEqual([
       '/auth/callback',
       '/auth/login',
       '/health/live',
       '/health/ready',
+      '/v1/account/password-reset',
+      '/v1/account/password-reset/confirm',
       '/v1/signup',
+      '/v1/signup/resend-verification',
+      '/v1/signup/verify',
     ]);
   });
 

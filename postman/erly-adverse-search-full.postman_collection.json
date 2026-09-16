@@ -1803,7 +1803,7 @@
     },
     {
       "name": "13 - Tenant: signing yourself up",
-      "description": "Self-service tenant creation (phase I step I1, decision D-053). Open signup: no invite code,\nno credential, and nobody at Erly involved.\n\nThis is the ONLY route in the service that writes without a credential, so three things are\nworth seeing here:\n  * the tenant id is GENERATED. There is no field for one, and sending `tenantId` is refused\n    rather than ignored — a caller who could name their own id could name somebody else's\n  * all four records (tenant, entitlement, taxonomy, policy) are written in one transaction.\n    A tenant missing its taxonomy fails at its first search with something that reads like a\n    bug in search rather than a signup that stopped halfway\n  * the entitlement grants live, and live is still not available yet. `liveAccess` in the\n    response says so, and says what would change it: a confirmed contact address (D-052)\n\nSignups are bounded per client address. The sixth in an hour answers 429, which is retryable.",
+      "description": "Self-service tenant creation (phase I step I1, decision D-053). Open signup: no invite code,\nno credential, and nobody at Erly involved.\n\nThis is the ONLY route in the service that writes without a credential, so three things are\nworth seeing here:\n  * the tenant id is GENERATED. There is no field for one, and sending `tenantId` is refused\n    rather than ignored — a caller who could name their own id could name somebody else's\n  * all four records (tenant, entitlement, taxonomy, policy) are written in one transaction.\n    A tenant missing its taxonomy fails at its first search with something that reads like a\n    bug in search rather than a signup that stopped halfway\n  * the entitlement grants live, and live is still not available yet. `liveAccess` in the\n    response says so, and says what would change it: a confirmed contact address (D-052)\n\nSignups are bounded per client address. The sixth in an hour answers 429, which is retryable.\n\nRequests 3-6 are the I2 account flow: confirming the address, which is what unlocks a live key, and getting back in after losing a password. No mail server runs on this stack, so the tokens are read out of the `outboundEmails` collection - that collection is the inbox (D-058).",
       "item": [
         {
           "name": "1. Sign up",
@@ -1820,14 +1820,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"organisationName\": \"Acme Compliance Ltd\",\n  \"contactEmail\": \"compliance@acme.example\"\n}"
+              "raw": "{\n  \"organisationName\": \"Acme Compliance Ltd\",\n  \"contactEmail\": \"compliance@acme.example\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/signup",
               "host": ["{{baseUrl}}"],
               "path": ["v1", "signup"]
             },
-            "description": "No credential. `auth` is explicitly noauth so the collection-level key is not attached — signup has to work for somebody who does not have one yet.\n\nThe response carries the generated tenant id and the three version numbers a support conversation starts from. It carries no secret: signup issues no credential, and the first key comes from the tenant key routes in folder 12."
+            "description": "No credential. `auth` is explicitly noauth so the collection-level key is not attached - signup has to work for somebody who does not have one yet.\n\nThe password creates the tenant's administrator, in the same transaction as the tenant (I2, D-051). It is stored as an argon2id hash and returned by nothing. It is refused if it is too short, a known-bad value, or contains the address or the organisation name.\n\nThe response carries the generated tenant id, the admin user id and the three version numbers a support conversation starts from. It carries no secret: signup issues no credential."
           },
           "event": [
             {
@@ -1839,13 +1839,16 @@
                   "pm.test('created', () => pm.expect(pm.response.code).to.eql(201));",
                   "if (pm.response.code === 201) {",
                   "  pm.environment.set('signedUpTenantId', b.tenantId);",
-                  "  console.log('tenant ' + b.tenantId + '  taxonomy v' + b.taxonomyVersion + '  policy v' + b.policyVersion);",
+                  "  pm.environment.set('signedUpEmail', b.contactEmail);",
+                  "  console.log('tenant ' + b.tenantId + '  admin ' + b.adminUserId);",
                   "  console.log('live access: ' + (b.liveAccess.granted ? 'granted' : 'blocked by ' + b.liveAccess.blockedBy));",
+                  "  console.log('verification email sent: ' + b.verificationEmail.sent);",
                   "}",
                   "pm.test('the tenant id was generated, not chosen', () => pm.expect(b.tenantId).to.match(/^tenant-[0-9a-f-]{36}$/));",
+                  "pm.test('an administrator was created with it', () => pm.expect(b.adminUserId).to.be.a('string'));",
                   "pm.test('both environments are granted (D-053)', () => pm.expect(b.entitlement.environments).to.eql(['sandbox', 'live']));",
                   "pm.test('live still waits for a confirmed address (D-052)', () => pm.expect(b.liveAccess.granted).to.eql(false));",
-                  "pm.test('no secret is returned, because signup issues no credential', () => pm.expect(JSON.stringify(b)).to.not.include('erly_'));"
+                  "pm.test('no secret and no hash comes back', () => pm.expect(JSON.stringify(b)).to.not.include('argon2'));"
                 ]
               }
             }
@@ -1883,6 +1886,152 @@
                 "exec": [
                   "pm.test('refused', () => pm.expect(pm.response.code).to.eql(400));",
                   "pm.test('and says which field', () => pm.expect(pm.response.json().code).to.eql('UNKNOWN_FIELD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Confirm the email address",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verificationToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "signup", "verify"]
+            },
+            "description": "The token arrives by email. No mail server runs on this stack, so read it out of the `outboundEmails` collection in MongoDB - that collection is the inbox (D-058):\n\n    db.outboundEmails.find({ kind: \"EMAIL_VERIFICATION\" }).sort({ sentAt: -1 }).limit(1)\n\nSet {{verificationToken}} to the token in the body, then send this.\n\nTHIS IS THE CALL THAT UNLOCKS A LIVE KEY (D-052). It sets `emailVerifiedAt` on the tenant, which is the value key issuance reads - so `liveAccessUnlocked` in the response is the same answer POST /v1/tenant/api-keys will now give.\n\nThe token works once. Sending it again answers 400, with the same message an invented token gets - a caller able to tell those apart could probe which links were issued."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('confirmed', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('and it says what that unlocked', () => pm.expect(b.liveAccessUnlocked).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Ask for the confirmation link again",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{signedUpEmail}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/resend-verification",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "signup", "resend-verification"]
+            },
+            "description": "202, always, with the same body - for an address that has an account, one that does not, and one already confirmed.\n\nTry it with an address you invent: the answer is identical. That is deliberate. An endpoint answering differently would be a list of this service's customers, readable by anybody with a word list. Signup is the one documented exception (D-057), because it has to answer with a tenant id.\n\nA new link spends the previous one, so the older email stops working."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));",
+                  "pm.test('and promises nothing', () => pm.expect(pm.response.json().accepted).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Ask for a password reset",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{signedUpEmail}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/account/password-reset",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "account", "password-reset"]
+            },
+            "description": "Public, because somebody who has lost their password has no credential to present. 202 and the same body for every address, for the same reason as the request above.\n\nRead the token from `outboundEmails` with kind PASSWORD_RESET. It expires in an hour - it is a live credential for whoever holds it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Set a new password",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"quiet-harbour-at-midnight-7\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/account/password-reset/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "account", "password-reset", "confirm"]
+            },
+            "description": "The token works once. The new password meets the same bar as a signup password, checked BEFORE the token is spent - so a weak choice can be corrected with the same link rather than a new one.\n\nA reset ends every session that user holds, and `sessionsEnded` says how many. A reset may be an account being taken back from somebody who should not have it, and leaving the other party signed in would make it cosmetic. It also clears a lockout: whoever holds the mailbox has proved more than a password would."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reset', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('and every session for that user ended', () => pm.expect(pm.response.json().sessionsEnded).to.be.a('number'));"
                 ]
               }
             }

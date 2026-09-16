@@ -1005,7 +1005,17 @@ function buildPaths(): Record<string, SchemaObject> {
           'rate budget shared across every tenant. The `liveAccess` object in the response ' +
           'says whether live is available and, if not, what would change that.\n\n' +
           'Signups are bounded per client address. Past that bound the answer is `429`, which ' +
-          'is retryable: the same request succeeds once the window has passed.',
+          'is retryable: the same request succeeds once the window has passed.\n\n' +
+          "**The password creates the tenant's administrator**, in the same transaction as " +
+          'the tenant itself (I2, decision **D-051**). It is stored as an argon2id hash and is ' +
+          'returned by nothing. It is refused if it is too short, a known-bad value, or ' +
+          'contains the email address or the organisation name — all three are things an ' +
+          'attacker holding a customer list tries first.\n\n' +
+          'The email address is the sign-in identity, so it must be unique: a second signup ' +
+          'with the same address answers `409 EMAIL_ALREADY_REGISTERED`. This is the **one** ' +
+          'route that reveals whether an address is a customer, and D-057 records why — it has ' +
+          'to answer with a tenant id, so it cannot answer identically for both cases. Every ' +
+          'other account route does.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: ref('SignupRequest') } },
@@ -1016,7 +1026,116 @@ function buildPaths(): Record<string, SchemaObject> {
             content: { 'application/json': { schema: ref('SignupResult') } },
           },
           '400': errorRef(400),
+          '409': errorRef(409),
           '429': errorRef(429),
+        },
+      },
+    },
+    '/v1/signup/verify': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'verifyEmail',
+        summary: 'Confirm the email address a tenant signed up with',
+        security: [],
+        description:
+          'The token arrives by email and **is** the credential — a customer confirming an ' +
+          'address has nothing else to present. It works once and expires.\n\n' +
+          'This is the call that unlocks a live key (decision **D-052**). It sets ' +
+          '`emailVerifiedAt` on the tenant, which is the value key issuance reads, so ' +
+          '`liveAccessUnlocked` in the response is the same answer `POST /v1/tenant/api-keys` ' +
+          'will give — computed by the same function, not restated.\n\n' +
+          '`200`, not 201: nothing is created.\n\n' +
+          'An unusable token answers `400` with one undifferentiated message, whether it is ' +
+          'unknown, expired or already spent. A caller able to tell those apart could probe ' +
+          'which links were issued, and the answer is the same either way: ask for a new one.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('VerifyEmailRequest') } },
+        },
+        responses: {
+          '200': {
+            description: 'Confirmed, and whether that made a live key available.',
+            content: { 'application/json': { schema: ref('VerifyEmailResult') } },
+          },
+          '400': errorRef(400),
+        },
+      },
+    },
+    '/v1/signup/resend-verification': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'resendVerification',
+        summary: 'Send the confirmation link again',
+        security: [],
+        description:
+          '`202`, always, with the same sentence — for an address that has an account, one that ' +
+          'does not, and one already confirmed.\n\n' +
+          'That is deliberate. An endpoint that answered differently would be a list of this ' +
+          "service's customers, readable by anybody with a word list. The same rule governs " +
+          'the password-reset request; signup is the documented exception, because it has to ' +
+          'answer with a tenant id.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('EmailRequest') } },
+        },
+        responses: {
+          '202': {
+            description: 'Accepted. Says nothing about whether anything was sent.',
+            content: { 'application/json': { schema: ref('Accepted') } },
+          },
+          '400': errorRef(400),
+        },
+      },
+    },
+    '/v1/account/password-reset': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'requestPasswordReset',
+        summary: 'Ask for a password-reset link',
+        security: [],
+        description:
+          'Public, because a customer who has lost their password has no credential to present.\n\n' +
+          '`202`, always, with the same sentence for every address — see ' +
+          '`/v1/signup/resend-verification` for why.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('EmailRequest') } },
+        },
+        responses: {
+          '202': {
+            description: 'Accepted. Says nothing about whether the address has an account.',
+            content: { 'application/json': { schema: ref('Accepted') } },
+          },
+          '400': errorRef(400),
+        },
+      },
+    },
+    '/v1/account/password-reset/confirm': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'confirmPasswordReset',
+        summary: 'Set a new password with an emailed token',
+        security: [],
+        description:
+          'The token works once and expires after an hour — it is a live credential for whoever ' +
+          'holds it, so it is deliberately short-lived.\n\n' +
+          '**A reset ends every session that user holds**, and the response says how many. A ' +
+          'reset may be an account being taken back from somebody who should not have it, and ' +
+          'leaving the other party signed in would make the reset cosmetic. It also clears a ' +
+          'lockout: whoever holds the mailbox has proved more than a password would.\n\n' +
+          'The new password meets the same bar as a signup password, checked **before** the ' +
+          'token is spent — so a weak choice can be corrected with the same link rather than a ' +
+          'new one.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('ResetPasswordRequest') } },
+        },
+        responses: {
+          '200': {
+            description: 'The password is changed and every session for that user has ended.',
+            content: { 'application/json': { schema: ref('ResetPasswordResult') } },
+          },
+          '400': errorRef(400),
         },
       },
     },

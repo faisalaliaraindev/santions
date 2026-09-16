@@ -31,7 +31,9 @@
 
 import { z } from 'zod';
 
-/** What the caller supplies. Two fields, both about who they are — nothing about what they get. */
+import { passwordSchema } from './account.js';
+
+/** What the caller supplies. Three fields, all about who they are — nothing about what they get. */
 export const signupSchema = z
   .object({
     /**
@@ -42,13 +44,26 @@ export const signupSchema = z
      */
     organisationName: z.string().trim().min(2).max(200),
     /**
-     * Where the service reaches this customer, and the address D-052's verification is sent to.
+     * Where the service reaches this customer, the address D-052's verification is sent to, and
+     * the sign-in identity of the administrator created alongside the tenant (I2).
      *
-     * Not a login — I2 owns user credentials. Storing it here rather than only on a user record
-     * keeps the tenant contactable when a person leaves, which is the situation where a silent
-     * service is worst.
+     * Kept on the tenant record as well as on the user, so the tenant stays contactable when a
+     * person leaves — which is exactly the situation where a silent service is worst.
      */
     contactEmail: z.string().trim().toLowerCase().email().max(254),
+    /**
+     * The password for the tenant's first user, who is its administrator (I2).
+     *
+     * Required, not optional. A tenant with no user is a tenant nobody can sign in to, and it
+     * would have to be completed by a second call that could fail — which is the half-finished
+     * signup this whole route exists to make impossible.
+     *
+     * Stored as an **argon2id hash** and never returned by anything (D-051). It is checked
+     * against `PASSWORD_MIN_LENGTH`, a list of known-bad values, and the two strings this request
+     * already contains: a password that is the organisation name or the email address is one an
+     * attacker reading a customer list can guess.
+     */
+    password: passwordSchema,
   })
   .strict();
 
@@ -71,6 +86,8 @@ export const signupResultSchema = z
   .object({
     /** Generated here. The body could not name it and no later call can change it. */
     tenantId: z.string(),
+    /** The tenant's first user, created in the same transaction. Its administrator. */
+    adminUserId: z.string(),
     organisationName: z.string(),
     contactEmail: z.string(),
     createdAt: z.string(),
@@ -102,6 +119,21 @@ export const signupResultSchema = z
       .object({
         granted: z.boolean(),
         blockedBy: liveAccessBlockSchema.nullable(),
+        detail: z.string(),
+      })
+      .strict(),
+
+    /**
+     * Whether a verification email was dispatched, and where it went.
+     *
+     * `false` is a real possibility rather than a formality: the tenant exists and the address is
+     * unconfirmed, and telling the customer that the email did not go out is better than leaving
+     * them waiting for it. `POST /v1/signup/resend-verification` is the way back.
+     */
+    verificationEmail: z
+      .object({
+        sent: z.boolean(),
+        sentTo: z.string(),
         detail: z.string(),
       })
       .strict(),

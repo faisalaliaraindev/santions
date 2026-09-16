@@ -919,7 +919,7 @@
         "operationId": "signUp",
         "summary": "Create a tenant",
         "security": [],
-        "description": "Open signup (decision **D-053**): no invite code, and both key kinds are granted from day one.\n\nCreates four records in **one transaction** — the tenant, its entitlement, its taxonomy version and its policy version. All four or none: a tenant missing its taxonomy is one whose first search fails with `INVALID_POLICY`, which reads as a defect in search rather than as a signup that stopped halfway.\n\n**The tenant id is generated and cannot be requested.** There is no field for one and the schema is strict, so sending `tenantId` is refused with `UNKNOWN_FIELD` rather than ignored. A caller who could name their own id could name somebody else's.\n\n**A live key is not available immediately.** The entitlement grants `live`, but a self-signed-up tenant must confirm its contact address first (decision **D-052**) — live searches reach real publishers under the provider's identity, against a rate budget shared across every tenant. The `liveAccess` object in the response says whether live is available and, if not, what would change that.\n\nSignups are bounded per client address. Past that bound the answer is `429`, which is retryable: the same request succeeds once the window has passed.",
+        "description": "Open signup (decision **D-053**): no invite code, and both key kinds are granted from day one.\n\nCreates four records in **one transaction** — the tenant, its entitlement, its taxonomy version and its policy version. All four or none: a tenant missing its taxonomy is one whose first search fails with `INVALID_POLICY`, which reads as a defect in search rather than as a signup that stopped halfway.\n\n**The tenant id is generated and cannot be requested.** There is no field for one and the schema is strict, so sending `tenantId` is refused with `UNKNOWN_FIELD` rather than ignored. A caller who could name their own id could name somebody else's.\n\n**A live key is not available immediately.** The entitlement grants `live`, but a self-signed-up tenant must confirm its contact address first (decision **D-052**) — live searches reach real publishers under the provider's identity, against a rate budget shared across every tenant. The `liveAccess` object in the response says whether live is available and, if not, what would change that.\n\nSignups are bounded per client address. Past that bound the answer is `429`, which is retryable: the same request succeeds once the window has passed.\n\n**The password creates the tenant's administrator**, in the same transaction as the tenant itself (I2, decision **D-051**). It is stored as an argon2id hash and is returned by nothing. It is refused if it is too short, a known-bad value, or contains the email address or the organisation name — all three are things an attacker holding a customer list tries first.\n\nThe email address is the sign-in identity, so it must be unique: a second signup with the same address answers `409 EMAIL_ALREADY_REGISTERED`. This is the **one** route that reveals whether an address is a customer, and D-057 records why — it has to answer with a tenant id, so it cannot answer identically for both cases. Every other account route does.",
         "requestBody": {
           "required": true,
           "content": {
@@ -934,7 +934,108 @@
             }
           },
           "400": { "$ref": "#/components/responses/Error400" },
+          "409": { "$ref": "#/components/responses/Error409" },
           "429": { "$ref": "#/components/responses/Error429" }
+        }
+      }
+    },
+    "/v1/signup/verify": {
+      "post": {
+        "tags": ["Tenant"],
+        "operationId": "verifyEmail",
+        "summary": "Confirm the email address a tenant signed up with",
+        "security": [],
+        "description": "The token arrives by email and **is** the credential — a customer confirming an address has nothing else to present. It works once and expires.\n\nThis is the call that unlocks a live key (decision **D-052**). It sets `emailVerifiedAt` on the tenant, which is the value key issuance reads, so `liveAccessUnlocked` in the response is the same answer `POST /v1/tenant/api-keys` will give — computed by the same function, not restated.\n\n`200`, not 201: nothing is created.\n\nAn unusable token answers `400` with one undifferentiated message, whether it is unknown, expired or already spent. A caller able to tell those apart could probe which links were issued, and the answer is the same either way: ask for a new one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/VerifyEmailRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed, and whether that made a live key available.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/VerifyEmailResult" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" }
+        }
+      }
+    },
+    "/v1/signup/resend-verification": {
+      "post": {
+        "tags": ["Tenant"],
+        "operationId": "resendVerification",
+        "summary": "Send the confirmation link again",
+        "security": [],
+        "description": "`202`, always, with the same sentence — for an address that has an account, one that does not, and one already confirmed.\n\nThat is deliberate. An endpoint that answered differently would be a list of this service's customers, readable by anybody with a word list. The same rule governs the password-reset request; signup is the documented exception, because it has to answer with a tenant id.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EmailRequest" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. Says nothing about whether anything was sent.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Accepted" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" }
+        }
+      }
+    },
+    "/v1/account/password-reset": {
+      "post": {
+        "tags": ["Tenant"],
+        "operationId": "requestPasswordReset",
+        "summary": "Ask for a password-reset link",
+        "security": [],
+        "description": "Public, because a customer who has lost their password has no credential to present.\n\n`202`, always, with the same sentence for every address — see `/v1/signup/resend-verification` for why.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EmailRequest" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. Says nothing about whether the address has an account.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Accepted" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" }
+        }
+      }
+    },
+    "/v1/account/password-reset/confirm": {
+      "post": {
+        "tags": ["Tenant"],
+        "operationId": "confirmPasswordReset",
+        "summary": "Set a new password with an emailed token",
+        "security": [],
+        "description": "The token works once and expires after an hour — it is a live credential for whoever holds it, so it is deliberately short-lived.\n\n**A reset ends every session that user holds**, and the response says how many. A reset may be an account being taken back from somebody who should not have it, and leaving the other party signed in would make the reset cosmetic. It also clears a lockout: whoever holds the mailbox has proved more than a password would.\n\nThe new password meets the same bar as a signup password, checked **before** the token is spent — so a weak choice can be corrected with the same link rather than a new one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The password is changed and every session for that user has ended.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ResetPasswordResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" }
         }
       }
     },
@@ -1130,6 +1231,7 @@
               "REVISION_CONFLICT",
               "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY",
               "ALREADY_TERMINAL",
+              "EMAIL_ALREADY_REGISTERED",
               "PAYLOAD_TOO_LARGE",
               "INPUT_BOUND_EXCEEDED",
               "RATE_LIMITED",
@@ -1231,15 +1333,17 @@
         "type": "object",
         "properties": {
           "organisationName": { "type": "string", "minLength": 2, "maxLength": 200 },
-          "contactEmail": { "type": "string", "format": "email", "maxLength": 254 }
+          "contactEmail": { "type": "string", "format": "email", "maxLength": 254 },
+          "password": { "type": "string", "minLength": 12, "maxLength": 200 }
         },
-        "required": ["organisationName", "contactEmail"],
+        "required": ["organisationName", "contactEmail", "password"],
         "additionalProperties": false
       },
       "SignupResult": {
         "type": "object",
         "properties": {
           "tenantId": { "type": "string" },
+          "adminUserId": { "type": "string" },
           "organisationName": { "type": "string" },
           "contactEmail": { "type": "string" },
           "createdAt": { "type": "string" },
@@ -1271,10 +1375,21 @@
             "required": ["granted", "blockedBy", "detail"],
             "additionalProperties": false
           },
+          "verificationEmail": {
+            "type": "object",
+            "properties": {
+              "sent": { "type": "boolean" },
+              "sentTo": { "type": "string" },
+              "detail": { "type": "string" }
+            },
+            "required": ["sent", "sentTo", "detail"],
+            "additionalProperties": false
+          },
           "nextSteps": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
         },
         "required": [
           "tenantId",
+          "adminUserId",
           "organisationName",
           "contactEmail",
           "createdAt",
@@ -1282,11 +1397,61 @@
           "taxonomyVersion",
           "policyVersion",
           "liveAccess",
+          "verificationEmail",
           "nextSteps"
         ],
         "additionalProperties": false
       },
       "LiveAccessBlock": { "type": "string", "enum": ["NOT_ENTITLED", "EMAIL_NOT_VERIFIED"] },
+      "VerifyEmailRequest": {
+        "type": "object",
+        "properties": { "token": { "type": "string", "minLength": 16, "maxLength": 200 } },
+        "required": ["token"],
+        "additionalProperties": false
+      },
+      "VerifyEmailResult": {
+        "type": "object",
+        "properties": {
+          "tenantId": { "type": "string" },
+          "emailVerifiedAt": { "type": "string" },
+          "liveAccessUnlocked": { "type": "boolean" }
+        },
+        "required": ["tenantId", "emailVerifiedAt", "liveAccessUnlocked"],
+        "additionalProperties": false
+      },
+      "EmailRequest": {
+        "type": "object",
+        "properties": { "email": { "type": "string", "format": "email", "maxLength": 254 } },
+        "required": ["email"],
+        "additionalProperties": false
+      },
+      "Accepted": {
+        "type": "object",
+        "properties": {
+          "accepted": { "type": "boolean", "enum": [true] },
+          "detail": { "type": "string" }
+        },
+        "required": ["accepted", "detail"],
+        "additionalProperties": false
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string", "minLength": 16, "maxLength": 200 },
+          "newPassword": { "$ref": "#/components/schemas/SignupRequest/properties/password" }
+        },
+        "required": ["token", "newPassword"],
+        "additionalProperties": false
+      },
+      "ResetPasswordResult": {
+        "type": "object",
+        "properties": {
+          "reset": { "type": "boolean", "enum": [true] },
+          "sessionsEnded": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["reset", "sessionsEnded"],
+        "additionalProperties": false
+      },
       "CreateApiKeyRequest": {
         "type": "object",
         "properties": {
@@ -2963,7 +3128,7 @@
         }
       },
       "Error409": {
-        "description": "Conflict: a stale revision, or an idempotency key reused with a different body. Possible codes: REVISION_CONFLICT, IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY, ALREADY_TERMINAL.",
+        "description": "Conflict: a stale revision, or an idempotency key reused with a different body. Possible codes: REVISION_CONFLICT, IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY, ALREADY_TERMINAL, EMAIL_ALREADY_REGISTERED.",
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/ApiError" },

@@ -2009,3 +2009,69 @@ D-052 deferred, and it does nothing about the SEC's shared 120-requests-an-hour 
 2. **A contact address is not unique.** One person may legitimately own two tenants, the thing
    that must be unique is the user credential I2 introduces, and refusing a duplicate would tell
    an anonymous caller which addresses are already customers.
+
+---
+
+## D-057 — Signup says an address is taken; every other account route says nothing
+
+**Status:** Accepted and implemented 2026-09-16, as Phase I step **I2**.
+
+**Context.** The email address is the sign-in identity, so it has to be unique — two users with
+one address makes "who is signing in" a question with two answers. That uniqueness is observable:
+a second signup with a known address must fail somehow.
+
+**The tension.** This service refuses to be an account-enumeration oracle everywhere else. One
+opaque `401` for every credential failure (T03, T68). `404` rather than `403` for another tenant's
+key, because the second confirms it exists. A list of this service's customers is a list of
+compliance firms, which is worth stealing in a way an ordinary user list is not.
+
+**Decision.** Signup answers `409 EMAIL_ALREADY_REGISTERED`, plainly. Every other account route —
+`resend-verification`, `password-reset` — answers **identically** for a known address, an unknown
+one and an already-confirmed one: `202`, same body, same sentence, nothing sent for the cases
+where nothing should be.
+
+**Why not hide it at signup too.** The only way is to make signup asynchronous: answer `202 check
+your email` and deliver the tenant id by mail, so the response carries no evidence either way.
+That is a real option and it is the upgrade path if this ever matters, but it costs the property
+that makes the current API pleasant to integrate against — a signup that returns the tenant, its
+versions and its live-access state in one synchronous response.
+
+**What pays for the leak.** Signup is bounded per client address (D-056), so the route cannot be
+walked through a word list quickly; and the fact learned is narrow — that an address is a
+customer, not which tenant, nor anything about it.
+
+**This is a trade, recorded as one.** If the customer base ever becomes sensitive enough that
+membership alone is the secret, reopen this and make signup asynchronous.
+
+---
+
+## D-058 — No mail transport is configured, and production refuses to start rather than pretend
+
+**Status:** Accepted and implemented 2026-09-16, as Phase I step **I2**.
+
+**Context.** I2's verification and password-reset flows need to deliver a token to an address.
+Nothing has decided what sends it — SMTP, SES, or a provider — and guessing would put a dead
+configuration key into the schema and a dependency into the build.
+
+**Decision.** `NotificationPort`, with two adapters and a third that deliberately does not exist:
+
+| Adapter                           | Where       | What it does                                                          |
+| :-------------------------------- | :---------- | :-------------------------------------------------------------------- |
+| `MailboxNotificationAdapter`      | Local, test | Writes to `outboundEmails` and logs. That collection **is** the inbox |
+| `UnconfiguredNotificationAdapter` | Production  | Refuses, naming the problem                                           |
+| A real transport                  | —           | Not built. Nothing has chosen one                                     |
+
+**Why a refusal and not a no-op.** A no-op mailer produces a deployment where signup looks
+healthy, verification emails go into a database nobody reads, and every customer sits unverified
+and unable to reach live — with no error anywhere. That is the same class of failure as a fixture
+answering as though it were a live source, and this codebase refuses that one loudly too.
+
+**Sending never fails a signup.** The tenant is committed first, and the email goes afterwards,
+outside the transaction — the transaction body can run more than once under the retry policy, and
+an email sent from inside it would be sent again on each attempt. A failed send leaves the address
+unconfirmed, which the response says, and `resend-verification` is the way back.
+
+**`PUBLIC_APP_URL` is optional and is not guessed at.** With no value, the emails carry the token
+and the endpoint to send it to rather than a link to a host nobody confirmed. It is deliberately
+not derived from `CORS_ORIGINS`: that list says who may call this API, which is a different
+question from where the customer's interface lives.

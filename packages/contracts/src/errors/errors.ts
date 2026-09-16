@@ -38,6 +38,10 @@ export const ERROR_CODES = [
   'REVISION_CONFLICT',
   'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY',
   'ALREADY_TERMINAL',
+  // Signup only. The email address is the sign-in identity, so it must be unique — and signup
+  // is the one route that cannot hide that, because it has to answer with a tenant id. Every
+  // other account route answers identically for a known and an unknown address. See D-057.
+  'EMAIL_ALREADY_REGISTERED',
   // 413
   'PAYLOAD_TOO_LARGE',
   'INPUT_BOUND_EXCEEDED',
@@ -110,6 +114,7 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   REVISION_CONFLICT: 409,
   IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY: 409,
   ALREADY_TERMINAL: 409,
+  EMAIL_ALREADY_REGISTERED: 409,
 
   PAYLOAD_TOO_LARGE: 413,
   INPUT_BOUND_EXCEEDED: 413,
@@ -149,6 +154,9 @@ export const ERROR_RETRYABLE: Readonly<Record<ErrorCode, boolean>> = {
   REVISION_CONFLICT: false,
   IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_BODY: false,
   ALREADY_TERMINAL: false,
+  // Sending it again changes nothing: the address is taken until somebody does something about
+  // it, and that something is signing in or resetting the password.
+  EMAIL_ALREADY_REGISTERED: false,
 
   PAYLOAD_TOO_LARGE: false,
   INPUT_BOUND_EXCEEDED: false,

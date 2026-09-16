@@ -9,7 +9,7 @@ of previous sessions. It is deliberately short.
 
 > **Phase I — Tenant self-service onboarding**
 >
-> **I4 and I1 are built. I2 is next, and nothing blocks it.** Read
+> **I4, I1 and I2 are built. I3 is next, and nothing blocks it.** Read
 > [`phase-i-tenant-onboarding.md`](./phase-i-tenant-onboarding.md) — it is the brief, and it is
 > short.
 >
@@ -31,9 +31,19 @@ of previous sessions. It is deliberately short.
 > imports it rather than keeping its own copy. **Nothing yet sets `emailVerifiedAt`**, so a
 > self-signed-up tenant has sandbox only until I2 lands the verification flow.
 >
-> **Next: I2** — the customer password store, in our own database, argon2id (D-051). It owns
-> reset, lockout, rotation and the **email verification** that D-052 requires before a live key,
-> which is the thing I1 left unset on purpose.
+> **Done (2026-09-16): I2.** The customer credential store, in our own database, argon2id
+> (D-051). Signup now takes a password and creates the tenant's administrator in the same
+> transaction; `POST /v1/signup/verify` sets `tenants.emailVerifiedAt`, which is **the** thing
+> standing between a self-signed-up tenant and a live key. Password reset, lockout and single-use
+> emailed tokens come with it. Recorded as **D-057** (signup says an address is taken; every other
+> account route says nothing) and **D-058** (no mail transport is configured — the local stack
+> writes to an `outboundEmails` collection, and **production refuses to start** rather than
+> dropping messages somewhere nobody reads).
+>
+> **Next: I3** — a login that returns a session. `UserService.authenticate` already checks the
+> password and applies the lockout; what is missing is the route. It must not become a second
+> authentication system: one verifier, one session store, one set of rules — and one opaque answer
+> for every failure, as `AuthGuard` already gives for API keys.
 >
 > **All three gating decisions are closed** (2026-09-16), so no session needs to stop and ask:
 >
@@ -97,10 +107,10 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today (2026-09-16): clean, clean, **879 passed, 29 passed, 12 passed**.
+Expected today (2026-09-16): clean, clean, **895 passed, 29 passed, 12 passed**.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
-**215 integration** tests, `pnpm test:security` **143 security** tests, and `pnpm test:e2e:api`
+**215 integration** tests, `pnpm test:security` **167 security** tests, and `pnpm test:e2e:api`
 **10 API end-to-end** tests over real HTTP, real SQS and a real worker. All four figures were
 re-measured on 2026-09-16; the ones they replace had drifted by a session or two.
 

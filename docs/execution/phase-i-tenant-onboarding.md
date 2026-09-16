@@ -1,6 +1,6 @@
 # Phase I — Tenant self-service onboarding
 
-**Status: I4 and I1 built, 2026-09-16. I2, I3, I5, I6 not started.** Written 2026-09-16, and the
+**Status: I4, I1 and I2 built, 2026-09-16. I3, I5, I6 not started.** Written 2026-09-16, and the
 three decisions it raised (D-051, D-052, D-053) are now all closed — see section 7.
 
 Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-running the
@@ -73,10 +73,41 @@ that reads like a bug in search rather than a half-finished signup.
 about them, and taking them away to prove a point would cost a day of unrelated breakage. What it
 stops being is the _only_ way.
 
-### I2 — Where the password lives
+### I2 — Where the password lives — **BUILT 2026-09-16**
 
 **Decided 2026-09-16: our own store, in our database. D-051 is closed, against the
 recommendation below.**
+
+Built as `apps/api/src/auth/password.ts` (argon2id and the policy), `user.service.ts` (the
+records) and `account.service.ts` (what a customer experiences), with **D-057** (signup says an
+address is taken; every other account route says nothing) and **D-058** (no mail transport is
+configured, and production refuses to start rather than pretend).
+
+What exists now:
+
+- **Signup takes a password and creates the tenant's administrator in the same transaction** as
+  the four tenant records. argon2id at OWASP's floor, parameters written out rather than
+  inherited from a library default that a lock-file update could change.
+- **The policy is length plus a known-bad list**, not composition rules — and it refuses a
+  password containing the email address or the organisation name, which are the two strings an
+  attacker holding a customer list already has. `P@ssw0rd-1234` is refused; the candidate folding
+  that catches it is order-dependent and commented.
+- **`POST /v1/signup/verify` sets `tenants.emailVerifiedAt`**, which is the value `decideLiveAccess`
+  reads — so confirming the address is literally the moment a live key becomes issuable (D-052,
+  D-055), and the response says so.
+- **Single-use, expiring, hashed tokens.** Issuing a new one spends the old one. Every refusal —
+  unknown, expired, spent, wrong purpose — is the same message.
+- **Lockout**: ten wrong passwords, fifteen minutes, cleared by a successful sign-in or a reset.
+  Temporary on purpose: a permanent lock is a denial of service anybody can trigger against a
+  named customer.
+- **Password reset ends every session that user holds**, and says how many.
+- **An unconfirmed address still signs in.** D-052 gates the live key, not the account — signup
+  promises sandbox works immediately, and a customer who cannot sign in until an email arrives
+  cannot use what they were promised.
+
+**Not in I2, and named rather than discovered:** _changing_ a password while signed in (it needs
+I3's session identity; reset-by-email is the interim route), and **MFA**, which D-051 makes ours
+to build and which nothing here pretends exists.
 
 What that buys the estimate for this step: password reset, lockout and rate limiting on failed
 attempts, rotation, MFA if it is ever wanted, and breach response for a credential store that now
@@ -105,6 +136,12 @@ credentials". That is a large new surface for a feature that is not our product.
 customer identity has its own operational cost, and someone should say yes deliberately.
 
 ### I3 — Login and session
+
+**Next.** `UserService.authenticate` already verifies a password, applies the lockout and returns
+a safe user; what does not exist is the route that turns that into a session. The failure values
+it returns (`UNKNOWN_USER`, `BAD_PASSWORD`, `LOCKED`, `SUSPENDED`) are for the audit trail and the
+counter — I3 must flatten them into **one opaque answer** at the HTTP boundary, exactly as
+`AuthGuard` does for API keys.
 
 `POST /auth/login` exists as an OIDC redirect for the panel. Machine-driven signup needs a session
 the customer's own backend can obtain and use. Either:
@@ -204,7 +241,7 @@ hour.
 | :-- | :---------------------------------- | :-------------------------------------------------------------------- |
 | 1   | ~~**I4** disable/enable~~ **done**  | Smallest, self-contained, valuable on its own. Warms up the key model |
 | 2   | ~~**I1** tenant creation~~ **done** | The core. Everything else needs a tenant to exist                     |
-| 3   | **I2** user creation, own store     | D-051 closed: our database, argon2id hashes                           |
+| 3   | ~~**I2** user creation~~ **done**   | D-051 closed: our database, argon2id hashes                           |
 | 4   | **I3** login returning a session    | Needs I2                                                              |
 | 5   | **I5/I6** both keys, one response   | Mostly assembly once the above stand                                  |
 | 6   | Per-tenant live budget              | The D-052 mitigation                                                  |

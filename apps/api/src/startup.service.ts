@@ -6,7 +6,9 @@ import { CapabilityCoverageService } from './admin/capability-coverage.service.j
 import type { AppConfig } from './config/config.js';
 import { APP_CONFIG } from './tokens.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
+import { MailboxNotificationAdapter } from './auth/notification.port.js';
 import { SessionService } from './auth/session.service.js';
+import { UserService } from './auth/user.service.js';
 import { AuditService, LocalAuditCheckpointWriter } from './persistence/audit.service.js';
 import { InboxReceiptService } from './persistence/inbox-receipt.service.js';
 import { OutboxService } from './persistence/outbox.service.js';
@@ -44,6 +46,8 @@ export class StartupService implements OnModuleInit {
 
   constructor(
     private readonly sessions: SessionService,
+    private readonly users: UserService,
+    private readonly mailbox: MailboxNotificationAdapter,
     private readonly apiKeys: ApiKeyService,
     private readonly signups: SignupService,
     private readonly subjects: SubjectsService,
@@ -77,6 +81,8 @@ export class StartupService implements OnModuleInit {
 
     await Promise.all([
       this.sessions.ensureIndexes(),
+      this.users.ensureIndexes(),
+      this.mailbox.ensureIndexes(),
       this.apiKeys.ensureIndexes(),
       this.signups.ensureIndexes(),
       this.subjects.ensureIndexes(),

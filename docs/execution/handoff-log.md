@@ -27,6 +27,122 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (eighth) — Phase I step I2: the customer credential store
+
+**Did.**
+
+1. **I2 is built — this service now holds passwords, which it never did before (D-051).**
+   - `apps/api/src/auth/password.ts` — argon2id at OWASP's floor (19 MiB, t=2, p=1), written out
+     rather than inherited from the library's defaults, because a default can change under a
+     lock-file update and every new password would be hashed more cheaply with nobody noticing.
+     `passwordNeedsRehash` compares parameter by parameter and **only in the weaker direction**, so
+     a deployment whose parameters were lowered cannot quietly re-hash every account down to it.
+   - The policy is **length plus a known-bad list**, no composition rules (NIST SP 800-63B's
+     position, and the trade is stated in the file). It also refuses a password containing the
+     email address or the organisation name — the two strings an attacker holding a customer list
+     already has. The folding that catches `P@ssw0rd-1234` is order-dependent: substitute symbols,
+     fold, strip trailing digits, _then_ de-leet. Reorder any two and it passes.
+   - `user.service.ts` — the records. Globally unique email (it is the sign-in identity), argon2id
+     hash that nothing returns, lockout at ten attempts for fifteen minutes, single-use expiring
+     tokens stored as SHA-256, and `authenticate` for I3 to build on.
+   - `account.service.ts` + `account.controller.ts` — verification, resend, password reset.
+
+2. **Signup creates the administrator in the same transaction as the tenant.** `POST /v1/signup`
+   now takes a `password`. A tenant with no user is a tenant nobody can sign in to, and creating it
+   in a second call is creating something that can fail on its own — the same reasoning that put
+   the four tenant records in one transaction in I1.
+
+3. **`POST /v1/signup/verify` is what unlocks a live key.** It sets `tenants.emailVerifiedAt`,
+   which is the value `decideLiveAccess` reads (D-055), in the same transaction as the user's own
+   flag — a verified user beside an unverified tenant is a customer who did everything asked of
+   them and still cannot reach live. The response says `liveAccessUnlocked`, computed by the same
+   function key issuance uses rather than restated.
+
+4. **Two decisions recorded.**
+   - **D-057** — signup answers `409 EMAIL_ALREADY_REGISTERED`, and it is the **only** account
+     route that reveals an address is a customer. It has to return a tenant id, so it cannot answer
+     identically for both cases without becoming asynchronous. Every other route — resend,
+     password-reset — answers `202` with the same body for known, unknown and already-confirmed,
+     and sends nothing where nothing should be sent. The upgrade path, if membership ever becomes
+     the secret, is an asynchronous signup; it is written down.
+   - **D-058** — `NotificationPort` with a mailbox adapter (writes to `outboundEmails`; that
+     collection _is_ the local inbox) and **production refuses to start** rather than running a
+     no-op mailer. A no-op produces a deployment where signup looks healthy and every customer sits
+     unverified and unreachable. New optional `PUBLIC_APP_URL`: with no value the emails carry the
+     token and the endpoint rather than a link to a host nobody confirmed.
+
+5. **New dependency: `@node-rs/argon2`.** Prebuilt binaries, no node-gyp, no build tools needed on
+   Windows.
+
+**Verified.** The stack was already up; everything below actually ran.
+
+```
+lint            clean          typecheck       clean
+unit            895 passed     invariants      29 passed     evaluation   12 passed
+integration     215 passed     security        167 passed    e2e (API)    10 passed
+```
+
+Unit was 879 (+16 in `apps/api/test/password.test.ts`); security was 143 (+24 in
+`tests/security/account.test.ts`).
+
+**Three claims proven by planting the violation, not by watching green:**
+
+- verification setting only the _user's_ flag and not the tenant's → the live-unlock tests fail;
+- dropping `usedAt: null` and the expiry from the token lookup → four single-use/expiry tests fail;
+- the reset route answering "no account with that address" for an unknown one → the enumeration
+  test fails.
+
+Each was reverted immediately after.
+
+**Left half-done.** Nothing in I2. Two things are **deliberately** not in it, and both are named in
+the brief rather than left to be discovered: **changing a password while signed in** (it needs
+I3's session identity; reset-by-email is the interim route) and **MFA**, which D-051 makes ours to
+build and which nothing here pretends exists.
+
+**Found.**
+
+1. **Two security suites sharing one database wiped each other's state.** `signup.test.ts` builds a
+   rate-limit counter against a fixed address while `account.test.ts` cleared the whole
+   `signupAttempts` collection in `beforeEach` — a `deleteMany({})` on a shared collection, and the
+   suites run in parallel. Fixed by exporting `signupOriginKey` from the service so each file
+   clears **only its own bucket**. Re-ran the security suite three times to confirm it is stable.
+2. **`emitDecoratorMetadata` is on, but the const-enum import is not usable.** `@node-rs/argon2`
+   publishes `Algorithm` as an ambient `const enum`, which `verbatimModuleSyntax` refuses to read
+   at runtime. Typed as `2 as Algorithm` and asserted in a unit test against a hash the module
+   actually produced, so a wrong value fails a test rather than silently selecting argon2d.
+3. **An unconfirmed address must still be able to sign in.** The first cut refused it, which
+   contradicts what signup promises — sandbox works immediately. D-052 gates the live _key_, not
+   the account. The verification state travels on the returned user so a caller can say so.
+4. **A rejected password must not be echoed anywhere.** The `details` array on a validation error
+   carries the path and the rule, never the value — there is a test asserting the rejected string
+   appears nowhere in the response.
+5. **`tests/integration/transactions.test.ts` is flaky while a dev API is running against the same
+   database**, and it is nothing to do with I2. The test asserts a just-committed outbox event is
+   still unpublished (FI-04: publication is a separate, later step); a `pnpm dev` process on port
+   3000 has an `OutboxPublisher` polling the same collection, and it publishes the event between
+   the commit and the assertion. It failed once during this session's final run — an API was
+   listening on 3000 — and passed on re-run. If you see
+   `expected 2026-…Z to be null` at `transactions.test.ts:635`, stop the dev server rather than
+   looking for a defect. Worth fixing properly by scoping that assertion to a tenant the publisher
+   is not draining.
+
+**Next session should:** build **I3** — a login that returns a session for a machine caller.
+`UserService.authenticate` already verifies the password and applies the lockout; what is missing
+is the route. Two constraints: it must reuse the one session store and one verifier rather than
+becoming a second authentication system, and it must flatten `UNKNOWN_USER`, `BAD_PASSWORD`,
+`LOCKED` and `SUSPENDED` into **one opaque answer**, exactly as `AuthGuard` does for API keys —
+those values exist for the audit trail and the counter, not for whoever is trying passwords.
+
+The standing prerequisite from two sessions ago is unchanged: the `FIXED_FEED` fetch (once per run,
+not once per planned query) should land before any live key reaches a tenant nobody at Erly has
+spoken to. I2 makes that closer, because the verification flow it adds is the last thing that stood
+between a self-signed-up tenant and a live key.
+
+**Decisions touched:** **D-057 and D-058 opened and accepted.** D-051 is now implemented rather
+than merely closed. D-052, D-053, D-054, D-055, D-056 unchanged.
+
+---
+
 ## 2026-09-16 (seventh) — Phase I step I1: `POST /v1/signup`, and one definition of a tenant
 
 **Did.**

@@ -29,8 +29,14 @@ import { TokenVerifier } from '../../apps/api/src/auth/token-verifier.js';
 import { loadConfig } from '../../apps/api/src/config/config.js';
 import type { AuditService } from '../../apps/api/src/persistence/audit.service.js';
 import { TransactionRunner } from '../../apps/api/src/persistence/transaction.runner.js';
+import { AccountService } from '../../apps/api/src/auth/account.service.js';
+import { UserService } from '../../apps/api/src/auth/user.service.js';
 import { ApiKeyService, type IssuedApiKey } from '../../apps/api/src/tenancy/api-key.service.js';
-import { SignupService, SIGNUP_MAX_PER_WINDOW } from '../../apps/api/src/tenancy/signup.service.js';
+import {
+  signupOriginKey,
+  SignupService,
+  SIGNUP_MAX_PER_WINDOW,
+} from '../../apps/api/src/tenancy/signup.service.js';
 
 const MONGODB_URI =
   process.env['MONGODB_URI'] ??
@@ -70,10 +76,33 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   CORS_ORIGINS: '',
 };
 
+/**
+ * A password that passes the policy without being memorable enough to be reused anywhere.
+ *
+ * Randomised per call so no two test accounts share one, and long enough that the length rule is
+ * never the thing under test unless a test says so.
+ */
+
+/**
+ * The rows this file's own HTTP signups write.
+ *
+ * Supertest connects over the loopback interface, which Express reports as one of these
+ * depending on how the socket was opened. Keyed with the same function the service uses, so the
+ * keying cannot drift between them.
+ */
+const LOOPBACK_KEYS = ['::ffff:127.0.0.1', '::1', '127.0.0.1'].map((ip) =>
+  signupOriginKey(String(TEST_ENV['SESSION_SECRET']), ip),
+);
+
+function testPassword(): string {
+  return `harbour-lantern-${randomUUID()}`;
+}
+
 function signupBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     organisationName: 'Acme Compliance Ltd',
     contactEmail: `${randomUUID()}@example.test`,
+    password: testPassword(),
     ...overrides,
   };
 }
@@ -167,14 +196,18 @@ beforeAll(async () => {
  * test, and leaving it uncleared would make every other test depend on how many tests ran first.
  */
 beforeEach(async () => {
-  await db.collection('signupAttempts').deleteMany({});
+  // Only this bucket. A blanket delete would also clear the counter the rate-limit test in
+  // `signup.test.ts` is building up against its own fixed address — the two files run in
+  // parallel against one database, and that is exactly how a suite starts failing for a reason
+  // that has nothing to do with what it tests.
+  await db.collection('signupAttempts').deleteMany({ originKey: { $in: LOOPBACK_KEYS } });
 });
 
 afterAll(async () => {
   // Signups made directly through the service, by the rate-limit and rollback tests, are
   // matched by name rather than by id — those calls never returned one to collect.
   await Promise.all(
-    ['tenants', 'tenantEntitlementVersions', 'taxonomyVersions', 'policyVersions'].map(
+    ['tenants', 'tenantEntitlementVersions', 'taxonomyVersions', 'policyVersions', 'users'].map(
       (collection) => db.collection(collection).deleteMany({ tenantId: { $in: createdTenants } }),
     ),
   );
@@ -184,7 +217,7 @@ afterAll(async () => {
     .toArray();
   const strayIds = strays.map((record) => record['tenantId'] as string);
   await Promise.all(
-    ['tenants', 'tenantEntitlementVersions', 'taxonomyVersions', 'policyVersions'].map(
+    ['tenants', 'tenantEntitlementVersions', 'taxonomyVersions', 'policyVersions', 'users'].map(
       (collection) => db.collection(collection).deleteMany({ tenantId: { $in: strayIds } }),
     ),
   );
@@ -329,18 +362,24 @@ describe('I1 — all four records, or none', () => {
       db,
       app.get(TransactionRunner),
       exploding,
+      app.get(UserService),
+      app.get(AccountService),
       loadConfig(TEST_ENV),
     );
 
     const organisationName = `Rollback Probe ${randomUUID()}`;
+    const email = `${randomUUID()}@example.test`;
     await expect(
       service.signUp(
-        { organisationName, contactEmail: `${randomUUID()}@example.test` },
+        { organisationName, contactEmail: email, password: testPassword() },
         { ip: `10.0.0.${String(Math.floor(Math.random() * 200))}`, correlationId: null },
       ),
     ).rejects.toThrow();
 
     expect(await db.collection('tenants').countDocuments({ name: organisationName })).toBe(0);
+    // The user goes with it. A user left behind would hold the address for ever, and the
+    // customer's second, successful attempt would be refused as a duplicate.
+    expect(await db.collection('users').countDocuments({ email })).toBe(0);
   });
 });
 
@@ -420,14 +459,22 @@ describe('I1 — the open door is bounded', () => {
 
     for (let attempt = 0; attempt < SIGNUP_MAX_PER_WINDOW; attempt += 1) {
       await signups.signUp(
-        { organisationName: 'Bounded Ltd', contactEmail: `${randomUUID()}@example.test` },
+        {
+          organisationName: 'Bounded Ltd',
+          contactEmail: `${randomUUID()}@example.test`,
+          password: testPassword(),
+        },
         { ip, correlationId: null },
       );
     }
 
     await expect(
       signups.signUp(
-        { organisationName: 'One Too Many Ltd', contactEmail: `${randomUUID()}@example.test` },
+        {
+          organisationName: 'One Too Many Ltd',
+          contactEmail: `${randomUUID()}@example.test`,
+          password: testPassword(),
+        },
         { ip, correlationId: null },
       ),
     ).rejects.toMatchObject({ rejection: 'RATE_LIMITED' });

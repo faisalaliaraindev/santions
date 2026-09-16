@@ -14,7 +14,16 @@ import { FetchGateService } from './sources/fetch-gate.service.js';
 import { SourceVersionService } from './sources/source-version.service.js';
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
+import { AccountController } from './auth/account.controller.js';
+import { AccountService } from './auth/account.service.js';
 import { AuthController } from './auth/auth.controller.js';
+import {
+  MailboxNotificationAdapter,
+  NOTIFICATION_PORT,
+  UnconfiguredNotificationAdapter,
+  type NotificationPort,
+} from './auth/notification.port.js';
+import { UserService } from './auth/user.service.js';
 import { AuthGuard, PermissionGuard } from './auth/auth.guard.js';
 import { CsrfGuard } from './auth/csrf.guard.js';
 import { SessionService } from './auth/session.service.js';
@@ -96,6 +105,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
   controllers: [
     HealthController,
     AuthController,
+    AccountController,
     SubjectsController,
     SearchesController,
     // ReservedController must be registered BEFORE AdminController. Nest matches routes in
@@ -134,6 +144,38 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
     },
     { provide: SessionService, useFactory: (db: Db) => new SessionService(db), inject: [MONGO_DB] },
     {
+      provide: UserService,
+      useFactory: (db: Db, t: TransactionRunner, a: AuditService, s: SessionService) =>
+        new UserService(db, t, a, s),
+      inject: [MONGO_DB, TransactionRunner, AuditService, SessionService],
+    },
+    {
+      // The mailbox adapter on a local stack; a refusal in production, because no real transport
+      // has been chosen and a silent no-op would leave every customer unreachable and unverified
+      // while signup looked healthy.
+      provide: NOTIFICATION_PORT,
+      useFactory: (db: Db, config: AppConfig): NotificationPort =>
+        config.isProduction
+          ? new UnconfiguredNotificationAdapter()
+          : new MailboxNotificationAdapter(db),
+      inject: [MONGO_DB, APP_CONFIG],
+    },
+    {
+      provide: MailboxNotificationAdapter,
+      useFactory: (db: Db) => new MailboxNotificationAdapter(db),
+      inject: [MONGO_DB],
+    },
+    {
+      provide: AccountService,
+      useFactory: (
+        users: UserService,
+        entitlements: EntitlementsService,
+        notifications: NotificationPort,
+        config: AppConfig,
+      ) => new AccountService(users, entitlements, notifications, config),
+      inject: [UserService, EntitlementsService, NOTIFICATION_PORT, APP_CONFIG],
+    },
+    {
       provide: NameFrequencyService,
       useFactory: (db: Db) => new NameFrequencyService(db),
       inject: [MONGO_DB],
@@ -159,9 +201,11 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         db: Db,
         transactions: TransactionRunner,
         audit: AuditService,
+        users: UserService,
+        accounts: AccountService,
         config: AppConfig,
-      ) => new SignupService(db, transactions, audit, config),
-      inject: [MONGO_DB, TransactionRunner, AuditService, APP_CONFIG],
+      ) => new SignupService(db, transactions, audit, users, accounts, config),
+      inject: [MONGO_DB, TransactionRunner, AuditService, UserService, AccountService, APP_CONFIG],
     },
     {
       provide: InboxReceiptService,
@@ -647,6 +691,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       provide: StartupService,
       useFactory: (
         sessions: SessionService,
+        users: UserService,
+        mailbox: MailboxNotificationAdapter,
         apiKeys: ApiKeyService,
         signups: SignupService,
         subjects: SubjectsService,
@@ -668,6 +714,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
       ) =>
         new StartupService(
           sessions,
+          users,
+          mailbox,
           apiKeys,
           signups,
           subjects,
@@ -689,6 +737,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
         ),
       inject: [
         SessionService,
+        UserService,
+        MailboxNotificationAdapter,
         ApiKeyService,
         SignupService,
         SubjectsService,

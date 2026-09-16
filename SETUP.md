@@ -244,7 +244,7 @@ A tenant no longer has to be added to `scripts/bootstrap/seed-data.mjs` and boot
 can create itself (D-053, phase I step I1):
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/signup   -H "Content-Type: application/json"   -d '{"organisationName":"Acme Compliance Ltd","contactEmail":"compliance@acme.example"}'
+curl -X POST http://127.0.0.1:3000/v1/signup   -H "Content-Type: application/json"   -d '{"organisationName":"Acme Compliance Ltd","contactEmail":"compliance@acme.example","password":"harbour-lantern-drift-98"}'
 ```
 
 No credential — this is the only route in the service that writes without one. What it does:
@@ -260,10 +260,49 @@ No credential — this is the only route in the service that writes without one.
   immediately.
 - Is **bounded per client address** — the sixth signup in an hour answers `429`, retryably.
 
-**It issues no credential.** Signup creates no user and no key, so a tenant created this way still
-needs its first key from `pnpm key:issue` until steps I2 and I3 (a password, then a session) are
-built. `local:bootstrap` still seeds `tenant-alpha`, `tenant-beta` and `tenant-live` — what it
-stops being is the only way.
+The password creates the tenant's **administrator** in the same transaction (I2). It is stored as
+an argon2id hash and is returned by nothing. It is refused if it is too short (twelve characters),
+a known-bad value, or contains the address or the organisation name — there are deliberately no
+rules about capitals or symbols, which produce `Password1!` and buy very little.
+
+**It still issues no API key.** `local:bootstrap` keeps seeding `tenant-alpha`, `tenant-beta` and
+`tenant-live`; what it stops being is the only way to get a tenant.
+
+---
+
+# Part 3d — Confirming the address, and losing a password
+
+Signup sends a confirmation link. **No mail server runs on this stack**, so the message goes to
+the `outboundEmails` collection — that collection is the inbox (D-058):
+
+```bash
+docker exec erly-adverse-search-mongo-1 mongosh adverse_search --quiet --eval   'db.outboundEmails.find({kind:"EMAIL_VERIFICATION"}).sort({sentAt:-1}).limit(1).toArray()[0].body'
+```
+
+Take the token out of the body and confirm it:
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/signup/verify   -H "Content-Type: application/json" -d '{"token":"<token>"}'
+```
+
+**That call is what unlocks a live key.** It sets `emailVerifiedAt` on the tenant, which is the
+value key issuance reads, so `liveAccessUnlocked: true` in the response is the same answer
+`POST /v1/tenant/api-keys` will now give. Nothing else changes: the entitlement is untouched.
+
+| Route                                     | For                                                     |
+| :---------------------------------------- | :------------------------------------------------------ |
+| `POST /v1/signup/verify`                  | Confirm the address. Single-use token, expires in a day |
+| `POST /v1/signup/resend-verification`     | Send the link again. `202` for **every** address        |
+| `POST /v1/account/password-reset`         | Ask for a reset link. `202` for **every** address       |
+| `POST /v1/account/password-reset/confirm` | Set a new password. Ends every session that user holds  |
+
+The two `202` routes answer identically whether or not the address is a customer, and send
+nothing at all for an address that is already confirmed. That is deliberate: an endpoint that
+answered differently would be a list of this service's customers. Signup is the one route that
+does say an address is taken, and D-057 records why it has to.
+
+Production **refuses to start** with no mail transport configured rather than dropping messages
+into a collection nobody reads — see D-058.
 
 **Behind a load balancer**, set Express's `trust proxy` before exposing this route, or every
 customer shares one bucket of five signups an hour — see D-056.

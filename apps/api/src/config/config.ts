@@ -133,6 +133,17 @@ const rawSchema = z.object({
    * attached to every request this service makes.
    */
   FETCH_CONTACT_URL: optional(z.string().url()),
+
+  /**
+   * Where a customer's browser reaches the control panel, used to build the links in
+   * verification and password-reset emails (I2).
+   *
+   * Optional, and absent it is not defaulted to a guess. An email carrying a link to the wrong
+   * host is worse than one carrying the token and the endpoint to send it to, which is what the
+   * message says instead. Deliberately **not** derived from `CORS_ORIGINS`: that list says who
+   * may call this API, which is a different question from where the customer's interface lives.
+   */
+  PUBLIC_APP_URL: optional(z.string().url()),
 });
 
 export type AppConfig = Readonly<{
@@ -143,6 +154,8 @@ export type AppConfig = Readonly<{
   mongodbUri: string;
   oidc: { issuer: string; clientId: string; clientSecret: string; audience: string };
   session: { secret: string; secure: boolean };
+  /** Base URL for links sent to customers by email. Null when none is configured. */
+  publicAppUrl: string | null;
   corsOrigins: readonly string[];
   jobs: {
     queueUrl: string | null;
@@ -374,6 +387,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       audience: raw.OIDC_AUDIENCE,
     },
     session: { secret: raw.SESSION_SECRET, secure: raw.SESSION_COOKIE_SECURE },
+    publicAppUrl: raw.PUBLIC_APP_URL ?? null,
     corsOrigins: raw.CORS_ORIGINS.split(',')
       .map((o) => o.trim())
       .filter((o) => o !== ''),

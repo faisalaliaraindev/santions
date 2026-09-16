@@ -36,6 +36,9 @@ import type { ClientSession, Collection, Db } from 'mongodb';
 
 import type { SignupInput, SignupResult } from '@erly/adverse-contracts';
 
+import { AccountService } from '../auth/account.service.js';
+import { assessPassword } from '../auth/password.js';
+import { UserError, UserService, type SafeUser } from '../auth/user.service.js';
 import { ApiException } from '../common/api-exception.js';
 import { AuditService } from '../persistence/audit.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';
@@ -44,6 +47,24 @@ import { APP_CONFIG } from '../tokens.js';
 import type { EntitlementVersionRecord, TenantRecord } from './entitlements.service.js';
 import { CREATED_VIA_SIGNUP, decideLiveAccess } from './live-access.js';
 import { buildTenantProvisioning, INITIAL_VERSION } from './provisioning.js';
+
+/**
+ * A keyed digest of the address, never the address.
+ *
+ * A bare SHA-256 of an IPv4 address is not anonymisation — the whole space is four billion values
+ * and a laptop walks it in seconds. Keying the digest with the deployment's own secret makes the
+ * stored value useless to anyone who does not also hold that secret, while still being stable
+ * enough to count against for an hour.
+ *
+ * Exported rather than private so that anything needing to find one origin's rows — an operator
+ * asking why an address is being refused, a test clearing its own bucket without touching
+ * another's — uses this function instead of reimplementing the keying beside it.
+ */
+export function signupOriginKey(secret: string, ip: string | undefined): string {
+  return createHmac('sha256', secret)
+    .update(ip ?? 'unknown')
+    .digest('hex');
+}
 
 /** How long a signup attempt counts against its origin. */
 export const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
@@ -58,12 +79,14 @@ export const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
 export const SIGNUP_MAX_PER_WINDOW = 5;
 
 /** Why signup was refused before anything was written. */
-export type SignupRejection = 'RATE_LIMITED';
+export type SignupRejection = 'RATE_LIMITED' | 'WEAK_PASSWORD' | 'EMAIL_TAKEN';
 
 export class SignupError extends Error {
   constructor(
     readonly rejection: SignupRejection,
     message: string,
+    /** Safe to show the caller. A weak password has to say what was wrong with it. */
+    readonly publicDetail?: string,
   ) {
     super(message);
     this.name = 'SignupError';
@@ -103,6 +126,8 @@ export class SignupService {
     db: Db,
     private readonly transactions: TransactionRunner,
     private readonly audit: AuditService,
+    private readonly users: UserService,
+    private readonly accounts: AccountService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {
     this.tenants = db.collection<TenantRecord>('tenants');
@@ -143,6 +168,22 @@ export class SignupService {
     now: Date = new Date(),
   ): Promise<SignupResult> {
     await this.recordAttempt(context, now);
+
+    // Judged before a single record is written, and before the expensive hash is computed. The
+    // two strings the request already contains are part of the check: a password that is the
+    // organisation name or the email address is one an attacker holding a customer list guesses
+    // first.
+    const verdict = assessPassword(input.password, {
+      email: input.contactEmail,
+      organisationName: input.organisationName,
+    });
+    if (!verdict.ok) {
+      throw new SignupError(
+        'WEAK_PASSWORD',
+        `password rejected: ${verdict.rejection}`,
+        verdict.detail,
+      );
+    }
 
     // Generated. Not derived from the organisation name, which would leak one customer's
     // existence to another who guessed it, and would collide between two firms called the same
@@ -187,41 +228,91 @@ export class SignupService {
       mode,
     };
 
-    await this.transactions.run(
-      async (session: ClientSession) => {
-        await this.tenants.insertOne(tenant, { session });
-        await this.entitlements.insertOne({ ...provisioned.entitlement, mode }, { session });
-        await this.taxonomies.insertOne({ ...provisioned.taxonomy, mode }, { session });
-        await this.policies.insertOne({ ...provisioned.policy, mode }, { session });
+    let adminUser: SafeUser;
 
-        // The tenant's first audit entry, sequence 1, inside the same transaction as the
-        // records it describes. An audit entry that can fail separately from the action it
-        // records is an action that can happen unrecorded.
-        await this.audit.append(
-          {
-            tenantId,
-            actor: { type: 'SYSTEM', subject: 'signup', clientId: null },
-            action: 'tenant:signup',
-            target: { type: 'TENANT', id: tenantId, version: INITIAL_VERSION },
-            // SEC-05: the minimal permitted fact. The address is on the tenant record, which
-            // has a retention policy; copying it into an append-only chain would not.
-            reason: 'Self-service signup',
-            correlationId: context.correlationId,
-            result: 'ALLOWED',
-            now,
-          },
-          session,
+    try {
+      adminUser = await this.transactions.run(
+        async (session: ClientSession) => {
+          await this.tenants.insertOne(tenant, { session });
+          await this.entitlements.insertOne({ ...provisioned.entitlement, mode }, { session });
+          await this.taxonomies.insertOne({ ...provisioned.taxonomy, mode }, { session });
+          await this.policies.insertOne({ ...provisioned.policy, mode }, { session });
+
+          // The administrator, in the same transaction as the tenant they administer (I2). A
+          // tenant with no user is a tenant nobody can sign in to, and creating it in a second
+          // call is creating something that can fail on its own.
+          const user = await this.users.createInTransaction(
+            {
+              tenantId,
+              email: input.contactEmail,
+              password: input.password,
+              // The tenant's first user administers it: they have to be able to issue the first
+              // key and manage the ones after it. Narrower roles are theirs to hand out.
+              roles: ['tenant_admin'],
+              displayName: input.organisationName,
+              now,
+            },
+            session,
+          );
+
+          // The tenant's first audit entry, sequence 1, inside the same transaction as the
+          // records it describes. An audit entry that can fail separately from the action it
+          // records is an action that can happen unrecorded.
+          await this.audit.append(
+            {
+              tenantId,
+              actor: { type: 'SYSTEM', subject: 'signup', clientId: null },
+              action: 'tenant:signup',
+              target: { type: 'TENANT', id: tenantId, version: INITIAL_VERSION },
+              // SEC-05: the minimal permitted fact. The address is on the tenant record, which
+              // has a retention policy; copying it into an append-only chain would not.
+              reason: 'Self-service signup',
+              correlationId: context.correlationId,
+              result: 'ALLOWED',
+              now,
+            },
+            session,
+          );
+
+          return user;
+        },
+        { name: 'tenancy.signup' },
+      );
+    } catch (error) {
+      // The address is the sign-in identity, so it has to be unique — and signup is the one
+      // route that cannot hide that fact, because it must answer with a tenant id. D-057 records
+      // the trade and its mitigations: every *other* account route answers identically for a
+      // known and an unknown address.
+      if (error instanceof UserError && error.reason === 'EMAIL_TAKEN') {
+        throw new SignupError(
+          'EMAIL_TAKEN',
+          error.message,
+          'An account already exists for this email address. Sign in instead, or reset the ' +
+            'password if it has been lost.',
         );
-      },
-      { name: 'tenancy.signup' },
-    );
+      }
+      throw error;
+    }
 
-    this.logger.log(`Tenant ${tenantId} signed up (${input.organisationName}).`);
+    this.logger.log(
+      `Tenant ${tenantId} signed up (${input.organisationName}), admin ${adminUser.userId}.`,
+    );
 
     const liveAccess = decideLiveAccess({ tenant, entitlement: provisioned.entitlement });
 
+    // After the commit, never inside it. The transaction body may run more than once — that is
+    // what the retry policy in `TransactionRunner` does on a write conflict — and an email sent
+    // from inside it would be sent again on each attempt. Section 6.3 puts every side effect
+    // outside the boundary for exactly this reason.
+    const verification = await this.accounts.sendVerification(
+      adminUser,
+      input.organisationName,
+      now,
+    );
+
     return {
       tenantId,
+      adminUserId: adminUser.userId,
       organisationName: tenant.name,
       contactEmail: input.contactEmail,
       createdAt: now.toISOString(),
@@ -237,8 +328,16 @@ export class SignupService {
         blockedBy: liveAccess.blockedBy,
         detail: liveAccess.detail,
       },
+      verificationEmail: {
+        sent: verification.sent,
+        sentTo: input.contactEmail,
+        detail: verification.detail,
+      },
       nextSteps: [
-        'Sign in and issue a sandbox API key: POST /v1/tenant/api-keys.',
+        verification.sent
+          ? 'Confirm the email address using the link just sent.'
+          : 'Ask for the confirmation link again: POST /v1/signup/resend-verification.',
+        'Issue a sandbox API key: POST /v1/tenant/api-keys. It works before the address is confirmed.',
         'A key secret is shown once, at creation, and cannot be recovered afterwards.',
         liveAccess.granted
           ? 'Live keys may be issued for this tenant now.'
@@ -272,32 +371,48 @@ export class SignupService {
     }
   }
 
-  /**
-   * A keyed digest of the address, never the address.
-   *
-   * A bare SHA-256 of an IPv4 address is not anonymisation — the whole space is four billion
-   * values and a laptop walks it in seconds. Keying the digest with the deployment's own secret
-   * makes the stored value useless to anyone who does not also hold that secret, while still
-   * being stable enough to count against for an hour.
-   */
   private originKey(ip: string | undefined): string {
-    return createHmac('sha256', this.config.session.secret)
-      .update(ip ?? 'unknown')
-      .digest('hex');
+    return signupOriginKey(this.config.session.secret, ip);
   }
 }
 
 /**
- * The 429 a caller sees. Separated from the service so the service stays free of HTTP.
+ * The refusal a caller sees, from the reason signup stopped.
  *
- * `RATE_LIMITED` is the only code in the contract marked retryable, and that is the correct
- * promise here: the same request, unchanged, succeeds once the window has passed.
+ * Kept out of the service so the service stays free of HTTP, and kept in one place so the three
+ * refusals cannot drift into three different shapes.
  */
 export function signupRejectionToApiException(error: SignupError): ApiException {
-  return new ApiException(
-    'RATE_LIMITED',
-    'Too many signups from this address. Try again later, or contact the provider if you need ' +
-      'several tenants.',
-    { internalDetail: error.message },
-  );
+  switch (error.rejection) {
+    case 'RATE_LIMITED':
+      // The only code in the contract marked retryable, and that is the correct promise here:
+      // the same request, unchanged, succeeds once the window has passed.
+      return new ApiException(
+        'RATE_LIMITED',
+        'Too many signups from this address. Try again later, or contact the provider if you ' +
+          'need several tenants.',
+        { internalDetail: error.message },
+      );
+
+    case 'WEAK_PASSWORD':
+      // Says what was wrong. "Invalid password" with no reason is a form somebody submits four
+      // more times before giving up, and the rule they broke is not a secret.
+      return new ApiException(
+        'VALIDATION_FAILED',
+        error.publicDetail ?? 'That password cannot be used.',
+        {
+          internalDetail: error.message,
+          // The path, never the value. A rejected password must not be echoed anywhere — not in
+          // a response, not in a log, not in an error report somebody forwards.
+          details: [{ path: 'password', message: error.publicDetail ?? 'Refused.' }],
+        },
+      );
+
+    case 'EMAIL_TAKEN':
+      return new ApiException(
+        'EMAIL_ALREADY_REGISTERED',
+        error.publicDetail ?? 'An account already exists for this email address.',
+        { internalDetail: error.message },
+      );
+  }
 }
