@@ -27,6 +27,50 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (fifth) — Phase I planned: tenant self-service onboarding
+
+**No code. This entry exists so the next session starts in the right place.**
+
+**Did.** Wrote [`phase-i-tenant-onboarding.md`](./phase-i-tenant-onboarding.md) — the brief for
+replacing seed-file tenant provisioning with self-service signup. Raised **D-051**, **D-052** and
+**D-053** in `open-decisions.md`.
+
+**The target, as instructed.** A customer signs up through the API, sets a password, logs in, gets
+a session, and issues their own **sandbox and live** keys with nobody at Erly involved. Keys can
+be disabled and re-enabled; newly created keys are active immediately; sandbox and live are
+separate credentials. Metering and payment gating come later — both key kinds are available now.
+
+**Start with I4, not I1.** Disable/enable is small, self-contained, useful on its own, and proves
+the key-state change before any signup machinery depends on it.
+
+**Three things the brief flags rather than assumes.**
+
+- **D-051 — where the password lives.** Recommendation: **Keycloak**. This service has never
+  stored a password; human identity is OIDC end to end and the panel holds no secrets. Building
+  our own store means owning reset, lockout, MFA and breach response in a service whose security
+  story is that it holds no credentials.
+- **D-052 — a self-signed-up tenant with a live key drives real traffic to real publishers under
+  _our_ identity.** Our contact URL is in their logs, so a complaint arrives at us; the SEC's free
+  tier is 120 requests an hour for the **whole service** and one search spends about 41 of them;
+  and every first-contact approval was given on an assumption about use that open signup changes.
+  The brief builds it as instructed and proposes two cheap mitigations — email verification before
+  a live key, and a per-tenant live budget under the shared one. Neither blocks a real customer.
+- **D-053 — open signup or invite-only.** Same endpoint either way, very different abuse surface,
+  and retrofitting the check later means retrofitting it around tenants that already exist.
+
+**Do not conflate disable and revoke.** Revoke is one-way on purpose: a leaked key must be
+permanently killable. Disable must be a separate, reversible field, or either a leaked key can be
+switched back on or a routine pause is irreversible.
+
+**Next session should:** read the brief, get a decision on **D-053** (ten minutes, and it shapes
+I1), then build **I4** — `disabledAt` distinct from `revokedAt`, refused by `verify()` the same
+way, and visible as its own status in the listing.
+
+**Decisions touched:** D-051, D-052, D-053 opened. D-007 remains only half superseded — D-050 took
+key issuance; plans, metering and billing are still deferred.
+
+---
+
 ## 2026-09-16 (fourth) — Live search works end to end; tenant self-service keys (D-050)
 
 **Two things happened this session: the live path started returning real findings, and four
