@@ -39,13 +39,4 @@ export class ReservedController {
       'Tenant usage reporting is deferred (decision D-007).',
     );
   }
-
-  @All('tenant/api-keys')
-  @RequirePermission('tenant:manage')
-  ownApiKeys(): never {
-    throw new ApiException(
-      'NOT_IMPLEMENTED',
-      'Tenant self-service key management is deferred. Keys are provider-managed in this phase (decision D-007).',
-    );
-  }
 }

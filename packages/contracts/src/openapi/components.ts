@@ -12,6 +12,13 @@
  */
 
 import { z } from 'zod';
+
+import {
+  apiKeySummarySchema,
+  createApiKeySchema,
+  issuedApiKeySchema,
+  revokeApiKeySchema,
+} from '../tenancy/api-keys.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { apiErrorSchema, ERROR_CODES, ERROR_STATUS, type ErrorCode } from '../errors/errors.js';
@@ -87,6 +94,10 @@ export const COMPONENT_SCHEMAS = {
   CompanyIdentifier: companyIdentifierSchema,
   ScreeningPurpose: screeningPurposeSchema,
   NameFrequencyPrior: nameFrequencyPriorSchema,
+  CreateApiKeyRequest: createApiKeySchema,
+  IssuedApiKey: issuedApiKeySchema,
+  ApiKeySummary: apiKeySummarySchema,
+  RevokeApiKeyRequest: revokeApiKeySchema,
   CreateSubjectRequest: createSubjectSchema,
   SubjectVersion: subjectVersionSchema,
 

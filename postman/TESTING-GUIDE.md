@@ -168,6 +168,23 @@ can watch source health cannot thereby read a customer's findings.
 
 ---
 
+## Stage 6b — Managing your own API keys (folder 12)
+
+Self-service issuance, decision **D-050**. Needs `apikey:manage`, which `tenant_admin` holds.
+
+| Request                              | What it proves                                        |
+| :----------------------------------- | :---------------------------------------------------- |
+| `POST /v1/tenant/api-keys`           | A tenant issues its own key. **Secret returned once** |
+| `GET /v1/tenant/api-keys`            | The listing carries no secret and no hash of one      |
+| Escalation attempt                   | A key cannot carry roles the caller does not hold     |
+| Live key from a sandbox credential   | Entitlement is sold, not granted by asking            |
+| `DELETE /v1/tenant/api-keys/{keyId}` | Revocation is immediate, and the reason is audited    |
+
+The two refusals are worth running once: they are the difference between self-service and
+self-promotion.
+
+---
+
 ## Stage 7 — Taking a real source live (folder 11)
 
 This is the only part that reaches outside the machine, and two steps are not developer actions.

@@ -24,6 +24,7 @@ import { buildOpenApiDocument } from '@erly/adverse-contracts';
 import { AdminController } from '../src/admin/admin.controller.js';
 import { AuthController } from '../src/auth/auth.controller.js';
 import { ReservedController } from '../src/common/reserved.controller.js';
+import { TenantApiKeysController } from '../src/tenancy/tenant-api-keys.controller.js';
 import { HealthController } from '../src/health/health.controller.js';
 import { SearchesController } from '../src/searches/searches.controller.js';
 import { SubjectsController } from '../src/subjects/subjects.controller.js';
@@ -39,6 +40,7 @@ const CONTROLLERS = [
   SearchesController,
   ReservedController,
   AdminController,
+  TenantApiKeysController,
 ];
 
 interface Route {

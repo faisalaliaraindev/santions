@@ -979,11 +979,98 @@ function buildPaths(): Record<string, SchemaObject> {
       'reservedTenantUsage',
       'Tenant usage reporting is deferred by decision D-007.',
     ),
-    ...reservedPath(
-      '/v1/tenant/api-keys',
-      'reservedTenantApiKeys',
-      'Tenant self-service key management is deferred by decision D-007. Keys are provider-managed in this phase.',
-    ),
+    '/v1/tenant/api-keys': {
+      post: {
+        tags: ['Tenant'],
+        operationId: 'createApiKey',
+        summary: 'Issue an API key for your own tenant',
+        description:
+          'Self-service issuance (decision **D-050**, replacing the deferral in D-007).\n\n' +
+          'The `secret` in the response is shown **once** and is not recoverable: only a hash ' +
+          'is stored, so no endpoint can return it again and no support process can recover it.\n\n' +
+          'Three limits apply, and each is a rule rather than an oversight:\n\n' +
+          '- a key can carry only roles **you already hold**;\n' +
+          '- the tenant comes from your credential and can never be sent in the body;\n' +
+          '- an `environment: "live"` key requires your tenant to be entitled to live **and** ' +
+          'your own credential to be live. Entitlement is sold by the provider; self-service ' +
+          'issues within what was sold.\n\n' +
+          'Requires the `apikey:manage` permission, which `tenant_admin` holds.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('CreateApiKeyRequest') } },
+        },
+        responses: {
+          '201': {
+            description: 'The key, including the only copy of its secret you will ever receive.',
+            content: { 'application/json': { schema: ref('IssuedApiKey') } },
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '422': errorRef(422),
+        },
+      },
+      get: {
+        tags: ['Tenant'],
+        operationId: 'listApiKeys',
+        summary: "List your tenant's API keys",
+        description:
+          'Every key this tenant holds, with no secret and no hash of one. `status` is derived ' +
+          'at read time rather than stored, so a key whose expiry passed while nothing was ' +
+          'running still reads as `EXPIRED`.',
+        responses: {
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '200': {
+            description: 'The keys.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['items'],
+                  properties: { items: { type: 'array', items: ref('ApiKeySummary') } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/v1/tenant/api-keys/{keyId}': {
+      delete: {
+        tags: ['Tenant'],
+        operationId: 'revokeApiKey',
+        summary: 'Revoke one of your keys',
+        description:
+          'Immediate and irreversible. The reason is mandatory and is written to the audit ' +
+          'trail.\n\nA key belonging to another tenant answers **404**, not 403 — the second ' +
+          'would confirm that it exists.',
+        parameters: [{ name: 'keyId', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: ref('RevokeApiKeyRequest') } },
+        },
+        responses: {
+          '200': {
+            description: 'Revoked.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['keyId', 'revoked'],
+                  properties: {
+                    keyId: { type: 'string' },
+                    revoked: { type: 'boolean', enum: [true] },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '404': errorRef(404),
+        },
+      },
+    },
   };
 }
 

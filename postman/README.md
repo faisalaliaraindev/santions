@@ -47,9 +47,10 @@ _below_ its roles and never widen it, so a key with no scopes is refused on ever
 route — `POST /v1/searches` needs `search:write`, the admin routes need `admin:read` /
 `admin:write`. Pass `--scope` only when you want a key that can do less than its role allows.
 
-> `POST /v1/tenant/api-keys` exists and returns **501**. That is not a bug. Decision **D-007**
-> defers the commercial self-service layer, so keys are provider-managed in this phase, and a
-> script an operator runs is what provider-managed means.
+> **A tenant issues its own keys** through `POST /v1/tenant/api-keys` (decision **D-050**).
+> This used to return 501 under D-007; it no longer does. The script above is still how the
+> _first_ key for a new tenant is issued, because a tenant with no key cannot authenticate to
+> ask for one. See folder **12 — Tenant: your own API keys**.
 
 ## 4. Import into Postman
 

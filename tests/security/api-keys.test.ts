@@ -441,3 +441,166 @@ describe('T62 — a sandbox key cannot reach live data', () => {
     expect(search.body.code).toBe('FORBIDDEN');
   });
 });
+
+describe('self-service key issuance (D-050) cannot become a way to get more', () => {
+  /** A tenant_admin key, which is what a tenant would actually hold to manage its own keys. */
+  async function tenantAdminKey(
+    environment: KeyEnvironment = 'sandbox',
+    tenantId = `tenant-${randomUUID()}`,
+  ): Promise<IssuedApiKey & { tenantId: string }> {
+    const issued = await apiKeys.create({
+      tenantId,
+      environment,
+      label: 'tenant admin, self-service tests',
+      roles: ['tenant_admin'],
+      scopes: ['search:read', 'admin:read', 'admin:write'],
+      createdBy: 'operator@erly.test',
+      expiresAt: null,
+    });
+    return { ...issued, tenantId };
+  }
+
+  it('issues a key, and returns the secret exactly once', async () => {
+    const admin = await tenantAdminKey();
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'issued by the tenant itself', roles: ['tenant_admin'] })
+      .expect(201);
+
+    expect(created.body.secret).toMatch(/^erly_sandbox_/);
+    expect(created.body.warning).toContain('shown once');
+
+    // The listing is the only other place a key appears, and it must not carry the secret — nor
+    // a hash of it, which is just a slower way of handing the same thing over.
+    const listed = await request(app.getHttpServer())
+      .get('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .expect(200);
+
+    const mine = listed.body.items.find(
+      (item: { keyId: string }) => item.keyId === created.body.keyId,
+    );
+    expect(mine).toBeDefined();
+    expect(mine.status).toBe('ACTIVE');
+    expect(JSON.stringify(listed.body)).not.toContain(created.body.secret);
+    expect(JSON.stringify(listed.body)).not.toContain('secretHash');
+  });
+
+  it('refuses to mint a role the caller does not hold', async () => {
+    // The whole point. Without this a tenant_admin is a path to platform_admin and the role
+    // model is decoration.
+    const admin = await tenantAdminKey();
+
+    const response = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'escalation attempt', roles: ['platform_admin'] })
+      .expect(403);
+
+    expect(response.body.code).toBe('FORBIDDEN');
+    expect(response.body.message).toContain('platform_admin');
+  });
+
+  it('refuses a live key from a sandbox credential', async () => {
+    const admin = await tenantAdminKey('sandbox');
+
+    const response = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'live from sandbox', roles: ['tenant_admin'], environment: 'live' })
+      .expect(403);
+
+    expect(response.body.code).toBe('SANDBOX_CANNOT_ACCESS_LIVE');
+  });
+
+  it('refuses a live key when the tenant is not entitled to live', async () => {
+    // A live *credential* is not enough. Entitlement is sold by the provider, and self-service
+    // issues within what was sold rather than granting it.
+    const admin = await tenantAdminKey('live');
+
+    const response = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'live, unentitled tenant', roles: ['tenant_admin'], environment: 'live' })
+      .expect(403);
+
+    // Either entitlement denial is correct and which one depends on how far the tenant got:
+    // this tenant has no entitlement record at all, so the capability check refuses before the
+    // environment check is reached. What matters is that a live credential alone did not buy
+    // live access.
+    expect(['SANDBOX_CANNOT_ACCESS_LIVE', 'ADVERSE_MEDIA_NOT_INCLUDED_IN_PLAN']).toContain(
+      response.body.code,
+    );
+  });
+
+  it('refuses a scope the requested roles could not use', async () => {
+    const admin = await tenantAdminKey();
+
+    // tenant_admin does not grant search:write, so a key claiming it would be wider than the
+    // role it was issued under.
+    const response = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({
+        label: 'scope beyond role',
+        roles: ['tenant_admin'],
+        scopes: ['search:write'],
+      })
+      .expect(422);
+
+    expect(response.body.code).toBe('INVALID_SCOPE');
+  });
+
+  it("will not revoke another tenant's key, and does not confirm it exists", async () => {
+    const admin = await tenantAdminKey();
+    const somebodyElse = await issue();
+
+    const response = await request(app.getHttpServer())
+      .delete(`/v1/tenant/api-keys/${somebodyElse.keyId}`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'not mine to revoke' })
+      .expect(404);
+
+    // NOT_FOUND rather than FORBIDDEN: the second confirms the key exists.
+    expect(response.body.code).toBe('NOT_FOUND');
+
+    // And it really is untouched.
+    const principal = await apiKeys.verify(somebodyElse.secret);
+    expect(principal.tenantId).toBe(somebodyElse.tenantId);
+  });
+
+  it('revokes its own key immediately, and the key stops working', async () => {
+    const admin = await tenantAdminKey();
+
+    const created = await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ label: 'to be revoked', roles: ['tenant_admin'] })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/v1/tenant/api-keys/${created.body.keyId}`)
+      .set('Authorization', `ApiKey ${admin.secret}`)
+      .send({ reason: 'rotated during the security suite' })
+      .expect(200);
+
+    await expect(apiKeys.verify(created.body.secret)).rejects.toThrow(ApiKeyError);
+  });
+
+  it('refuses an anonymous caller, and one without the permission', async () => {
+    await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .send({ label: 'nobody at all', roles: ['analyst'] })
+      .expect(401);
+
+    // An analyst key has no apikey:manage. Issuing keys is not part of running searches.
+    const analyst = await issue();
+    await request(app.getHttpServer())
+      .post('/v1/tenant/api-keys')
+      .set('Authorization', `ApiKey ${analyst.secret}`)
+      .send({ label: 'analyst trying to issue', roles: ['analyst'] })
+      .expect(403);
+  });
+});

@@ -170,6 +170,41 @@ an `example` host that resolves nowhere.
 
 ---
 
+# Part 3b — Issuing your own keys, without an operator
+
+Once you hold a key with the `apikey:manage` permission — which `tenant_admin` has — your tenant
+manages its own credentials. No provider involvement, and nothing to wait for.
+
+| Request                              | Does                                    |
+| :----------------------------------- | :-------------------------------------- |
+| `POST /v1/tenant/api-keys`           | Issue a key. **Secret returned once**   |
+| `GET /v1/tenant/api-keys`            | List your keys. No secrets, no hashes   |
+| `DELETE /v1/tenant/api-keys/{keyId}` | Revoke one. Immediate, reason mandatory |
+
+Postman folder **`12 — Tenant: your own API keys`** drives all three, plus the two refusals worth
+seeing once.
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/tenant/api-keys \
+  -H "Authorization: ApiKey <your tenant_admin key>" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"ci pipeline","roles":["analyst"],"expiresInDays":90}'
+```
+
+**Three things it will not do**, each deliberate:
+
+- **It will not give you roles you do not already hold.** Asking for `platform_admin` from a
+  `tenant_admin` key is refused, naming the role. Otherwise the weakest admin credential is a
+  path to every role in the system.
+- **It will not cross a tenant boundary.** The tenant comes from your credential; there is no
+  field in the body to put one in. Revoking another tenant's key answers `404`, not `403` — the
+  second would confirm it exists.
+- **It will not sell you live access.** An `environment: "live"` key needs your tenant to be
+  entitled to live **and** your own credential to be live. Entitlement is a commercial act by the
+  provider; self-service issues within what was sold.
+
+---
+
 # Part 4 — The frontend (control panel)
 
 ```bash

@@ -13,6 +13,7 @@ export * from './searches/associations.js';
 export * from './searches/findings.js';
 export * from './admin/admin.js';
 export * from './auth/session.js';
+export * from './tenancy/api-keys.js';
 export * from './common/pagination.js';
 export * from './common/health.js';
 export * from './openapi/components.js';

@@ -27,6 +27,109 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (fourth) — Live search works end to end; tenant self-service keys (D-050)
+
+**Two things happened this session: the live path started returning real findings, and four
+defects were found by running it rather than reading it.**
+
+**Did.**
+
+1. **The live path works.** A search against the SEC litigation-releases feed now returns a real
+   finding — real request, real feed, real document fetched, extracted, banded. Getting there
+   needed a live key, a tenant entitled to live (`tenant-live`, seeded), the SEC source restored
+   and activated, and `pnpm dev:live`.
+
+2. **Four defects, each found only by running it.**
+   - `GET /v1/admin/sources`, `/taxonomy` and `/policies` returned **500** on any bootstrapped
+     stack. `toRecord` cast four timestamp fields straight to `Date`; lifecycle-written records
+     store `Date`s and `local-bootstrap` stores ISO **strings**. Normalised at the read boundary.
+   - **A successful run reported `FAILED`.** `cascadeCoverageOutcomes` emitted only _gaps_, so a
+     rung that answered emptily recorded nothing, and `aggregateRun` read that gap list as a
+     census. A run that polled a publisher, got a valid response and found no match was filed as
+     a failure. Every rung walked is now named; an `EMPTY` answer records `COMPLETED`.
+   - **Every live SEC search returned a false "nothing found".** The planner writes the subject as
+     a quoted phrase and appends conduct terms bare (`"Jon P. Kipp" fraud`). Those bare terms are
+     hints addressed to a _search engine_; applied as filters against the publisher's own list —
+     items titled with just the defendant's name — they discarded the very entry being looked
+     for. This was the worst shape a bug here takes: confident, well-formed, entirely wrong.
+     Fixed-feed matching now uses the quoted phrases.
+   - `POST /v1/searches` accepted **any two characters** as a jurisdiction. `EU`, `ZZ` and `99`
+     all returned 202, consumed a job, and surfaced as a run that `FAILED` on polling.
+
+3. **FI-20 written and proven** (`tests/integration/source-halt.test.ts`, six tests): the
+   automatic halt and its audit entry commit together, neither lands when the audit write fails,
+   and the halt is re-derived from the next identical failure. Verified by planting the
+   violation.
+
+4. **Tenant self-service API keys — D-050, superseding the key half of D-007.**
+   `POST`/`GET`/`DELETE /v1/tenant/api-keys` are implemented; the `501` stub is gone. A tenant
+   holding `apikey:manage` (which `tenant_admin` has) issues, lists and revokes its own keys.
+
+   Three limits, each with a test that fails if removed: **no escalation** (a key carries only
+   roles the caller already holds), **no crossing a tenant boundary** (tenant comes from the
+   principal; revoking another tenant's key answers 404, not 403), and **no buying live access**
+   (a live key needs the tenant entitled to live _and_ the calling credential to be live —
+   entitlement is sold by the provider, self-service issues within what was sold).
+
+   `scopesForRoles` moved into `packages/domain` because the operator script and the endpoint
+   both derive it, and the copy that drifted would be the one issuing keys quietly wider than
+   intended.
+
+5. **Fixtures, registry and Postman.** Five more demo people (an acquittal that survives, a
+   conviction corroborated by two publishers, a lone early-stage report, an English case). Rungs
+   2 and 4 seeded `PROPOSED` and inert. Separate sandbox and live Postman environments, with
+   `environment` now a variable. `SETUP.md`, `TESTING-GUIDE.md`, `ADVERSE-SEARCH-WALKTHROUGH.md`
+   and `INTEGRATOR-GUIDE.md` written.
+
+**Verified.**
+
+```
+pnpm verify:local   lint · typecheck · unit · invariants · evaluation ·
+                    integration · security · e2e (API)      all ok
+                    end-to-end (browser)                     n/i — G8, the intended failure
+security 26 (was 18)      unit 895+      integration 214
+newman: folder 12, 8 assertions, 0 failures
+```
+
+Every fix was proven by **reverting it and watching the test fail**, not by watching it pass.
+
+The live run that produced a finding:
+`SUCCEEDED / INCOMPLETE / mode LIVE`, one finding, `AMBIGUOUS | MARKET_ABUSE | ALLEGATION`.
+
+**Found.**
+
+- **A `FIXED_FEED` is fetched once per planned query** — about 41 identical requests per run,
+  retrieving the same bytes each time and matching each copy against a different query. That
+  exhausts the SEC's 120/hour budget in two or three searches, and the symptom is `PARTIAL` /
+  `UNRESOLVED` with a rejected lead at stage `FETCH`. It should be fetched once per run and
+  matched many times. **This is the most valuable thing left on the live path.**
+- **A stale worker silently breaks everything.** The source ladder is assembled at process start,
+  so any registry change while it runs is not picked up — and the symptom is not an error, it is
+  every search returning `FAILED` with every rung reporting "no approved source".
+- `findingsState` says `NO_MATCHES_FOUND` while `findings` holds one entry, because `AMBIGUOUS`
+  does not meet the "supported" bar. Defensible, contradictory to read, and an integrator will
+  trip on it. Not changed — it is a product decision.
+- `pnpm dev` and the test suites consume the same SQS queue and steal each other's jobs.
+
+**Left half-done.** Nothing. The fixed-feed fetch above is a known gap, not a half-built thing.
+
+**Next session should:** fix the fixed-feed-per-query fetch, then **F3 — the eight FR-07
+validation rules** in `packages/domain`, pure, from scratch. `grep validateAssertion` still
+returns nothing.
+
+**Decisions touched.**
+
+- **D-050 recorded and implemented** — tenant self-service keys, superseding the key-management
+  half of D-007. The rest of D-007 stands: plans, usage metering and billing remain deferred and
+  still answer 501.
+- **The SEC approval was not genuine four-eyes.** It was executed by an automated session using
+  the approver credential on the project owner's explicit instruction, and that is written into
+  the audit reason verbatim so the trail is not read as independent review. If anything real
+  depends on this source, redo the approval with a second person.
+- **D6** remains the open decision sitting in the path of any further live source.
+
+---
+
 ## 2026-09-16 (third) — Postman is testable end to end with six people; four defects found by running it
 
 **Did.** Ran the collection instead of reading it, which found four real defects, then made the

@@ -27,12 +27,29 @@ another tenant, and you cannot read another tenant's searches — there is a req
 
 ### Getting a key
 
-Keys are **provider-managed** in this phase (decision D-007). `POST /v1/tenant/api-keys` exists and
-deliberately returns `501` — self-service key issuance is not built. You ask the provider, who runs:
+**Your first key comes from the provider.** A tenant with no key cannot authenticate to ask for
+one, so the provider issues it:
 
 ```bash
-pnpm key:issue --role analyst --label "Zquence production"
+pnpm key:issue --role tenant_admin --label "Zquence production"
 ```
+
+**Every key after that, you issue yourself** (decision **D-050**). If that first key carries
+`apikey:manage` — which `tenant_admin` has — your platform mints and rotates its own credentials
+with no provider involvement:
+
+```http
+POST /v1/tenant/api-keys      issue    (secret returned once)
+GET  /v1/tenant/api-keys      list     (no secrets, ever)
+DELETE /v1/tenant/api-keys/{keyId}   revoke   (reason mandatory)
+```
+
+Ask for `tenant_admin` on that first key, or you will be back to the provider for the second.
+
+Three limits, each a rule rather than an oversight: a key carries only roles **you already hold**;
+the tenant comes from your credential and can never be sent in the body; and a `live` key needs
+your tenant entitled to live **and** your own credential to be live — entitlement is sold by the
+provider, and self-service issues within what was sold.
 
 The secret is shown **once** and only a hash is stored. There is no recovery path; if you lose it,
 you get a new one. Store it as a secret on your side, never in source control.

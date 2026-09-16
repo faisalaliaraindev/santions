@@ -913,26 +913,91 @@
       }
     },
     "/v1/tenant/api-keys": {
-      "get": {
-        "operationId": "reservedTenantApiKeysGet",
-        "tags": ["reserved"],
-        "summary": "Reserved — not implemented",
-        "description": "Tenant self-service key management is deferred by decision D-007. Keys are provider-managed in this phase.",
+      "post": {
+        "tags": ["Tenant"],
+        "operationId": "createApiKey",
+        "summary": "Issue an API key for your own tenant",
+        "description": "Self-service issuance (decision **D-050**, replacing the deferral in D-007).\n\nThe `secret` in the response is shown **once** and is not recoverable: only a hash is stored, so no endpoint can return it again and no support process can recover it.\n\nThree limits apply, and each is a rule rather than an oversight:\n\n- a key can carry only roles **you already hold**;\n- the tenant comes from your credential and can never be sent in the body;\n- an `environment: \"live\"` key requires your tenant to be entitled to live **and** your own credential to be live. Entitlement is sold by the provider; self-service issues within what was sold.\n\nRequires the `apikey:manage` permission, which `tenant_admin` holds.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateApiKeyRequest" } }
+          }
+        },
         "responses": {
+          "201": {
+            "description": "The key, including the only copy of its secret you will ever receive.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/IssuedApiKey" } }
+            }
+          },
           "401": { "$ref": "#/components/responses/Error401" },
           "403": { "$ref": "#/components/responses/Error403" },
-          "501": { "$ref": "#/components/responses/Error501" }
+          "422": { "$ref": "#/components/responses/Error422" }
         }
       },
-      "post": {
-        "operationId": "reservedTenantApiKeysPost",
-        "tags": ["reserved"],
-        "summary": "Reserved — not implemented",
-        "description": "Tenant self-service key management is deferred by decision D-007. Keys are provider-managed in this phase.",
+      "get": {
+        "tags": ["Tenant"],
+        "operationId": "listApiKeys",
+        "summary": "List your tenant's API keys",
+        "description": "Every key this tenant holds, with no secret and no hash of one. `status` is derived at read time rather than stored, so a key whose expiry passed while nothing was running still reads as `EXPIRED`.",
         "responses": {
+          "200": {
+            "description": "The keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ApiKeySummary" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" }
+        }
+      }
+    },
+    "/v1/tenant/api-keys/{keyId}": {
+      "delete": {
+        "tags": ["Tenant"],
+        "operationId": "revokeApiKey",
+        "summary": "Revoke one of your keys",
+        "description": "Immediate and irreversible. The reason is mandatory and is written to the audit trail.\n\nA key belonging to another tenant answers **404**, not 403 — the second would confirm that it exists.",
+        "parameters": [
+          { "name": "keyId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/RevokeApiKeyRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["keyId", "revoked"],
+                  "properties": {
+                    "keyId": { "type": "string" },
+                    "revoked": { "type": "boolean", "enum": [true] }
+                  }
+                }
+              }
+            }
+          },
           "401": { "$ref": "#/components/responses/Error401" },
           "403": { "$ref": "#/components/responses/Error403" },
-          "501": { "$ref": "#/components/responses/Error501" }
+          "404": { "$ref": "#/components/responses/Error404" }
         }
       }
     }
@@ -1056,6 +1121,156 @@
           "sourceRef": { "type": "string", "minLength": 1 }
         },
         "required": ["decile", "population", "sourceRef"],
+        "additionalProperties": false
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string", "minLength": 3, "maxLength": 120 },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "viewer",
+                "analyst",
+                "reviewer",
+                "tenant_admin",
+                "source_admin",
+                "taxonomy_admin",
+                "auditor",
+                "platform_operator",
+                "platform_admin"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 9
+          },
+          "environment": { "type": "string", "enum": ["sandbox", "live"], "default": "sandbox" },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["search:read", "search:write", "admin:read", "admin:write"]
+            },
+            "minItems": 1,
+            "maxItems": 4
+          },
+          "expiresInDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "nullable": true,
+            "default": null
+          }
+        },
+        "required": ["label", "roles"],
+        "additionalProperties": false
+      },
+      "IssuedApiKey": {
+        "type": "object",
+        "properties": {
+          "keyId": { "type": "string" },
+          "secret": { "type": "string" },
+          "environment": {
+            "$ref": "#/components/schemas/CreateApiKeyRequest/properties/environment"
+          },
+          "label": { "type": "string" },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "viewer",
+                "analyst",
+                "reviewer",
+                "tenant_admin",
+                "source_admin",
+                "taxonomy_admin",
+                "auditor",
+                "platform_operator",
+                "platform_admin"
+              ]
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CreateApiKeyRequest/properties/scopes/items" }
+          },
+          "createdAt": { "type": "string" },
+          "expiresAt": { "type": "string", "nullable": true },
+          "warning": { "type": "string" }
+        },
+        "required": [
+          "keyId",
+          "secret",
+          "environment",
+          "label",
+          "roles",
+          "scopes",
+          "createdAt",
+          "expiresAt",
+          "warning"
+        ],
+        "additionalProperties": false
+      },
+      "ApiKeySummary": {
+        "type": "object",
+        "properties": {
+          "keyId": { "type": "string" },
+          "label": { "type": "string" },
+          "environment": {
+            "$ref": "#/components/schemas/CreateApiKeyRequest/properties/environment"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "viewer",
+                "analyst",
+                "reviewer",
+                "tenant_admin",
+                "source_admin",
+                "taxonomy_admin",
+                "auditor",
+                "platform_operator",
+                "platform_admin"
+              ]
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CreateApiKeyRequest/properties/scopes/items" }
+          },
+          "createdAt": { "type": "string" },
+          "createdBy": { "type": "string" },
+          "lastUsedAt": { "type": "string", "nullable": true },
+          "expiresAt": { "type": "string", "nullable": true },
+          "revokedAt": { "type": "string", "nullable": true },
+          "revokedReason": { "type": "string", "nullable": true },
+          "status": { "type": "string", "enum": ["ACTIVE", "EXPIRED", "REVOKED"] }
+        },
+        "required": [
+          "keyId",
+          "label",
+          "environment",
+          "roles",
+          "scopes",
+          "createdAt",
+          "createdBy",
+          "lastUsedAt",
+          "expiresAt",
+          "revokedAt",
+          "revokedReason",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "RevokeApiKeyRequest": {
+        "type": "object",
+        "properties": { "reason": { "type": "string", "minLength": 3, "maxLength": 500 } },
+        "required": ["reason"],
         "additionalProperties": false
       },
       "CreateSubjectRequest": {

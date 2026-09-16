@@ -212,7 +212,8 @@ Goal: every documented endpoint either works or says clearly why it does not, an
 client can be run safely.
 
 - [ ] 🔵 **S — Decide the eight reserved endpoints.** `/v1/admin/plans`,
-      `/v1/admin/tenants/{id}/usage`, `/v1/tenant/usage` and `/v1/tenant/api-keys` return **501**
+      `/v1/admin/tenants/{id}/usage` and `/v1/tenant/usage` return **501** (`/v1/tenant/api-keys`
+      no longer does — implemented by **D-050**)
       with a documented reason, deferred by **D-007**. Either implement them or retire them from
       the contract. Leaving a documented endpoint permanently unimplemented is the thing that
       makes an OpenAPI document untrustworthy.

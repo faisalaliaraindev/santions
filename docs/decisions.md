@@ -1782,3 +1782,49 @@ render still yields little text — that is what FR-06's render trigger is for, 
 off at this call site. Boilerplate removal is not attempted at all: navigation and footer text is
 in the normalised text, which means a keyword in a site's own menu can sit near a name. The
 extractor's proximity window is what limits the damage, and it is a limit rather than a fix.
+
+---
+
+## D-050 — Tenant self-service API keys, replacing the D-007 deferral
+
+**Status:** Accepted 2026-09-16. Supersedes the key-management half of **D-007**.
+
+**Context.** D-007 deferred the commercial self-service layer, and recorded that keys were
+**provider-managed in this phase**: an operator ran `pnpm key:issue` and handed the secret over.
+`POST /v1/tenant/api-keys` returned `501` with that reason. That was right while there was no
+commercial layer to hang self-service off.
+
+It stopped being right for a reason that has nothing to do with commerce. A tenant that cannot
+issue or rotate its own credential without a human on the provider's side does not rotate it. The
+provider becomes the reason a customer's key outlives its usefulness, and "rotate your keys" turns
+into advice nobody can act on at the moment they need to.
+
+**Decision.** `POST`, `GET` and `DELETE /v1/tenant/api-keys` are implemented. A tenant holding
+`apikey:manage` — which `tenant_admin` has — issues, lists and revokes its own machine keys.
+
+**What self-service deliberately does not include.** Three limits, each a rule rather than an
+omission, and each with a test that fails if it is removed:
+
+1. **No escalation.** A key carries only roles the caller already holds. Without that, the weakest
+   `tenant_admin` credential mints a `platform_admin` one and the role model is decoration.
+2. **No crossing a tenant boundary.** The tenant is taken from the authenticated principal. There
+   is no tenant field in the request body to ignore. Revoking a key that is not this tenant's
+   answers `404`, not `403` — the second confirms it exists.
+3. **No buying live access.** An `environment: "live"` key needs the tenant's entitlement to
+   include `live` **and** the calling credential to be live. Entitlement is a commercial act by
+   the provider; self-service issues credentials _within_ what was sold, it does not sell.
+
+**What is unchanged.** The secret is returned once and never again. Only a hash is stored, so no
+endpoint can return it a second time and no support process can recover it — a credential the
+provider can read back is one the provider can leak. Creation and revocation are audited with the
+actor and, for revocation, a mandatory reason.
+
+**What this does not decide.** The rest of D-007 stands: plans, usage metering and billing remain
+deferred, and `/v1/admin/plans`, `/v1/admin/tenants/{id}/usage` and `/v1/tenant/usage` still
+answer `501`. Issuing a credential is not the same as selling one, and only the first is built.
+
+**Consequence for the operator script.** `pnpm key:issue` remains, and remains the only way to
+issue the _first_ key for a new tenant — a tenant with no key cannot authenticate to ask for one.
+The scope derivation both paths use now lives once, in `packages/domain`, because two copies of
+that would drift and the one that drifted would be the one issuing keys quietly wider than
+intended.

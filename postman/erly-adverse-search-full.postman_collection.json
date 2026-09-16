@@ -1134,52 +1134,6 @@
               "raw": "{}"
             }
           }
-        },
-        {
-          "name": "Own API keys",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
-            },
-            "description": "Tenant self-service key management is deferred. Use `pnpm key:issue`."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('reserved', () => pm.expect([403,501]).to.include(pm.response.code));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create own API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{}"
-            }
-          }
         }
       ]
     },
@@ -1582,6 +1536,196 @@
                   "const b = pm.response.json();",
                   "pm.test('ACTIVE', () => pm.expect(b.status).to.eql('ACTIVE'));",
                   "console.log('v' + b.version + ' ' + b.status + '  activatedAt=' + b.activatedAt);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "12 - Tenant: your own API keys",
+      "description": "Self-service key management (decision D-050, replacing the D-007 deferral). A tenant issues,\nlists and revokes its own machine keys — no operator involved.\n\nNeeds the `apikey:manage` permission, which `tenant_admin` holds. Set {{apiKey}} to a\ntenant_admin key first:\n\n    pnpm key:issue --role tenant_admin --label \"your name\"\n\nTHE SECRET COMES BACK ONCE. Only a hash is stored, so no endpoint can return it again and\nno support process can recover it. The first request below saves it into {{issuedKey}} so\nyou can use it immediately, but it is gone from the server the moment the response is sent.\n\nThree things self-service deliberately is not, each with a request here that proves it:\n  * a path to roles you do not already hold\n  * a way across a tenant boundary\n  * a way to buy live access — entitlement is sold by the provider, not granted by a key",
+      "item": [
+        {
+          "name": "1. Issue a key for yourself",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"issued from Postman\",\n  \"roles\": [\n    \"tenant_admin\"\n  ],\n  \"environment\": \"{{environment}}\",\n  \"expiresInDays\": 90\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "Roles must be ones you already hold. Omit `scopes` to get the scopes those roles can use — an explicit list can only narrow, never widen.\n\n`expiresInDays` may be null for a key that never expires, which is a choice rather than a default."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('issuedKey', b.secret);",
+                  "  pm.environment.set('issuedKeyId', b.keyId);",
+                  "  console.log('keyId ' + b.keyId + '  scopes=' + b.scopes.join(', '));",
+                  "  console.log('SECRET SHOWN ONCE — saved to {{issuedKey}}');",
+                  "}",
+                  "pm.test('the secret is returned, once', () => pm.expect(b.secret).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. List your keys (no secrets)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "Every key this tenant holds. Carries no secret and no hash of one — the listing is not a slower way of handing the secret back.\n\n`status` is derived at read time, so a key whose expiry passed while nothing was running still reads EXPIRED."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('listed', () => pm.expect(pm.response.code).to.eql(200));",
+                  "// The property worth asserting every time: no secret ever appears here.",
+                  "pm.test('no secret in the listing', () =>",
+                  "  pm.expect(JSON.stringify(b)).to.not.match(/erly_(sandbox|live)_[0-9a-f]{16}_/));",
+                  "if (b.items) {",
+                  "  b.items.slice(0, 10).forEach(function (k) {",
+                  "    console.log('  ' + k.keyId + '  ' + k.status + '  ' + k.environment + '  ' + k.label);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Escalation is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"escalation attempt\",\n  \"roles\": [\n    \"platform_admin\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "Worth running once. Without this rule the weakest tenant_admin credential mints a platform_admin one and the role model is decoration.\n\nThe refusal names the specific role you were missing, because \"forbidden\" on its own sends an integrator back to re-read the role table."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('refused', () => pm.expect(pm.response.code).to.eql(403));",
+                  "pm.test('names the role', () => pm.expect(b.message).to.contain('platform_admin'));",
+                  "console.log(b.code + ': ' + b.message);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. A live key from a sandbox credential is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"live from sandbox\",\n  \"roles\": [\n    \"tenant_admin\"\n  ],\n  \"environment\": \"live\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "Run this with a SANDBOX {{apiKey}}. Two independent conditions gate a live key: your tenant must be entitled to live, and your own credential must be live.\n\nEntitlement is a commercial act by the provider. Self-service issues credentials within what was sold; it does not sell."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 201) {",
+                  "  console.log('You are using a LIVE credential on an entitled tenant, so this succeeded.');",
+                  "  pm.environment.set('issuedKeyId', b.keyId);",
+                  "} else {",
+                  "  pm.test('refused', () => pm.expect(pm.response.code).to.eql(403));",
+                  "  console.log(b.code + ': ' + b.message);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Revoke the key you issued",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"rotated from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys/{{issuedKeyId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys", "{{issuedKeyId}}"]
+            },
+            "description": "Immediate and irreversible. The reason is mandatory and is written to the audit trail.\n\nA key belonging to another tenant answers 404, not 403 — the second would confirm that it exists."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('revoked', () => pm.expect(pm.response.code).to.eql(200));",
+                  "console.log('revoked ' + pm.environment.get('issuedKeyId'));"
                 ]
               }
             }

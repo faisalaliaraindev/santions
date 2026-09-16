@@ -318,3 +318,44 @@ export function isBreakGlassActive(grant: BreakGlassGrant | null, asOf: Date): b
   const expires = Date.parse(grant.expiresAt);
   return !Number.isNaN(expires) && expires > asOf.getTime();
 }
+
+/** The scopes a machine key may carry. A scope narrows a key below its roles; it never widens it. */
+export const MACHINE_SCOPES = ['search:read', 'search:write', 'admin:read', 'admin:write'] as const;
+export type MachineScope = (typeof MACHINE_SCOPES)[number];
+
+/**
+ * The scopes a set of roles should get by default.
+ *
+ * **Scopes narrow a machine key below its roles; they never widen it.** So the safe default is
+ * the scopes those roles could actually use — not everything, and emphatically not nothing. An
+ * empty scope list is *nothing*, not everything: a key issued with none is refused on every
+ * scope-gated route, which once made a working API look broken.
+ *
+ * Deliberately not "all four scopes for every key": a `viewer` key carrying `search:write` would
+ * be a read-only credential that can start work.
+ *
+ * Lives here, in the pure package, because two callers derive it — the operator script
+ * (`scripts/issue-api-key.mjs`) and the tenant self-service endpoint. Two copies of this would
+ * drift, and the one that drifted would be the one issuing keys quietly wider than intended.
+ */
+export function scopesForRoles(roles: readonly Role[]): MachineScope[] {
+  const scopes = new Set<MachineScope>();
+  for (const role of roles) {
+    // Anything that can read results can read searches.
+    scopes.add('search:read');
+    if (role === 'analyst') {
+      scopes.add('search:write');
+    }
+    if (['source_admin', 'taxonomy_admin', 'tenant_admin', 'auditor'].includes(role)) {
+      scopes.add('admin:read');
+    }
+    if (['source_admin', 'taxonomy_admin', 'tenant_admin'].includes(role)) {
+      scopes.add('admin:write');
+    }
+    if (['platform_operator', 'platform_admin'].includes(role)) {
+      scopes.add('admin:read');
+      scopes.add('admin:write');
+    }
+  }
+  return MACHINE_SCOPES.filter((scope) => scopes.has(scope));
+}
