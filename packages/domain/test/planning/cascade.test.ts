@@ -151,7 +151,16 @@ describe('summarising a walk', () => {
 });
 
 describe('coverage outcomes', () => {
-  it('names every gap and stays silent about every non-gap', () => {
+  it('names every rung it walked, and says which of them answered', () => {
+    // This used to assert the opposite — that non-gaps were left out entirely. That was the
+    // shape of the list, not a safety property, and reading it as a census is what produced a
+    // real defect: `aggregateRun` decides "did anything answer?" from these outcomes, so a walk
+    // where every rung either answered emptily or had no source contained no `COMPLETED`, and a
+    // live run that polled a publisher, got a valid response and found no match was filed as
+    // `FAILED`.
+    //
+    // The property that actually matters is below and in the test after it: a gap is never
+    // omitted and never misclassified. Naming the successes too does not hide any of them.
     const outcomes = cascadeCoverageOutcomes([
       attempt(0, 'FOUND'),
       attempt(1, 'EMPTY'),
@@ -159,8 +168,23 @@ describe('coverage outcomes', () => {
       attempt(3, 'NO_SOURCE'),
     ]);
 
-    expect(outcomes).toHaveLength(2);
-    expect(outcomes.map((o) => o.cascadeRung)).toEqual([2, 3]);
+    expect(outcomes.map((o) => o.cascadeRung)).toEqual([0, 1, 2, 3]);
+    expect(outcomes.map((o) => o.outcome)).toEqual(['COMPLETED', 'COMPLETED', 'FAILED', 'SKIPPED']);
+
+    // Every gap is still present, which is the thing a coverage statement must never lose.
+    expect(outcomes.filter((o) => o.outcome !== 'COMPLETED').map((o) => o.cascadeRung)).toEqual([
+      2, 3,
+    ]);
+  });
+
+  it('says a rung that answered with nothing was searched, not skipped', () => {
+    // "We looked and there was nothing" and "we could not look" are different statements, and
+    // the whole coverage vocabulary exists to keep them apart.
+    const [outcome] = cascadeCoverageOutcomes([attempt(1, 'EMPTY')]);
+
+    expect(outcome?.outcome).toBe('COMPLETED');
+    expect(outcome?.detail).toContain('had nothing');
+    expect(outcome?.detail).toContain('not a coverage gap');
   });
 
   it('distinguishes asked-and-unanswered from never-asked', () => {

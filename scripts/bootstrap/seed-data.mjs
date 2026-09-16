@@ -14,6 +14,13 @@
 // the copy is the one that acquires a protected-characteristic term nobody checks. `pnpm
 // local:bootstrap` builds first, so the import always resolves.
 import { SEED_LEXICON } from '../../packages/domain/dist/index.js';
+// The rung 2 and rung 4 discovery templates, imported from the built API package for the same
+// reason the lexicon is imported above: a second copy of a registry record is a second thing to
+// keep in step, and the copy that drifts is the one nobody is reading.
+import {
+  BING_NEWS_RSS_TEMPLATE,
+  GOOGLE_NEWS_RSS_TEMPLATE,
+} from '../../apps/api/dist/sources/registry/discovery-rungs.js';
 
 import { log, waitFor } from '../lib/local-guard.mjs';
 import { loadNameFrequency } from './name-frequency.mjs';
@@ -26,6 +33,15 @@ import { loadNameFrequency } from './name-frequency.mjs';
 const TENANTS = [
   { tenantId: 'tenant-alpha', name: 'Alpha Compliance (mock)', environment: 'sandbox' },
   { tenantId: 'tenant-beta', name: 'Beta Screening (mock)', environment: 'sandbox' },
+  // A third tenant, provisioned for LIVE. Entitlement to the live environment is a commercial
+  // act by the provider, not something a caller can ask for — `assertCapability` refuses an
+  // environment the tenant's entitlement does not list, whatever the credential says. Without a
+  // live-entitled tenant seeded, a live end-to-end search cannot be run at all on a local stack,
+  // and the refusal reads as a bug in the key rather than as the provisioning step it is.
+  //
+  // Kept separate from alpha and beta deliberately: they are the sandbox tenants every other
+  // suite reasons about, and widening them would quietly change what those tests mean.
+  { tenantId: 'tenant-live', name: 'Live Demo (provisioned for live)', environment: 'live' },
 ];
 
 /**
@@ -191,7 +207,14 @@ const SEED_SOURCES = [
     authorityTier: 3,
     cascadeRung,
     canonicalDomains: ['fixtures.local'],
-    countries: ['CR', 'GB'],
+    // `US` is here to match `SEED_COUNTRIES` above. The two lists are different things — what a
+    // source covers, and what the taxonomy enables categories for — and a lead only survives the
+    // fetch gate where they overlap. They overlapped on `CR` alone, so the only English-language
+    // demo the corpus can offer was refused either as `SOURCE_DOES_NOT_COVER_JURISDICTION` (US:
+    // enabled, not covered) or `JURISDICTION_NOT_ENABLED` (GB: covered, not enabled). Both
+    // refusals are the gates working correctly; the gap was in the fixture, which claimed to
+    // serve `en` while covering no country where `en` could be searched.
+    countries: ['CR', 'GB', 'US'],
     languages: ['es', 'en'],
     credentialsRef: null,
     // Null, not zero. A fixture has no free tier to exhaust, and zero would mean "no requests
@@ -207,6 +230,36 @@ const SEED_SOURCES = [
     robotsPosition: 'NOT_ESTABLISHED',
     contentFormat,
     status: 'ACTIVE',
+  })),
+
+  /**
+   * The rung 2 and rung 4 query feeds — seeded **PROPOSED**, and that is the whole point.
+   *
+   * Every other source here is seeded ACTIVE because it is a fixture that talks to nothing.
+   * These two name real publishers. Seeding them active would put two unverified endpoints on
+   * the ladder of every fresh stack, and the only thing standing between that and a live request
+   * would be the fetch gate — which would refuse them, correctly, but relying on the last gate
+   * to catch what the first one should never have admitted is how a gate becomes load-bearing by
+   * accident.
+   *
+   * So a fresh stack gets them as drafts an operator can see and work on, in the same registry
+   * as everything else, with three separate things still missing and each recorded on the record
+   * itself:
+   *
+   *   - nobody has loaded the endpoint      → `ENDPOINT NOT VERIFIED` in `policySummary`
+   *   - nobody has read robots.txt          → `robotsPosition: 'NOT_ESTABLISHED'`
+   *   - nobody has accepted first contact   → `accessPolicy.firstContactApproval: null`
+   *
+   * Rung 3 (GDELT) is deliberately not seeded: it needs its own connector and is not on the path
+   * to a live name search, which rungs 2 and 4 are.
+   */
+  ...[
+    ['google-news-rss-en-us', GOOGLE_NEWS_RSS_TEMPLATE],
+    ['bing-news-rss-en-us', BING_NEWS_RSS_TEMPLATE],
+  ].map(([sourceId, template]) => ({
+    sourceId,
+    ...template,
+    status: 'PROPOSED',
   })),
 ];
 
@@ -359,7 +412,9 @@ export async function seedData(db) {
         tenantId: tenant.tenantId,
         version: 1,
         capabilities: ['adverse_media'],
-        environments: ['sandbox'],
+        // A sandbox tenant is entitled to sandbox only. A live tenant keeps sandbox too, because
+        // taking live away would mean a customer provisioned for live could no longer rehearse.
+        environments: tenant.environment === 'live' ? ['sandbox', 'live'] : ['sandbox'],
         status: 'ACTIVE',
         activatedAt: now,
       },

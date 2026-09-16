@@ -418,6 +418,18 @@ export class VersionedRecordService {
               ...(input.content === undefined ? {} : { content: input.content }),
               ...(input.rightsPolicy === undefined ? {} : { rightsPolicy: input.rightsPolicy }),
               ...(input.dataProfile === undefined ? {} : { dataProfile: input.dataProfile }),
+              // Re-stamped, not carried forward. `mode` says which kind of process established
+              // this version's content, and an edit establishes it again — so a draft written by
+              // `local-bootstrap` (which stamps every record `MOCK`) and then edited in a live
+              // process must stop claiming to be mock. The alternative is a record about a real
+              // publisher carrying a label that says it is a fixture, which is a false statement
+              // on a record several gates read.
+              //
+              // Only a draft reaches here — `isEditable` refused anything else above — so this
+              // cannot rewrite the provenance of an approved or active version. Taking a mock
+              // draft live still needs everything else it needed: a verified endpoint, a robots
+              // position, a named first-contact approval and four eyes.
+              mode: this.mode === 'live' ? 'LIVE' : 'MOCK',
               updatedAt: input.now,
             },
             $inc: { revision: 1 },
@@ -1085,11 +1097,37 @@ function toRecord(document: Document, kind: AdminRecordKind): VersionedRecord {
     approvedBy: (document['approvedBy'] as string | undefined) ?? null,
     revision: (document['revision'] as number | undefined) ?? 1,
     history: (document['history'] as LifecycleTransitionEntry[] | undefined) ?? [],
-    createdAt: (document['createdAt'] as Date | undefined) ?? null,
-    updatedAt: (document['updatedAt'] as Date | undefined) ?? null,
-    activatedAt: (document['activatedAt'] as Date | undefined) ?? null,
-    supersededAt: (document['supersededAt'] as Date | undefined) ?? null,
+    createdAt: dateOrNull(document['createdAt']),
+    updatedAt: dateOrNull(document['updatedAt']),
+    activatedAt: dateOrNull(document['activatedAt']),
+    supersededAt: dateOrNull(document['supersededAt']),
   };
+}
+
+/**
+ * A stored timestamp as a real `Date`, whichever way it was written.
+ *
+ * These four fields were cast straight to `Date`, and the cast was a lie for half the records in
+ * the database: a version written through this lifecycle stores real `Date`s, but one written by
+ * `local-bootstrap` stores **ISO strings**. Both are real records — the same flat-versus-nested
+ * split `toRecord` already handles for `content` — so every consumer that believed the type and
+ * called `.toISOString()` threw `TypeError: ... is not a function`.
+ *
+ * That surfaced as a **500 on `GET /v1/admin/sources`, `/v1/admin/taxonomy` and
+ * `/v1/admin/policies`** — a bootstrapped registry could not be listed at all, which is the first
+ * admin request anybody makes. Normalising here rather than at each mapper fixes both call sites
+ * (`admin.controller.ts` and `toTaxonomyWire` below) and makes the declared type true, so the
+ * next consumer does not have to know.
+ */
+function dateOrNull(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
 }
 
 /**

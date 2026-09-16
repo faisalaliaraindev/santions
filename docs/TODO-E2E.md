@@ -1,6 +1,6 @@
 # TODO — production ready, and testable end to end in Postman
 
-Date: 2026-09-15
+Date: 2026-09-16
 
 A checklist. Work top to bottom. Each group is useful on its own, so you can stop at any group
 boundary and still have something that works.
@@ -102,8 +102,10 @@ Goal: a search runs through real source logic instead of returning fixtures.
       rungs, so this is the same read answering one more question.
       _File:_ `apps/api/src/pipeline/ladder.builder.ts`
 
-- [ ] **M — Relevance filter before fetch.** The nine FR-06 signals, scored before a socket
-      opens. Rejected leads stored with their reason and visible in coverage.
+- [x] **Relevance filter before fetch.** Done 2026-09-15 (**D-047**). The nine FR-06 signals,
+      scored before a socket opens. Rejected leads stored with their reason and visible in
+      coverage. The filter decides what a document is _about_, never whether the subject is
+      guilty — an acquittal passes it as readily as an accusation.
 
 - [ ] **S — Prove plan generation against the real taxonomy.** Eight query families, per enabled
       category and language. A disabled category must produce no query at all.
@@ -120,9 +122,19 @@ Goal: a search runs through real source logic instead of returning fixtures.
 
 Goal: the service makes its first real request, deliberately.
 
-- [ ] 🟠 **S — Write the FI-20 integration test first.** Prove the halt and its audit entry commit
-      together in Mongo. Before anything is polled live, not after.
-      _New:_ a test under `tests/integration/`
+- [x] **Write the FI-20 integration test first.** Done 2026-09-16, before anything is polled
+      live. Six tests proving the halt and its audit entry commit together in Mongo: both land
+      when a recorded stop condition fires; **neither** lands when the audit write fails; the
+      same refusal re-derives the halt afterwards (which is what bounds the window to one
+      request); a re-derived halt keeps the first record rather than moving the timestamp an
+      operator was alerted about; the halt refuses at the point of use through a freshly
+      constructed service, `SUSPENDED` with the reason verbatim; and the shared `__platform__`
+      hash chain still verifies.
+      _Verified by planting the violation_ — moving the health write outside the transaction
+      makes exactly the two atomicity tests fail with a halted source and no audit entry, and
+      restoring it makes them pass. The suite deletes nothing from `auditEvents`: removing an
+      entry from the middle of a hash chain is the tampering the chain exists to detect.
+      _File:_ `tests/integration/source-halt.test.ts`
 
 - [ ] 🟠 **S — Propose, approve and activate the SEC source.** Through `/v1/admin`, four eyes.
       The record is written and schema-checked already.
@@ -171,8 +183,18 @@ Goal: stop returning thin results.
 - [ ] 🟠 **M — Choose the extraction model.** Open decision **D7**. Benchmark against the
       labelled set.
 
-- [ ] 🟠 **L — Real extraction.** Today it is keyword matching. Until this lands, live results
-      are thin, and the coverage statement must keep saying so.
+- [ ] 🟠 **L — Real extraction.** Partly addressed 2026-09-16 (**D-048**): live mode now has a
+      _rule-based_ extractor rather than none, so a live run no longer rejects every document at
+      `EXTRACTION`. It is still keyword matching — proximity-bounded to 600 characters of a name
+      form, English and Spanish term tables only, `modelId: null`, **recall never measured**.
+      Every run using it carries a warning saying so. Until a benchmarked model lands (D7), live
+      results are thin and the coverage statement must keep saying so.
+      _File:_ `apps/api/src/sources/rule-based-extraction.adapter.ts`
+
+- [ ] 🟠 **M — The four FR-07 date fields.** The rule-based extractor leaves all four null, which
+      is correct under FR-07 — a missing date is never backfilled with retrieval time — and means
+      **every finding it produces is undated**. Recency behaviour cannot be tested against a live
+      result until this lands. The rest of Phase F step F1, with PDF and OCR.
 
 - [ ] **M — Wire FR-10 clustering.** A syndicated copy of one story currently counts as a second
       independent source. That inflates the evidence behind a finding.

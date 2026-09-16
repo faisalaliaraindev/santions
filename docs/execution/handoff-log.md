@@ -27,6 +27,206 @@ Say what you did about it.
 
 ---
 
+## 2026-09-16 (third) — Postman is testable end to end with six people; four defects found by running it
+
+**Did.** Ran the collection instead of reading it, which found four real defects, then made the
+mock corpus answer to more than one name.
+
+1. **`GET /v1/admin/sources`, `/taxonomy` and `/policies` returned 500** on any bootstrapped
+   stack — the first admin request anybody makes. `toRecord` cast four timestamp fields straight
+   to `Date`, and the cast was false for half the database: lifecycle-written records store
+   `Date`s, `local-bootstrap` stores ISO **strings**, so `.toISOString()` threw. Fixed at the read
+   boundary (`versioned-record.service.ts`, `dateOrNull`) rather than per mapper, so the declared
+   type stops lying and both call sites are covered. `history.at` one line above had already been
+   patched for this same class and the fix was never carried down.
+
+2. **`POST /v1/searches` accepted any two characters as a jurisdiction.** `EU`, `ZZ` and `99` all
+   returned 202, consumed a job, and surfaced as a run that `FAILED` on polling. The admin surface
+   validated this properly all along; the caller's own entry point did not. `search.ts` now uses a
+   real ISO-3166 check and refuses regional groupings by name, sharing `REGIONAL_PSEUDO_CODES` with
+   the admin schema so the two cannot drift. OpenAPI regenerated.
+
+3. **A run that produced a finding reported `FAILED / NOT_EVALUATED`.** `aggregateRun` derives
+   "did anything answer?" from `sourceOutcomes`, but for the cascade that list is a list of _gaps_
+   — `cascadeCoverageOutcomes` filters on `isGap`, so a rung that answered records nothing. The
+   only component emitting `COMPLETED` was the company register, so any jurisdiction without one
+   reported every source as failed **while returning a finding in the same response**. `anySucceeded`
+   now also counts findings and unresolved leads, which cannot exist unless something answered.
+   T47 is untouched: a run holding a finding is not one where every source failed.
+
+4. **Two collection defects.** The Source health script did `rows.forEach` on the body, so a 403
+   threw `TypeError` and the refusal never surfaced as a failure — it now asserts the status first.
+   And the poll loop re-fired itself with **no delay**, so all 30 attempts finished in milliseconds
+   and reported "still QUEUED" while the worker was still picking the job up; it now waits between
+   attempts. That one made every headless run of folder 3 fail.
+
+5. **A demo cast of six people** (`discovery-fixtures.ts`, `evidence-fetch.mock.ts`). One subject
+   proved the pipeline runs; it could not show what the pipeline _says_. Added: an investigation
+   **followed by an acquittal** (both come back — the case that matters most), a conviction
+   corroborated by two publishers in different words as against the existing syndicated pair, a
+   lone early-stage report, and an English-language indictment. `DEMO_SUBJECTS` documents what each
+   one is for. Every person, publisher and domain is invented.
+
+6. **The collection is parameterised.** `subjectName`, `subjectJurisdiction` and `subjectLanguage`
+   drive both bodies, so testing a different person is one variable rather than an edited body.
+
+7. **The README's role guidance was wrong** and is corrected with a role-per-folder table.
+   `GET /v1/admin/source-health` needs `platform:read_health` (`platform_operator`), **not**
+   `source_admin`, and no single key runs the whole collection — that is T06 working.
+
+**Verified.**
+
+```
+pnpm verify:local   lint · typecheck · unit · invariants · evaluation · integration ·
+                    security · e2e (API)      all ok
+                    end-to-end (browser)      n/i — G8, the intended failure
+integration 214 (was 213)   unit 865   invariants 29
+newman, full collection: 76 requests, 45 test scripts, 0 assertion failures
+newman, folders 2→3→4 for each of the six people: 0 failures, 5 assertions each
+```
+
+Fix 1 was proven by reverting it — the regression test fails with
+`expected '2026-09-10T…' to be an instance of Date` and passes when restored.
+
+**Found.**
+
+- **`pnpm dev` and the test suites fight over the same SQS queue.** Running `verify:local` with
+  `pnpm dev` up fails `integration` for no visible reason: both workers consume the same queue and
+  steal each other's jobs. It passed alone and failed under the gate purely for this. Added to the
+  README troubleshooting table.
+- **The seeded source covered `CR, GB`; the seeded taxonomy enabled `CR, US`.** A lead only
+  survives the fetch gate where the two overlap, so the only English demo possible was refused
+  either as `SOURCE_DOES_NOT_COVER_JURISDICTION` (US) or `JURISDICTION_NOT_ENABLED` (GB). Both
+  refusals were correct; the fixture was claiming to serve `en` while covering nowhere `en` could
+  be searched. The fixture source now covers `CR, GB, US`.
+- **`sources: 0` on every finding.** The findings come back with an empty source array in the
+  wire shape I read them through. Not investigated — it may be the field name in my probe rather
+  than the payload. Worth ten minutes before anybody demos evidence provenance.
+
+**Left half-done.** Nothing from this session. The 409 on the source-registry **approve** request
+is still unexplained — it is a revision conflict from a stale `recordRevision` collection variable,
+**not** four-eyes, and it was left alone because chasing it means approving the SEC source, which
+is the decision below.
+
+**Next session should:** build **F3 — the eight FR-07 validation rules** in `packages/domain`,
+pure, from scratch. `grep validateAssertion` still returns nothing. Unchanged from two entries ago.
+
+**Waiting on you.** Unchanged, and still not engineering:
+
+1. **A second named person** for four eyes (SEC-06). Two `source_admin` keys now exist —
+   `4f93491691d8c22e` (proposer) and `b49936006e34f1ae` (approver) — but the check compares
+   credentials, not humans, so the second identity existing is not the same as a second person
+   deciding.
+2. **`pnpm first-contact`**, which the project owner runs, then `robotsPosition` from what
+   robots.txt actually said, then propose → approve → activate. The propose and submit steps were
+   exercised this session against the real API and both returned 201.
+
+**Decisions touched:** none closed. **D6** is still the decision sitting directly in the path of
+step 2 above. A one-off three-role smoke key was issued to run the whole collection at once and
+**revoked immediately**; the README says not to keep one, because it is exactly the combination
+the roles exist to separate.
+
+---
+
+## 2026-09-16 (later) — FI-20 written and proven; the two stale Postman documents corrected
+
+**Read this first. Every engineering blocker on the live Postman path is now closed. What
+remains is three things only you can do, listed at the bottom.**
+
+**Did.** Two things, in this order, and nothing else.
+
+1. **Corrected two documents that had gone stale within a day and would have misled the next
+   reader.** `postman/README.md` still carried a section headed "What blocks a live run today"
+   saying live mode has no extractor and the pipeline hands raw HTML to it. Both were closed
+   earlier the same day by D-048 and D-049. Anyone following it would either not attempt a live
+   run at all, or would read a genuine live result as the known blocker. That section is now
+   "What a live run will and will not tell you", and it states the three things that are actually
+   true of the rule-based extractor and are easy to misread as absence: **recall has never been
+   measured**, the term tables are **English and Spanish only**, and **every finding it produces
+   is undated** because the four FR-07 date fields are not parsed. `docs/TODO-E2E.md` had the
+   relevance filter (D-047) still unchecked, and its "real extraction" row still described live
+   mode as having none; both corrected, and the missing FR-07 date-field work is now its own row
+   rather than a sentence inside another one.
+
+2. **`tests/integration/source-halt.test.ts` — FI-20, six tests.** The row was on the checklist as
+   "write this first, before anything is polled live", and it was still unwritten while the live
+   path was otherwise ready. `grep stop_condition_halt` returned exactly one hit — the service
+   that writes it — so the automatic-halt persistence boundary had no integration coverage at all.
+   The pure half (`applyObservedFailure`) was already covered in `apps/api/test/fetch-tripwires.test.ts`;
+   what was missing is the half only a real replica set shows.
+
+   What it asserts: the halt and its audit entry both land when a recorded stop condition fires;
+   **neither** lands when the audit write fails; the same refusal re-derives the halt afterwards,
+   which is what bounds FI-20's window to one request rather than forever; a re-derived halt
+   **keeps the first record** rather than moving the timestamp an operator was alerted about; the
+   halt refuses at the point of use through a freshly constructed service as `SUSPENDED` carrying
+   the reason verbatim; and the shared `__platform__` hash chain still verifies afterwards.
+
+**Verified.** Everything below was run in this session against the real stack, started for the
+purpose (Docker was not running; `local:up` then `local:bootstrap`):
+
+```
+pnpm verify:local
+  lint · typecheck · unit · invariants · evaluation · integration · security · e2e (API)  all ok
+  end-to-end (browser)  n/i — G8, the intended failure; verify:local exits non-zero
+integration   213  (was 207; +6 new)        API e2e   10
+```
+
+**The FI-20 suite was proven by planting the violation, not by watching it pass.** Moving the
+health write out of the transaction in `source-health.service.ts` makes exactly the two
+atomicity tests fail — a halted source persisted with no audit entry explaining it — and
+restoring it makes all six pass. A test that has never failed proves nothing.
+
+**No live source was contacted, and `pnpm first-contact` was not run.**
+
+**Left half-done.** Nothing. Both items finished.
+
+**Found.**
+
+- **The suite deliberately deletes nothing from `auditEvents`.** A halt writes to `__platform__`,
+  which is a hash chain, and no test had ever written to that chain before this one. Removing an
+  entry from the middle of a chain to tidy up is precisely the tampering the chain exists to
+  detect, and would leave every later verification failing for a reason nobody could find. The
+  entries are real platform events, they stay, and the suite asserts the chain still verifies on
+  the way out. Source state is this suite's own and is cleaned up as usual.
+- The seeded version is written in the **nested `content` shape** the admin lifecycle produces
+  rather than the flat shape the older fixtures use. `versionFacts` reads both; seeding the flat
+  shape would have tested the compatibility branch instead of the real one.
+- `RATE_LIMITED` exists in `packages/contracts` and the OpenAPI document lists 429 on
+  `POST /v1/searches`, but **nothing throws it** — confirmed by grep, not inferred. A Postman
+  test for 429 cannot pass today, and a looping caller is unbounded. Already on the list as a
+  Group 4 item; noted here because it is the kind of thing a first integrator finds.
+
+**Next session should:** build **F3 — the eight FR-07 validation rules** in `packages/domain`,
+pure, from scratch. `grep validateAssertion` still returns nothing. Unchanged from the previous
+entry: the brief puts the validator before the model deliberately, because rules written after a
+model get written around whatever that model produced.
+
+**Waiting on you, not on code.** This is now the whole of what stands between the project and a
+live Postman run, and none of it is engineering:
+
+1. **A second named person.** Taking the SEC source live is four eyes — the proposer cannot be
+   the approver (SEC-06). Nothing in the sequence below can start without this.
+2. **`pnpm first-contact` against the SEC feed.** One `GET https://www.sec.gov/robots.txt`,
+   requires `--yes-contact-the-sec`. It has never been run, and the project owner runs it — not a
+   session. Then `robotsPosition` updated on **what robots.txt actually said**, then propose →
+   approve → activate.
+3. **A subject actually present in the SEC feed** on the day of the demo. It is a `FIXED_FEED`:
+   the name never reaches the SEC, the feed is polled whole and matched locally, so a Costa Rican
+   name against it gives a correct, well-reasoned `NO_MATCHES_FOUND`.
+
+**What the first live run will honestly report**, unchanged: coverage `INCOMPLETE`, most rungs
+unsearched, one live source, US and English only, every fixture source refused, a warning that
+the extraction was rule-based and unbenchmarked — and every finding undated.
+
+**Decisions touched:** none closed. **D6** (how robots exceptions are approved and recorded,
+owner source admin, due G6) is now the decision directly in the path: step 2 above writes a
+`robotsPosition` that permits fetching, and D6 is the rule governing that write. **D4** still has
+a waiting input — the two Costa Rican sanctions spreadsheets, no file paths supplied. **D7** open
+and still not on the critical path.
+
+---
+
 ## 2026-09-16 — Phase F, the two engineering P0s for the live path
 
 **Read this, then [`phase-f.md`](./phase-f.md) §4 for what comes next. The live path's remaining

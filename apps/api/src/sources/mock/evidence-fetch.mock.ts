@@ -112,6 +112,96 @@ export const FIXTURE_DOCUMENTS: readonly FetchFixture[] = [
     lastModified: 'Mon, 18 Mar 2024 06:00:00 GMT',
     robots: 'ALLOWED',
   },
+
+  // ─── Documents for the demo cast in `discovery-fixtures.ts` ──────────────────────────────
+  //
+  // Every person here is invented and every host is an `example` domain that resolves nowhere.
+  // The conduct and stage wording is chosen to hit the mock extractor's term tables in
+  // `extraction-model.mock.ts` — change a term there and these stop producing findings.
+
+  // ── Vargas: the investigation, and then the acquittal that supersedes it.
+  {
+    url: 'https://www.nacion-example.cr/sucesos/caso-vargas-investigacion',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Fiscalía abre investigación contra Rodrigo Alberto Vargas ' +
+      'Méndez por presunto fraude</h1><p>La Fiscalía Adjunta de Delitos Económicos confirmó ' +
+      'la apertura de una investigación contra Rodrigo Alberto Vargas Méndez por presunto ' +
+      'fraude en la administración de fondos de la cooperativa, el 2 de noviembre de 2023.</p>' +
+      '</article></body></html>',
+    etag: 'W/"vargas-investigacion-1"',
+    lastModified: 'Thu, 02 Nov 2023 14:10:00 GMT',
+    robots: 'ALLOWED',
+  },
+  {
+    // The acquittal. An extractor that takes the first or the strongest match would report the
+    // fraud and drop this, which is the failure D-047 names: the service would be better at
+    // confirming a suspicion than at testing it.
+    url: 'https://www.crhoy-example.com/nacionales/caso-vargas-absolutoria',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Tribunal dicta sentencia absolutoria a favor de Rodrigo ' +
+      'Alberto Vargas Méndez</h1><p>El Tribunal Penal dictó sentencia absolutoria a favor de ' +
+      'Rodrigo Alberto Vargas Méndez en la causa por presunto fraude, por falta de prueba, el ' +
+      '20 de junio de 2024.</p></article></body></html>',
+    etag: 'W/"vargas-absolutoria-1"',
+    lastModified: 'Thu, 20 Jun 2024 16:45:00 GMT',
+    robots: 'ALLOWED',
+  },
+
+  // ── Jiménez: one conviction, two publishers, materially different wording.
+  {
+    url: 'https://www.nacion-example.cr/sucesos/caso-jimenez-sentencia',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Sentencia condenatoria contra Ana Lucía Jiménez Castro por ' +
+      'lavado de activos</h1><p>El Tribunal Penal dictó sentencia condenatoria contra Ana ' +
+      'Lucía Jiménez Castro por lavado de activos, el 8 de febrero de 2024.</p></article>' +
+      '</body></html>',
+    etag: 'W/"jimenez-sentencia-1"',
+    lastModified: 'Thu, 08 Feb 2024 10:20:00 GMT',
+    robots: 'ALLOWED',
+  },
+  {
+    url: 'https://www.observador-example.cr/judiciales/jimenez-castro-condena',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Condena firme en el caso de lavado que involucra a Ana Lucía ' +
+      'Jiménez Castro</h1><p>La resolución, que confirma la sentencia condenatoria por lavado ' +
+      'de activos impuesta a Ana Lucía Jiménez Castro, detalla el movimiento de fondos a ' +
+      'través de tres sociedades constituidas entre 2019 y 2021.</p></article></body></html>',
+    etag: 'W/"jimenez-condena-1"',
+    lastModified: 'Sun, 11 Feb 2024 08:05:00 GMT',
+    robots: 'ALLOWED',
+  },
+
+  // ── Rojas Mora: one early-stage report, and deliberately no second source.
+  {
+    url: 'https://www.observador-example.cr/politica/rojas-mora-cohecho',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Investigación por presunto cohecho salpica a Carlos Eduardo ' +
+      'Rojas Mora</h1><p>Una investigación preliminar examina pagos presuntamente irregulares ' +
+      'vinculados a Carlos Eduardo Rojas Mora. No se han presentado cargos.</p></article>' +
+      '</body></html>',
+    etag: 'W/"rojasmora-cohecho-1"',
+    lastModified: 'Thu, 30 May 2024 07:30:00 GMT',
+    robots: 'ALLOWED',
+  },
+
+  // ── Turner: English, so a walkthrough is not entirely in Spanish.
+  {
+    url: 'https://www.ledger-example.com/business/turner-indictment-2024',
+    contentType: 'text/html; charset=utf-8',
+    body:
+      '<html><body><article><h1>Prosecutors file formal charges against James Whitfield ' +
+      'Turner over securities fraud</h1><p>Federal prosecutors filed formal charges against ' +
+      'James Whitfield Turner on 5 September 2024, alleging securities fraud in a scheme to ' +
+      'misstate revenue across four quarters.</p></article></body></html>',
+    etag: 'W/"turner-indictment-1"',
+    lastModified: 'Thu, 05 Sep 2024 13:00:00 GMT',
+    robots: 'ALLOWED',
+  },
   {
     url: 'https://www.blocked-example.cr/archivo/1',
     contentType: 'text/html',

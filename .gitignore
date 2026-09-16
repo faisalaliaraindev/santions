@@ -14,3 +14,8 @@ coverage/
 /docs/evidence/**/*.json
 playwright-report/
 test-results/
+
+# Postman environments carrying real key secrets. The committed
+# local.postman_environment.json holds placeholders; anything *.ready.* holds
+# secrets an operator pasted in and must never be committed.
+postman/*.ready.postman_environment.json

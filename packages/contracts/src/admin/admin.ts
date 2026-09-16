@@ -111,14 +111,20 @@ export const canonicalDomainSchema = z
   );
 
 /**
+ * Groupings that are not countries, refused wherever a country code is expected.
+ *
+ * Exported because the search scope refuses the same list (`../searches/search.ts`). One list,
+ * because a region accepted at one entry point and refused at another is worse than either.
+ */
+export const REGIONAL_PSEUDO_CODES = ['EU', 'EEA', 'UK', 'MENA', 'SEA', 'LATAM', 'APAC', 'GLOBAL'];
+
+/**
  * A two-letter ISO country code.
  *
  * FR-05: "EU", "MENA" and "SEA" are not blanket source permissions. The enum of real codes is
  * not enumerated here, but a regional pseudo-code is rejected explicitly so the mistake fails
  * loudly at the API rather than silently widening a source's scope.
  */
-const REGIONAL_PSEUDO_CODES = ['EU', 'EEA', 'UK', 'MENA', 'SEA', 'LATAM', 'APAC', 'GLOBAL'];
-
 export const countryCodeSchema = z
   .string()
   .length(2)

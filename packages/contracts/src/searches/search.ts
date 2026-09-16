@@ -4,7 +4,28 @@
 
 import { z } from 'zod';
 
+import { REGIONAL_PSEUDO_CODES } from '../admin/admin.js';
 import { createSubjectSchema } from '../subjects/subject.js';
+
+/**
+ * An ISO 3166-1 alpha-2 country code, as a search scope may name one.
+ *
+ * Deliberately a separate declaration from `countryCodeSchema` in `../admin/admin.js` rather
+ * than an import: that one is the admin surface's, and the two happen to agree today but answer
+ * to different requirements — FR-05 for source permissions there, the coverage statement here.
+ * The shared thing worth sharing is the list of regional pseudo-codes, so that is what is
+ * imported.
+ */
+const searchCountryCodeSchema = z
+  .string()
+  .length(2)
+  .regex(/^[A-Za-z]{2}$/, 'Must be an ISO 3166-1 alpha-2 country code.')
+  .transform((value) => value.toUpperCase())
+  .refine((value) => !REGIONAL_PSEUDO_CODES.includes(value), {
+    message:
+      'Regional groupings cannot be searched as a jurisdiction. Name each country explicitly ' +
+      '(FR-05) — coverage, rights and source permissions are all recorded per country.',
+  });
 
 export const createSearchSchema = z
   .object({
@@ -31,7 +52,20 @@ export const createSearchSchema = z
      */
     requestedScope: z
       .object({
-        jurisdictions: z.array(z.string().length(2).toUpperCase()).min(1).max(50),
+        /**
+         * Each jurisdiction as an ISO 3166-1 alpha-2 country code.
+         *
+         * This was `z.string().length(2)`, which accepted any two characters — `EU`, `ZZ` and
+         * `99` were all taken, answered `202`, consumed a job, and surfaced as a run that
+         * `FAILED` on polling rather than as a request that was wrong when it was made. The
+         * admin side has validated this properly all along (`countryCodeSchema`); the caller's
+         * own entry point did not, which is the wrong way round.
+         *
+         * Regional groupings are refused by name. `EU` is not a jurisdiction the way `CR` is:
+         * coverage, rights and source permissions are all per country (FR-05), so a scope
+         * naming a region cannot be honestly reported against.
+         */
+        jurisdictions: z.array(searchCountryCodeSchema).min(1).max(50),
         languages: z.array(z.string().max(35)).min(1).max(30),
         /** Omit to use every category enabled for the tenant in that jurisdiction. */
         categories: z.array(z.string()).max(30).optional(),

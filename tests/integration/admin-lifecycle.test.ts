@@ -306,6 +306,61 @@ describe('the propose → approve → activate lifecycle', () => {
     ).rejects.toThrow(/cannot be edited/);
   });
 
+  it('re-stamps mode on edit, so a bootstrap-seeded draft cannot carry MOCK into a live process', async () => {
+    // `local-bootstrap` stamps every record it seeds `mode: 'MOCK'`, including the rung 2 and
+    // rung 4 drafts, which name real publishers. Editing such a draft in a live process used to
+    // leave the MOCK stamp in place — a record about Google News asserting it was a fixture.
+    // `mode` is set at propose time, so an edit has to set it again or it goes stale.
+    const recordId = `src-mode-${randomUUID()}`;
+
+    // Seeded the way the bootstrap seeds: written straight to the collection, stamped MOCK.
+    await db.collection('sourceVersions').insertOne({
+      sourceId: recordId,
+      version: 1,
+      status: 'PROPOSED',
+      mode: 'MOCK',
+      seededAt: NOW,
+      content: sourceContent({ sourceName: 'Seeded draft naming a real publisher' }),
+      rightsPolicy: policy(),
+      dataProfile: profile(),
+      revision: 1,
+      history: [],
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+
+    // A live process edits that draft.
+    const liveRecords = new VersionedRecordService(db, new TransactionRunner(mongo), audit, 'live');
+    await liveRecords.updateDraft({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      version: 1,
+      content: sourceContent({ sourceName: 'Edited in a live process' }),
+      now: NOW,
+    });
+
+    const stored = await db
+      .collection('sourceVersions')
+      .findOne({ sourceId: recordId, version: 1 });
+    expect(stored?.['mode']).toBe('LIVE');
+
+    // And the reverse: a mock process editing it says mock again. The stamp tracks the process
+    // that last established the content, rather than sticking at whatever wrote it first.
+    await records.updateDraft({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      recordId,
+      version: 1,
+      content: sourceContent({ sourceName: 'Edited again in a mock process' }),
+      now: NOW,
+    });
+    const again = await db.collection('sourceVersions').findOne({ sourceId: recordId, version: 1 });
+    expect(again?.['mode']).toBe('MOCK');
+
+    await db.collection('sourceVersions').deleteMany({ sourceId: recordId });
+  });
+
   it('supersedes the previous active version in the same transaction', async () => {
     const first = await approvedSource();
     await records.activate({
@@ -778,6 +833,36 @@ describe('FR-05 content conformance', () => {
       expect(() => {
         assertSourceContentConforms(record.content);
       }).not.toThrow();
+    }
+  });
+
+  it('hydrates a bootstrap-seeded timestamp as a Date, so a seeded registry can be listed', async () => {
+    // Regression. `local-bootstrap` writes `createdAt` as an ISO **string**; a version written
+    // through this lifecycle writes a real `Date`. `toRecord` cast both straight to `Date`, so
+    // every consumer that believed the type and called `.toISOString()` threw — surfacing as a
+    // **500 on GET /v1/admin/sources, /taxonomy and /policies**, the first admin request anybody
+    // makes against a bootstrapped stack. Found by running the Postman collection, 2026-09-16.
+    const seeded = await db
+      .collection('sourceVersions')
+      .find({ seededAt: { $exists: true } })
+      .toArray();
+    expect(seeded.length).toBeGreaterThan(0);
+    // The premise of the regression: at least one really is stored as a string, so this test
+    // fails for the right reason rather than because the fixture changed shape underneath it.
+    expect(seeded.some((document) => typeof document['createdAt'] === 'string')).toBe(true);
+
+    const listed = await records.listVersions({
+      kind: 'SOURCE',
+      principal: PROPOSER,
+      limit: 50,
+    });
+
+    const hydrated = listed.filter((record) => record.createdAt !== null);
+    expect(hydrated.length).toBeGreaterThan(0);
+    for (const record of hydrated) {
+      expect(record.createdAt).toBeInstanceOf(Date);
+      // The mapper calls exactly this. It threw before the fix.
+      expect(() => record.createdAt?.toISOString()).not.toThrow();
     }
   });
 

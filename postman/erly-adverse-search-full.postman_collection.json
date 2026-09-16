@@ -212,10 +212,10 @@
               "host": ["{{baseUrl}}"],
               "path": ["v1", "subjects"]
             },
-            "description": "`purpose` is **required**. The service records why a person was screened, because that is what limits who may later see the result.\n\n`knownCompanies` is accepted as user-supplied and unverified, and is labelled that way all the way through - never presented as a confirmed association.",
+            "description": "Create the person being screened.\n\nHOW AN INTEGRATOR ACTUALLY CALLS THIS: `fullName` is a per-request payload field. The tenant\nsends the name on every call. There is no configured subject anywhere in the service.\n\nThe {{subjectName}} / {{subjectJurisdiction}} placeholders below are a POSTMAN CONVENIENCE ONLY.\nPostman substitutes them before sending, so the request on the wire is an ordinary body:\n\n    { \"fullName\": \"Rodrigo Alberto Vargas Méndez\", \"countryContext\": [\"CR\"], ... }\n\nThey exist so one collection can drive the six fixture people without editing the body each\ntime. Replace them with a literal name and the request behaves identically.\n\nThe TENANT is never taken from the body — it is derived from the API key, so a caller cannot\nclaim to be someone else. `purpose` is mandatory and comes from a fixed list: nobody is\nscreened without a recorded lawful reason.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullName\": \"María Fernanda Solís Rojas\",\n  \"aliases\": [],\n  \"countryContext\": [\n    \"CR\"\n  ],\n  \"dateOfBirth\": {\n    \"value\": \"1972-03-15\",\n    \"precision\": \"DAY\"\n  },\n  \"knownCompanies\": [\n    {\n      \"registrationNumber\": \"CR-3101-100001\",\n      \"jurisdiction\": \"CR\"\n    }\n  ],\n  \"externalSubjectRef\": \"postman-demo-1\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}"
+              "raw": "{\n  \"fullName\": \"{{subjectName}}\",\n  \"aliases\": [],\n  \"countryContext\": [\n    \"{{subjectJurisdiction}}\"\n  ],\n  \"externalSubjectRef\": \"postman-demo-1\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}"
             }
           },
           "event": [
@@ -275,7 +275,7 @@
             "description": "Returns **202** and a `searchId`. The run is queued; the worker does the work.\n\nA queued run reports `findings: NOT_EVALUATED`. Rendering that would show someone \"nothing found\" about a search that has not started.\n\n`Idempotency-Key`: send the same value twice and you get **200** with the same id, not a second search.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{subjectId}}\",\n    \"version\": 1\n  },\n  \"externalCaseRef\": \"postman-case-1\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"CR\"\n    ],\n    \"languages\": [\n      \"es\",\n      \"en\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"sandbox\"\n}"
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{subjectId}}\",\n    \"version\": 1\n  },\n  \"externalCaseRef\": \"postman-case-1\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"{{subjectJurisdiction}}\"\n    ],\n    \"languages\": [\n      \"{{subjectLanguage}}\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"{{environment}}\"\n}"
             }
           },
           "event": [
@@ -295,6 +295,46 @@
           ]
         },
         {
+          "name": "Create a search (one call - subjectSnapshot)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectSnapshot\": {\n    \"fullName\": \"{{subjectName}}\",\n    \"aliases\": [],\n    \"countryContext\": [\n      \"{{subjectJurisdiction}}\"\n    ],\n    \"externalSubjectRef\": \"tenant-oneshot-1\",\n    \"purpose\": \"CUSTOMER_ONBOARDING\"\n  },\n  \"externalCaseRef\": \"case-oneshot-1\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"{{subjectJurisdiction}}\"\n    ],\n    \"languages\": [\n      \"{{subjectLanguage}}\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"{{environment}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "THE INTEGRATOR PATH. One call: send the name, get a screening.\n\nsubjectRef and subjectSnapshot are mutually exclusive - send exactly one. With subjectSnapshot the service creates the versioned subject and queues the search in the same request, so a tenant that just wants \"screen this name\" does not have to make two calls.\n\nUse subjectRef instead when you already hold a subjectId and want repeat screenings pinned to the same identity snapshot.\n\nStill 202. The work is queued either way - poll the status URL."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect(pm.response.code).to.be.oneOf([200, 202]));",
+                  "if (b.searchId) { pm.environment.set('searchId', b.searchId); }",
+                  "console.log('one-call screening queued: ' + b.searchId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Poll until terminal",
           "request": {
             "method": "GET",
@@ -307,6 +347,22 @@
             "description": "Run until `execution` is `SUCCEEDED`, `PARTIAL`, `FAILED` or `CANCELLED`.\n\nIn a Collection Run this re-runs itself until the run settles. `ETag` carries the revision."
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Wait before polling. Without this the 30 attempts complete in milliseconds and the run",
+                  "// reports \"still QUEUED\" while the worker is simply still working.",
+                  "const waited = Number(pm.environment.get('pollTries') || 0) > 0 ? 700 : 300;",
+                  "const until = Date.now() + waited;",
+                  "// A busy wait, deliberately: the sandbox does not reliably hold a run open for setTimeout.",
+                  "while (Date.now() < until) {",
+                  "  /* wait */",
+                  "}"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -321,7 +377,7 @@
                   "  if (tries > 30) {",
                   "    pm.environment.unset('pollTries');",
                   "    pm.test('terminal', () => pm.expect.fail('Still ' + b.execution + ' after 30 polls. Is the worker running? pnpm dev:worker'));",
-                  "  } else { postman.setNextRequest('Poll until terminal'); }",
+                  "  } else { pm.execution.setNextRequest('Poll until terminal'); }",
                   "} else {",
                   "  pm.environment.unset('pollTries');",
                   "  pm.test('terminal', () => pm.expect(terminal).to.include(b.execution));",
@@ -890,11 +946,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const b = pm.response.json();",
-                  "const rows = b.sources || b || [];",
-                  "rows.forEach(function (s) {",
-                  "  console.log('  ' + (s.sourceId || '') + '  breaker=' + (s.breaker || '') + '  killSwitch=' + (s.killSwitch ? 'ENGAGED' : 'none'));",
-                  "});"
+                  "// Source health needs `platform:read_health`, which `platform_operator` holds and",
+                  "// `source_admin` does NOT (T06: an operator sees breaker and budget state without being",
+                  "// handed evidence access). Assert the status before reading the body — a 403 here used to",
+                  "// crash this script on `rows.forEach`, which hid the refusal instead of reporting it.",
+                  "pm.test('readable with platform:read_health', function () {",
+                  "  pm.expect(pm.response.code, ",
+                  "    '403 means this key lacks platform:read_health — pnpm key:issue --role platform_operator'",
+                  "  ).to.eql(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  var b = pm.response.json();",
+                  "  var rows = Array.isArray(b.sources) ? b.sources : [];",
+                  "  rows.forEach(function (s) {",
+                  "    console.log('  ' + (s.sourceId || '') + '  breaker=' + (s.breaker || '') +",
+                  "      '  killSwitch=' + (s.killSwitch ? 'ENGAGED' : 'none'));",
+                  "  });",
+                  "}"
                 ]
               }
             }
@@ -1289,6 +1358,230 @@
                 "type": "text/javascript",
                 "exec": [
                   "console.log('403 here means your key lacks source_admin. That is the guard working.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 - SEC go-live (four eyes)",
+      "description": "Taking the SEC litigation-releases feed live, in the order it must happen.\n\nREAD FIRST. Two of these steps are not developer actions:\n\n  * `pnpm first-contact --yes-contact-the-sec` runs OUTSIDE Postman, and the project owner\n    runs it. It is the first live request this service makes. DONE 2026-09-16, verdict\n    ALLOWED, recorded in docs/sources/sec-robots-evidence.json.\n  * APPROVE must be sent with a DIFFERENT key from the one that proposed, by a DIFFERENT\n    person. The service compares credentials; it cannot tell humans apart, so the second\n    person is real only if they hold {{approverKey}} themselves.\n\nVersion 5 is the one to approve: it carries robotsPosition HONOURED taken from the live\nrobots read. Versions 1-4 are stale drafts from collection test runs and must NOT be\napproved.",
+      "item": [
+        {
+          "name": "1. Read the version awaiting approval",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "ApiKey {{approverKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "sec-litigation-releases",
+                "versions",
+                "{{secVersion}}"
+              ]
+            },
+            "description": "Confirm what you are about to approve. Check two things: `robotsPosition` is HONOURED, and `proposedBy` is NOT the key you are about to approve with.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('awaiting approval', () => pm.expect(b.status).to.eql('AWAITING_APPROVAL'));",
+                  "pm.test('robots position recorded from the live read', () =>",
+                  "  pm.expect(b.content.robotsPosition).to.eql('HONOURED'));",
+                  "// The revision is the concurrency token the next request must send.",
+                  "pm.environment.set('secRevision', String(b.revision));",
+                  "console.log('v' + b.version, b.status, 'proposedBy=' + b.proposedBy, 'revision=' + b.revision);",
+                  "pm.test(\"not already active\", () => pm.expect(b.status, \"This local DB already has v\" + b.version + \" at \" + b.status).to.not.eql(\"ACTIVE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. APPROVE - four eyes, second person, reason required",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "ApiKey {{approverKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"{{secRevision}}\""
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"APPROVE\",\n  \"reason\": \"Approved by {{approverName}}, {{approverRole}}. SEC litigation-releases feed; robots.txt read live on 2026-09-16 and permits this path (evidence: docs/sources/sec-robots-evidence.json).\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}/transitions",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "sec-litigation-releases",
+                "versions",
+                "{{secVersion}}",
+                "transitions"
+              ]
+            },
+            "description": "The approval. Sent with {{approverKey}}, which must be held by someone other than the proposer.\n\nPUT A REAL NAME IN THE REASON. The audit trail stores the KEY id, not a person, so the reason text is the only place a future reader learns who decided and why. It is mandatory and the service rejects an empty one.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const name = String(pm.environment.get(\"approverName\") || \"\").trim();",
+                  "const role = String(pm.environment.get(\"approverRole\") || \"\").trim();",
+                  "if (!name || /^CHANGE ME/i.test(name) || !role || /^CHANGE ME/i.test(role)) {",
+                  "  throw new Error(\"Set approverName and approverRole to the real second person before approving.\");",
+                  "}",
+                  "const apiKey = String(pm.environment.get(\"apiKey\") || \"\");",
+                  "const approverKey = String(pm.environment.get(\"approverKey\") || \"\");",
+                  "if (!approverKey) {",
+                  "  throw new Error(\"No approverKey set. Paste the second source_admin key into approverKey.\");",
+                  "}",
+                  "if (apiKey && apiKey === approverKey) {",
+                  "  throw new Error(\"apiKey and approverKey are the same secret; four-eyes approval needs a different key holder.\");",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 403) {",
+                  "  console.log('FOUR EYES REFUSED: ' + (b.message || ''));",
+                  "  console.log('The approver key is the same identity as the proposer. Use a different key.');",
+                  "}",
+                  "pm.test('approved', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('secRevision', String(b.revision));",
+                  "  console.log('v' + b.version + ' -> ' + b.status + '  approvedBy=' + b.approvedBy);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Activate - the rights gate (SEC-05)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "ApiKey {{approverKey}}"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"{{secRevision}}\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}/activate",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "sec-litigation-releases",
+                "versions",
+                "{{secVersion}}",
+                "activate"
+              ]
+            },
+            "description": "Not four eyes. This is the rights clearance: nothing reaches ACTIVE without a passing clearance to point at. A refusal here leaves the version at APPROVED with the clearance attached saying why — so \"why is this source not live?\" always has an answer.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('activated', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "if (b.clearance) {",
+                  "  console.log('clearance verdict: ' + b.clearance.verdict);",
+                  "}",
+                  "console.log('activated: ' + b.activated + '  status: ' + (b.version && b.version.status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Confirm it is live",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "ApiKey {{approverKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "sec-litigation-releases",
+                "versions",
+                "{{secVersion}}"
+              ]
+            },
+            "description": "The source is ACTIVE and the fetch gate will now permit it. Until this reads ACTIVE, a live search will refuse the source and report a coverage gap rather than searching it.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('ACTIVE', () => pm.expect(b.status).to.eql('ACTIVE'));",
+                  "console.log('v' + b.version + ' ' + b.status + '  activatedAt=' + b.activatedAt);"
                 ]
               }
             }

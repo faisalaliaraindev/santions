@@ -27,6 +27,7 @@ of previous sessions. It is deliberately short.
 > | :----- | :---------------------------------------------------------------------------------------------------------- | :-------------------------- | :-------------- |
 > | **P0** | The live rule-based extractor (D-048)                                                                       | Engineering                 | **Done**        |
 > | **P0** | F1 normalisation and charset (D-049)                                                                        | Engineering                 | **Done**        |
+> | **P0** | FI-20 — the automatic halt and its audit entry commit together (`tests/integration/source-halt.test.ts`)    | Engineering                 | **Done**        |
 > | **P1** | `pnpm first-contact` → update `robotsPosition` on what it said → propose/approve/activate                   | **Source admin, four eyes** | Open — blocking |
 > | **P1** | Search a subject actually present in the SEC feed — it is a `FIXED_FEED`, so the name never reaches the SEC | Whoever runs the demo       | Open            |
 >

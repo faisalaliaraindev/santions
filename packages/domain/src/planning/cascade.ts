@@ -272,9 +272,36 @@ export function summariseCascade(attempts: readonly RungAttempt[]): CascadeSumma
 export function cascadeCoverageOutcomes(
   attempts: readonly RungAttempt[],
 ): readonly SourceCoverageOutcome[] {
-  return attempts
-    .filter((attempt) => isGap(attempt.outcome))
-    .map((attempt) => ({
+  return attempts.map((attempt) => {
+    // A rung that answered records `COMPLETED`, including when it answered with nothing.
+    //
+    // This list used to hold **only** gaps, which is right for a coverage statement and wrong for
+    // anything that reads it as a census of what was asked. `aggregateRun` does exactly that: it
+    // decides "did anything answer?" from these outcomes, so a walk in which every rung either
+    // answered emptily or had no source produced no `COMPLETED` at all and was reported as
+    // `FAILED` — a run that polled a publisher, got a valid response and found no match, filed as
+    // a failure.
+    //
+    // That is the difference between "we looked and there was nothing" and "we could not look",
+    // and it is the whole point of the coverage vocabulary. `EMPTY` is the first of those.
+    if (!isGap(attempt.outcome)) {
+      return {
+        sourceId: attempt.sourceId ?? `cascade-rung-${String(attempt.rung)}`,
+        sourceName: attempt.sourceName,
+        cascadeRung: attempt.rung,
+        outcome: 'COMPLETED' as const,
+        detail:
+          attempt.outcome === 'EMPTY'
+            ? `${attempt.sourceName} answered at rung ${String(attempt.rung)} and had nothing ` +
+              `for this subject. The rung was searched; this is not a coverage gap.`
+            : `${attempt.sourceName} answered at rung ${String(attempt.rung)} with ` +
+              `${String(attempt.candidates)} candidate(s).`,
+        queriesAffected: attempt.queriesAffected,
+        truncation: null,
+      };
+    }
+
+    return {
       sourceId: attempt.sourceId ?? `cascade-rung-${String(attempt.rung)}`,
       sourceName: attempt.sourceName,
       cascadeRung: attempt.rung,
@@ -287,7 +314,8 @@ export function cascadeCoverageOutcomes(
           : `Rung ${String(attempt.rung)} did not answer.`),
       queriesAffected: attempt.queriesAffected,
       truncation: null,
-    }));
+    };
+  });
 }
 
 /**

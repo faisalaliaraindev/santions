@@ -125,21 +125,49 @@ export function fold(value: string): string {
  * Does this candidate match the planned query?
  *
  * Only ever applied where the publisher was **not** asked the question — a fixed feed is their
- * whole list. Deliberately dumb: every term of the query longer than one character must appear in
- * the title or the snippet.
+ * whole list.
+ *
+ * **It matches on the query's quoted phrases, and ignores the bare terms.** `buildQueryPlan`
+ * writes the subject's name as a phrase (`"Jon P. Kipp"`) and appends conduct terms unquoted
+ * (`"Jon P. Kipp" fraud`). Those bare terms are relevance hints addressed to a **search engine**
+ * — they tell a query feed what to rank. Applied instead as filters against a publisher's own
+ * list, they are a guarantee of nothing: an SEC litigation-release item is titled with the
+ * defendant's name and nothing else, so requiring `fraud` to appear in it discards the very
+ * entry the query was looking for.
+ *
+ * That was not hypothetical. It made every live search against the SEC feed return
+ * `NO_MATCHES_FOUND` for names that were *in the feed at the time*, which is the worst shape a
+ * bug here can take: a confident, well-formed, entirely wrong "nothing found".
+ *
+ * Every quoted phrase must appear, not merely one. The plan already contains a name-only query
+ * in its own right, so a feed entry naming just the person is still reached by that query; the
+ * stricter reading only affects queries that anchor on a name *and* a company, where requiring
+ * both is the correct meaning.
+ *
+ * Falls back to the old term-wise behaviour when the query carries no quoted phrase at all, so a
+ * caller that builds a query some other way is not silently matched against everything.
  *
  * **This is not relevance filtering and decides nothing about adversity.** It decides whether a
  * headline is about the person the query names. FR-06's nine-signal filter is a separate step
  * whose weights belong to the labelled corpus rather than to a guess here.
  */
 export function matchesQuery(queryText: string, candidate: RawCandidate): boolean {
+  const haystack = `${fold(candidate.title ?? '')} ${fold(candidate.snippet ?? '')}`;
+
+  const phrases = [...queryText.matchAll(/"([^"]+)"/g)]
+    .map((match) => fold(match[1] ?? '').trim())
+    .filter((phrase) => phrase.length > 1);
+
+  if (phrases.length > 0) {
+    return phrases.every((phrase) => haystack.includes(phrase));
+  }
+
   const terms = fold(queryText)
     .split(/\s+/)
     .filter((term) => term.length > 1);
   if (terms.length === 0) {
     return true;
   }
-  const haystack = `${fold(candidate.title ?? '')} ${fold(candidate.snippet ?? '')}`;
   return terms.every((term) => haystack.includes(term));
 }
 
