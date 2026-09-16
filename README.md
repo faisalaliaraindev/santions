@@ -12,6 +12,10 @@ existing sanctions.io integration for that.
 Every source, library and model is free to use, open-source, or public data published by the
 issuing authority. There are no paid data subscriptions and no commercial data licences.
 
+> **New here? Read [`SETUP.md`](./SETUP.md).** It takes you from an empty machine to a
+> working search in about fifteen minutes, covers the frontend too, and says exactly which keys
+> are needed and which are not.
+
 ## Status
 
 **G0 and G2 complete. G1 partial. Everything after that is not started.**
