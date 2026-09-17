@@ -194,6 +194,26 @@ be switched back on, or a routine pause is irreversible. Both are bad, in opposi
 `verify()` must refuse a disabled key exactly as it refuses a revoked one, and the listing must
 show which it is.
 
+### The live path the phase was gating — **PROVEN 2026-09-17**
+
+Not one of I1–I6, but the reason the phase mattered. A tenant created by `POST /v1/signup`, holding
+**its own live key**, ran a real SEC-backed adverse search against the local stack and retrieved a
+terminal result:
+
+```
+tenant      tenant-6a39fca2-f6a2-4068-8c18-3952b544aad4, created 2026-09-17T09:09:22.910Z
+search      de734e90-4ded-4e05-b187-d5b9b0345571, environment live
+            SUCCEEDED / NO_MATCHES_FOUND / INCOMPLETE, rung 6 reached
+source      sec-litigation-releases at rung 1, COMPLETED, 1 candidate. No fixture source
+            appears anywhere in the run's outcomes.
+requests    1 to the feed URL; 3 against the source budget for the whole run.
+```
+
+`SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live` (`tests/live/sec-live-e2e.test.ts`) re-runs it.
+Nothing else does: no default suite names the `live` project, and the suite refuses without that
+variable. `pnpm sec:live-smoke --yes-contact-the-sec` is the cheaper first check — one request,
+counted.
+
 ### I5 — Sandbox and live keys side by side
 
 Already true: a key is bound to one environment and cannot be promoted. What changes is that a
@@ -229,7 +249,7 @@ After this phase, anyone with an email address can. Three consequences worth sta
 1. **A publisher's complaint arrives at us**, not at the tenant, because it is our user agent in
    their logs.
 2. **One tenant can exhaust a shared budget.** The SEC's free tier is 120 requests an hour for the
-   _whole service_, and a single search currently spends about 41 of them.
+   _whole service_, and nothing bounds how many searches one tenant runs in an hour.
 3. **Every first-contact approval was given on an assumption about use** that open signup
    changes.
 
@@ -241,12 +261,16 @@ After this phase, anyone with an email address can. Three consequences worth sta
   confirmed. Costs a real customer one click.
 - **A per-tenant live budget — not in this phase.**
 
-**So consequence 2 above is unmitigated, and that makes the fixed-feed fetch a prerequisite rather
-than an efficiency fix.** A `FIXED_FEED` is fetched once per planned query instead of once per
-run, so one search spends about 41 of the SEC's 120 hourly requests. Fixing it cuts that by
-roughly forty times. It should land **before** live keys are issued to tenants nobody at Erly has
-spoken to, because until then a single self-signed-up tenant can exhaust the whole service's
-hour.
+**So consequence 2 above is unmitigated.** It was written as though the fixed-feed fetch were the
+cause — "one search spends about 41 of the SEC's 120 hourly requests". **Corrected 2026-09-17:
+that figure was never measured and was wrong.** A search costs **one** poll of the feed (plus
+`robots.txt` on a cold process and one fetch per candidate document); the fixed-feed work landed on
+2026-09-17 and is in `apps/api/src/sources/feed-poll-cache.ts`, with
+`apps/api/test/fixed-feed-amplification.test.ts` holding the line.
+
+What is still unmitigated is the thing the fetch path cannot fix: **nothing bounds how many
+searches one self-signed-up tenant runs**. The per-tenant live budget D-052 deferred is the
+mitigation, and it belongs to production readiness rather than to this phase.
 
 ---
 

@@ -65,16 +65,64 @@ explicit `scopes` list only when you want a key that can do **less** than its ro
 
 ## 4. Import into Postman
 
-Import from this folder:
+### Import exactly two files
 
-| File                                               | What it is                                                   |
-| :------------------------------------------------- | :----------------------------------------------------------- |
-| `erly-adverse-search-full.postman_collection.json` | **All 34 endpoints**, 48 requests, 11 folders. Start here    |
-| `erly-adverse-search.postman_collection.json`      | The short version — just the happy path and the refusals     |
-| `local.postman_environment.json`                   | `baseUrl`, `apiKey` and the ids the requests fill in for you |
+**One collection:**
 
-Select the **Erly adverse-search — local** environment, then paste the secret from step 3 into
-the `apiKey` variable.
+| File                                                   | What it is                                                                                                                           |
+| :----------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
+| **`erly-adverse-search-full.postman_collection.json`** | **Import this one.** 80 requests, 15 folders, sandbox **and** live. It is the only collection kept up to date                        |
+| `erly-adverse-search.postman_collection.json`          | A short happy-path subset kept for demos. It has no signup flow, no live folder and no admin. Do not use it to test sandbox and live |
+
+**One environment** — these are mutually exclusive, so import the one you want and select it:
+
+| File                                         | Select it when                                                                            | `apiKey`                       | Subject                         |
+| :------------------------------------------- | :---------------------------------------------------------------------------------------- | :----------------------------- | :------------------------------ |
+| **`sandbox.ready.postman_environment.json`** | **Testing sandbox.** Start here                                                           | seeded `tenant-alpha`, sandbox | María Fernanda Solís Rojas (CR) |
+| **`live.ready.postman_environment.json`**    | **Testing live**, after sandbox works                                                     | seeded `tenant-live`, live     | Jon P. Kipp (US)                |
+| `local.ready.postman_environment.json`       | A mixed working file. Same keys as sandbox, but `environment` is `live` — easy to confuse | —                              | —                               |
+| `local.postman_environment.json`             | You are starting from scratch and want to paste your own keys                             | empty                          | —                               |
+
+The `.ready.` files are **gitignored and hold working secrets**. They are not in the repository;
+they are on the machine that ran `pnpm key:issue`.
+
+### The keys, and why there are four
+
+No single key runs the collection — see the role table below. Each ready environment carries all
+four, already filled in:
+
+| Variable      | Role                       | Used by                                              |
+| :------------ | :------------------------- | :--------------------------------------------------- |
+| `apiKey`      | `analyst`                  | Subjects, searches, results — the collection default |
+| `adminKey`    | `tenant_admin` + `analyst` | Folder 12, which needs `apikey:manage`               |
+| `operatorKey` | `platform_operator`        | Folder 8, source health                              |
+| `approverKey` | `source_admin`             | Folder 11, the four-eyes approval                    |
+
+If one is empty, mint it:
+
+```bash
+pnpm key:issue --tenant tenant-alpha --env sandbox --role tenant_admin --role analyst --label postman
+```
+
+### Then run, in this order
+
+1. **Folder 0 — Health.** If this fails, nothing else will, and it will not be an auth problem.
+2. **Folder 13 — Tenant E2E**, with **Run folder**. The whole customer join against fixtures:
+   signup → verify → sign in → both keys → subject → search → findings. 31 requests, 28
+   assertions. This is the best single proof that sandbox works.
+3. **Folders 2, 3, 4** for the individual endpoints, then 8, 9, 10, 12 for admin and refusals.
+4. **Folder 14 — LIVE**, only once sandbox is green and only deliberately. See the live section
+   below.
+
+**Run collection** over the whole file works, but folders needing a different key will show 403s.
+That is the role separation, not a fault. Run folder by folder.
+
+**Signup is bounded at 5 per origin per hour (D-056)**, so a sixth run of folder 13 or 14 inside
+the hour returns 429 and halts. Wait, or clear the bucket on a local stack:
+
+```bash
+mongosh "$MONGODB_URI" --eval 'db.attemptLog.deleteMany({bucket:"SIGNUP"})'
+```
 
 ## 4b. Who you can search for
 
@@ -132,6 +180,19 @@ Folder **11 — SEC go-live (four eyes)** is the live-source approval path after
 has recorded an allowed robots result. Read [`SEC-GO-LIVE.md`](./SEC-GO-LIVE.md) before running it:
 it uses a separate `approverKey`, refuses placeholder approver names, and bails if the source is
 already active.
+
+Folder **13 — Tenant E2E: signup to adverse search** is the whole customer join against the
+fixture server: signup → verification token → verify → sign in → **sandbox and live keys** →
+subject → search → poll → findings, with every call from the subject onward on the tenant's own
+key. Runnable with **Run folder**; 31 requests, 28 assertions.
+
+Folder **14 — Tenant E2E: LIVE, a real SEC-backed search** is the same join with a real publisher
+at the end of it. **It contacts the SEC.** It will not run by accident: request 14.0 halts the
+folder unless the environment variable `liveConfirm` is exactly `yes-contact-the-sec`, and 14.6
+halts it again if the source's breaker is open. Read
+[the live section below](#testing-against-real-sources-live-mode--read-before-you-try) first, and
+run `pnpm sec:live-smoke --yes-contact-the-sec` before it — one request, counted, with everything
+about it printed.
 
 ### No single key runs the whole collection, by design
 
@@ -282,25 +343,56 @@ broken. A live stack that reported `COMPLETE` here would be the thing to worry a
 
 ### The order of operations
 
-Steps 1 to 3 are **not** things a developer does on the way to a demo. Step 1 is the first
-deliberate live request this project has ever made, and step 3 needs two different people.
+**Steps 1 to 3 have already been done on this database** — 2026-09-16, recorded in
+[`../docs/sources/first-live-contact.md`](../docs/sources/first-live-contact.md). They are kept
+here because they are what a fresh database needs, and because step 1 is not a thing a developer
+does on the way to a demo.
 
 1. `pnpm first-contact` — one `GET https://www.sec.gov/robots.txt`. Requires
-   `--yes-contact-the-sec`. **This is the first deliberate live request this project has ever
-   made, and the project owner runs it.** It writes `docs/sources/sec-robots-evidence.json` as
-   D6 evidence.
+   `--yes-contact-the-sec`. **This was the first deliberate live request this project ever made,
+   and the project owner ran it**, at 2026-09-16T10:56:04Z. It wrote
+   `docs/sources/sec-robots-evidence.json` as D6 evidence: HTTP 200, verdict **ALLOWED**.
 2. Update `robotsPosition` on the source record to reflect **what robots.txt actually said** —
    not what you expected it to say. It ships as `NOT_ESTABLISHED`, which the fetch gate refuses,
    and that ordering is deliberate. How that permission is approved and recorded is open
    decision **D6**, and it is the rule governing this write.
-3. Propose → approve → activate the source through the admin folder. **This needs four eyes**: the
-   proposer and the approver cannot be the same person, and the reason field is mandatory (SEC-06).
-   That means a **second named person** has to exist before this step can run at all.
-4. Run a search for a subject you have confirmed is in the feed.
+3. Propose → approve → activate through the admin folder (folder 11). **This needs four eyes**:
+   the proposer and the approver cannot be the same person, and the reason field is mandatory
+   (SEC-06).
+4. **`pnpm sec:live-smoke --yes-contact-the-sec`** — one poll of the feed, through the real
+   connector, with the request count read from the poll cache rather than assumed. Do this before
+   anything longer: it is the cheapest place to find a problem, and it prints the names currently
+   in the feed, which is what step 6 needs.
+5. **`pnpm source:health sec-litigation-releases`** if the smoke test reports a blocked breaker.
+   `--reset --reason "why"` clears our own record; it weakens nothing and resets nothing at
+   sec.gov.
+6. Run folder **14** with `liveConfirm=yes-contact-the-sec` and `liveSubjectName` set to a name
+   step 4 printed. Or run the whole thing headlessly:
+   `SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live`.
 
-**What the first live run will honestly report:** `SUCCEEDED`, coverage `INCOMPLETE`, most rungs
-unsearched, one live source, US and English only, every fixture source refused, and a warning that
-the extraction was rule-based and unbenchmarked. Expect that, so it does not read as a regression.
+**What a live run honestly reports:** `SUCCEEDED`, coverage `INCOMPLETE`, most rungs unsearched,
+one live source, US and English only, every fixture source refused, and a warning that the
+extraction was rule-based and unbenchmarked. Expect that, so it does not read as a regression.
+
+**A run can store a finding and still say `NO_MATCHES_FOUND`.** An `AMBIGUOUS` band is not a match
+(FR-13). That is the banding engine being correct, not retrieval failing.
+
+### How many requests a live search costs
+
+One poll of the feed, one `robots.txt` on a cold process, and one document fetch per candidate —
+three or four, out of a free tier of **120 an hour for the whole service**.
+
+That is worth stating because it used to be wrong in the other direction. Until 2026-09-17 several
+documents claimed a fixed feed was fetched "once per planned query, about 41 identical requests per
+run". The figure was never measured and was not what the code did. The real defect was that the
+publisher's own recorded **poll floor** — fifteen minutes, in the source record — was enforced
+nowhere, so every search re-polled and concurrent searches each opened a socket.
+`FixedFeedPollCache` now holds that floor, and `pnpm sec:live-smoke` prints the count so the claim
+is checkable rather than asserted.
+
+**What is still unbounded is per tenant.** Nothing limits how many searches one self-signed-up
+tenant runs in an hour (D-052 deferred the per-tenant live budget). That is the remaining
+production item, and no change to the fetch path addresses it.
 
 ## Keeping the collection honest
 

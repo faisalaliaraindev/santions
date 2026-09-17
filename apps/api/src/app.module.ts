@@ -9,6 +9,7 @@ import { FindingsService } from './pipeline/findings.service.js';
 import { SearchJobHandler } from './pipeline/search-job.handler.js';
 import { CascadeService } from './pipeline/cascade.service.js';
 import { LadderBuilder } from './pipeline/ladder.builder.js';
+import { FixedFeedPollCache } from './sources/feed-poll-cache.js';
 import { SearchPipeline } from './pipeline/search-pipeline.service.js';
 import { FetchGateService } from './sources/fetch-gate.service.js';
 import { SourceVersionService } from './sources/source-version.service.js';
@@ -111,8 +112,7 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
  * exists. `NODE_ENV` is the same value `loadConfig` derives `isProduction` from, and the
  * controller's constructor asserts the two agree.
  */
-const DEV_ONLY_CONTROLLERS =
-  process.env['NODE_ENV'] === 'production' ? [] : [DevMailboxController];
+const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [DevMailboxController];
 
 /**
  * Guard order is deliberate and enforced by registration order:
@@ -559,6 +559,9 @@ const DEV_ONLY_CONTROLLERS =
         CascadeService,
       ],
     },
+    // The fixed-feed poll floor. A singleton because what it bounds is the number of requests
+    // the publisher sees, which is a property of the process rather than of any one run.
+    FixedFeedPollCache,
     {
       // What sits on the FR-05 ladder, read from the registry on every run (D-045). Not cached:
       // a cached ladder keeps asking a source an administrator retired.
@@ -569,6 +572,7 @@ const DEV_ONLY_CONTROLLERS =
         config: AppConfig,
         versions: SourceVersionService,
         gate: FetchGateService,
+        pollCache: FixedFeedPollCache,
       ) =>
         new LadderBuilder(db, adapters, {
           mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
@@ -578,8 +582,18 @@ const DEV_ONLY_CONTROLLERS =
           // document fetch uses, so it inherits the SEC-02 screening, robots, both byte budgets,
           // both breakers and the D17 stop conditions rather than growing a weaker copy.
           evidenceFetch: adapters.evidenceFetch,
+          // One per process, so a fixed feed costs one request per poll floor however many
+          // queries or searches are matched against it.
+          pollCache,
         }),
-      inject: [MONGO_DB, SOURCE_ADAPTERS, APP_CONFIG, SourceVersionService, FetchGateService],
+      inject: [
+        MONGO_DB,
+        SOURCE_ADAPTERS,
+        APP_CONFIG,
+        SourceVersionService,
+        FetchGateService,
+        FixedFeedPollCache,
+      ],
     },
     {
       // Walking it. Separate from the builder so the walk is testable against a ladder of stubs

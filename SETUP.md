@@ -419,7 +419,36 @@ A source is only reachable when **all** of these are recorded on its approved ve
 | Rights clearance `ALLOW`               | SEC-05 gate at activation                                 |
 
 The SEC litigation-releases feed is the one source set up for this. Its first-contact evidence is
-in `docs/sources/sec-robots-evidence.json`.
+in `docs/sources/sec-robots-evidence.json`, and what has actually been contacted, when, is in
+`docs/sources/first-live-contact.md`.
+
+**Before the full flow, prove the connector on its own.** One request, counted, with everything
+about it printed:
+
+```bash
+pnpm sec:live-smoke                        # says what it would do, sends nothing
+pnpm sec:live-smoke --yes-contact-the-sec  # sends exactly one poll
+```
+
+If it reports `SEC LIVE SMOKE TEST BLOCKED` because the breaker is open, that is **our** record of
+the source refusing us, not the SEC refusing us right now:
+
+```bash
+pnpm source:health sec-litigation-releases
+pnpm source:health sec-litigation-releases --reset --reason "why"
+```
+
+The reset clears the recorded breaker, failure counts and budget windows. It does not weaken the
+breaker — the next failure opens it again on the same terms — and it resets nothing at sec.gov.
+
+**The whole tenant flow, live**, from signup to a retrieved result on the tenant's own live key:
+
+```bash
+SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live
+```
+
+Nothing else runs it: no default suite names the `live` project, and it refuses without that
+variable.
 
 **Approval is four eyes**: the person who proposes a version cannot approve it. See
 `postman/SEC-GO-LIVE.md`.
@@ -507,9 +536,15 @@ freeTierDailyBudget: 500
 Change one through the admin API (propose → approve → activate), not by editing a file. Lowering a
 budget takes effect without a deployment.
 
-> **Known issue:** a `FIXED_FEED` is currently fetched once per planned query — about 41 identical
-> requests per run — so the SEC's 120/hour budget is exhausted after two or three live searches.
-> When that happens the symptom is `PARTIAL` / `UNRESOLVED` with a rejected lead at stage `FETCH`.
+> **Fixed 2026-09-17.** This used to warn that a `FIXED_FEED` was fetched once per planned query,
+> "about 41 identical requests per run". The figure was never measured and was wrong — the real
+> cost was one request per F1 query — but the underlying defect was real: the publisher's recorded
+> poll floor was enforced nowhere, so every search re-polled. `FixedFeedPollCache` now holds that
+> floor, and one search costs **one** poll of the feed.
+>
+> If you do exhaust the budget, the symptom is `PARTIAL` / `UNRESOLVED` with a lead rejected at
+> stage `FETCH` and a detail naming the spent window. `pnpm source:health sec-litigation-releases`
+> shows it.
 
 ## Never commit
 

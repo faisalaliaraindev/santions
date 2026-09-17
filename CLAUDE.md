@@ -21,8 +21,12 @@ before any work starts.
    code, not the test.
 2. **A suite that does not exist fails; it never passes vacuously.** Unimplemented commands
    exit non-zero on purpose. `pnpm verify:local` reports them as unverified.
-3. **Never claim verification that did not happen.** No live source has been contacted. No
-   language is enabled. If you did not run it, say so.
+3. **Never claim verification that did not happen.** No language is enabled. If you did not
+   run it, say so.
+
+   **First live contact has happened** — 2026-09-16, the SEC, under D17. See
+   `docs/sources/first-live-contact.md` for exactly what was contacted and when. That is the
+   only source ever contacted, and it does not make any other claim about coverage true.
 
 ## Purity boundary
 
@@ -45,10 +49,11 @@ pnpm demo:api          # end-to-end walkthrough over the real HTTP API (mock sou
 
 ## Key documents
 
-| File                            | What it is                                             |
-| :------------------------------ | :----------------------------------------------------- |
-| `docs/execution/START-HERE.md`  | **Session entry point.** Active phase and reading list |
-| `docs/execution/handoff-log.md` | What the last session did and left behind              |
-| `docs/delivery-plan.md`         | Why the phases are in this order                       |
-| `docs/implementation-status.md` | Gate-by-gate status and known gaps                     |
-| `docs/open-decisions.md`        | D1–D12, each with an owner and closing gate            |
+| File                            | What it is                                                                     |
+| :------------------------------ | :----------------------------------------------------------------------------- |
+| `RUNBOOK.md`                    | **What to start and in what order**, from nothing running to a working request |
+| `docs/execution/START-HERE.md`  | **Session entry point.** Active phase and reading list                         |
+| `docs/execution/handoff-log.md` | What the last session did and left behind                                      |
+| `docs/delivery-plan.md`         | Why the phases are in this order                                               |
+| `docs/implementation-status.md` | Gate-by-gate status and known gaps                                             |
+| `docs/open-decisions.md`        | D1–D12, each with an owner and closing gate                                    |

@@ -27,6 +27,213 @@ Say what you did about it.
 
 ---
 
+## 2026-09-17 (eleventh) — Fixed-feed amplification, the breaker that opened itself, and the local live path
+
+**Did.**
+
+1. **Measured the fixed-feed fetch before changing anything, and the documented figure was wrong.**
+   Five documents said a fixed feed was fetched "once per planned query — about 41 identical
+   requests per run". It is not, and has not been since `9c5127c`: `RssNewsDiscoveryAdapter`
+   already returns `noResults` for any family but F1 on a `FIXED_FEED`, so F3 and F4 never reach
+   the wire. Measured with a counting fetch port driving the real `LadderBuilder` →
+   `CascadeService` → adapter path against a live-sized plan (17 categories, 3 terms each):
+   **53 planned queries → 1 request**, and **56 → 4** once the subject carries three aliases. The
+   41 was an inference from the plan's size that nobody had run. Corrected in `START-HERE.md`
+   rather than quietly deleted.
+
+2. **The real defect was underneath it: `pollFloorMs` was enforced nowhere.** It is parsed from
+   `accessPolicy.pollFloorSeconds` into `ActiveSourceVersion` and, until now, read by nothing — so
+   the publisher's own recorded minimum interval (fifteen minutes for the SEC) bounded nothing,
+   every search re-polled, and concurrent searches each opened their own socket. **New:**
+   `apps/api/src/sources/feed-poll-cache.ts` — `FixedFeedPollCache`, a process singleton that
+   serves a fixed feed's poll from the last response inside the recorded floor, joins an in-flight
+   poll rather than starting a second, never caches a failure, and **counts**, so "one search made
+   one request" is a number rather than a claim. Wired through `LiveDiscoveryDeps` and the
+   `LadderBuilder` provider in `app.module.ts`.
+
+3. **`fetchKey` no longer carries the query id for a fixed feed.** The port documents it as the
+   FR-06 idempotency key; namespacing it per query made every identical poll of an unchanging
+   resource a distinct key. A query feed keeps the query, because there the URL genuinely differs.
+
+4. **Found and fixed the thing that had the SEC source hard-blocked.** `CascadeService.askOne`
+   recorded **every** `FAILED` outcome against source health — including the ones a connector
+   raises for **our own** gate refusals, which carry `policyRefusal`. That signal classifies as
+   `HARD_BLOCK`: one missing robots position or an out-of-scope language opened the breaker and
+   suspended the domain on a publisher that had done nothing. `failure-classification.ts` says in
+   as many words that this signal "must never be fed to a per-source breaker", and
+   `HttpEvidenceFetchAdapter` honours it on the document path; the discovery path did not. That is
+   how `sec-litigation-releases` reached `OPEN` / `HARD_BLOCK` with `consecutiveFailures: 0` and a
+   `sec.gov` domain record showing a success and **no failure at all**. It is still a recorded
+   `FAILED` attempt and still a coverage gap — it is only source _health_ that must not hear it.
+
+5. **`pnpm source:health`** (`scripts/source-health.mjs`) — reads a source's breaker, failure
+   counts and budget windows; `--reset --reason "…"` clears the recorded state. It has **no** flag
+   that disables the breaker, refuses when `NODE_ENV=production`, refuses a non-local
+   `MONGODB_URI` through the same guard `local:bootstrap` uses, refuses to go around an engaged
+   kill switch, and prints in as many words that it reset nothing at sec.gov. There is
+   deliberately **no HTTP route**: an endpoint exists in production whether or not its guard is
+   right.
+
+6. **`pnpm sec:live-smoke`** (`scripts/sec-live-smoke.mjs`) — one real poll through the real
+   application context, reporting the request count from the poll cache, the leads normalised, and
+   source health before and after. Sends nothing without `--yes-contact-the-sec`.
+
+7. **`pnpm test:live`** — `tests/live/sec-live-e2e.test.ts`, a new vitest project named `live`.
+   Signup → verify → login → **own live key** → subject → live search → poll → findings, with
+   every customer call on the tenant's own key, asserting `mode: LIVE`, the SEC source id in the
+   run's outcomes, **no** fixture source id anywhere in them, one request to the feed, and a
+   bounded budget movement. Two gates: no default run names the `live` project, and the suite
+   refuses without `SEC_LIVE_E2E=yes-contact-the-sec`.
+
+8. **Regression tests.** `apps/api/test/fixed-feed-amplification.test.ts` (10) and
+   `apps/api/test/sec-retry-bounds.test.ts` (11). Between them: one poll for a full plan; one poll
+   with aliases; fewer than five requests for a 56-query plan; no re-poll on duplicate
+   orchestration; a re-poll once the floor elapses; concurrent polls collapsed; failures not
+   served from the cache; a gate refusal not recorded against health; a real 429 still recorded;
+   no retry after success; `RATE_LIMITED` bounded to the table's count; `HARD_BLOCK` terminal on
+   the first attempt; `Retry-After` honoured exactly.
+
+9. **Postman: folder 14, and two collection defects found by actually running it.** Folder
+   **14 - Tenant E2E: LIVE, a real SEC-backed search** mirrors folder 13 with a real publisher at
+   the end: signup → verify → login → **live key** → pre-flight breaker check → subject → live
+   search → poll → provenance assertions. Two guards, both halting the folder: **14.0** unless
+   `liveConfirm` is exactly `yes-contact-the-sec`, **14.6** unless the SEC breaker is closed.
+   14.10 asserts `mode: LIVE`, the SEC source id in the outcomes, and **none of the eight fixture
+   source ids** — because a fixture returns `SUCCEEDED` too and provenance is the only thing that
+   tells them apart. A new **SEC source health** request in folder 8 prints breaker, both budget
+   windows and the last success.
+
+   Running it found two things reading it would not have. **14.0 pointed at `/v1/health`, which is
+   a 404** — the real routes are `/health/live`, `/health/ready` and `/v1/health/dependencies`.
+   And **folder 8's three existing requests inherited the collection-level `{{apiKey}}`**, which is
+   an analyst key: they returned 403 while asserting 200. Re-pointed at `{{operatorKey}}`, which is
+   what `platform:read_health` needs. Folder 8 now passes 4/4.
+
+   All four environment files gained the keys the signup and live flows set; existing values were
+   left alone, so nobody's working secret was overwritten.
+
+10. **Documentation corrected against evidence, not assumption.**
+    `docs/sources/first-live-contact.md` is new and records **first live contact:
+    2026-09-16T10:56:04.310Z**, `GET https://www.sec.gov/robots.txt`, HTTP 200, verdict ALLOWED —
+    read from `docs/sources/sec-robots-evidence.json`, which the script wrote at the time. It also
+    records the first successful feed polls (fifteen `environment: 'live'` runs from
+    2026-09-16T13:06:53Z, one reaching `SUCCEEDED` with a stored finding at 2026-09-17T07:42:55Z)
+    and says plainly what had **not** happened at those points: no newly signed-up tenant had ever
+    used its own live key. `CLAUDE.md`, `START-HERE.md`, `coverage-matrix.md` and
+    `implementation-status.md` now point there instead of saying "no live source has been
+    contacted".
+
+**Verified.** Everything below actually ran.
+
+```
+lint            clean          typecheck       clean
+unit            917 passed     invariants      29 passed     evaluation   12 passed
+security        181 passed     e2e (API)       26 passed
+integration     215 passed  — T01 included; see "T01" below
+live (new)        7 passed  — SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live
+```
+
+**T01 was red on arrival and is green now, by scoping rather than by deletion.** It asserted that
+**no** record in four collections carries `mode != MOCK`, under the heading "every **seeded**
+record is labelled MOCK". Those are different statements, and the previous session's two
+`mode: LIVE` tenants — plus the ones this session's live suite creates — made the difference
+visible: a tenant created by a live-mode process is correctly labelled `LIVE`, and counting it
+there made the label doing its job look like the label being absent. The assertion is now scoped to
+the records `local:bootstrap` seeds, plus every `FIXTURE_MOCK` source version, plus a new check
+that no record carries a mode outside `{MOCK, LIVE}`. The neighbouring tenant test was relaxed the
+same way, for the same reason, and its comment says so. **Proven by planting the violation:**
+setting `tenant-alpha` to `mode: LIVE` fails it with "tenants holds seeded records not labelled
+MOCK"; reverting passes. No record was deleted — the live runs are the evidence in
+`docs/sources/first-live-contact.md`.
+
+**Live, and counted:**
+
+**Newman, against the local stack in mock mode:**
+
+```
+folder 13 (tenant E2E, fixtures)      31 requests, 28 assertions, 0 failed
+folder 8  (source health)             16 requests,  4 assertions, 0 failed
+folders 0,2,3,4,7,9,10                28 requests, 14 assertions, 0 failed
+folder 14 unarmed                      1 request  — halted at 14.0, no SEC contact
+folder 12                             PRE-EXISTING 403s: the ready environments' {{apiKey}} is an
+                                      analyst key and every request there needs apikey:manage.
+                                      Documented in the folder rather than fixed by rewriting
+                                      somebody's credentials — either point {{apiKey}} at a
+                                      tenant_admin key or run folder 13 first and use {{issuedKey}}.
+```
+
+```
+pnpm sec:live-smoke --yes-contact-the-sec     2026-09-17T08:54:05Z
+  outcome OK · 25 leads normalised · newest published 2026-09-16
+  external requests to the feed URL: 1
+  source budget moved by 2 (the feed, plus robots.txt on a cold process)
+  breaker CLOSED before and after
+```
+
+**LOCAL LIVE E2E PASSED** — `SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live`, 7 passed, 23.1s,
+2026-09-17T09:09:23Z. A tenant that did not exist 200ms earlier ran a real SEC-backed search on its
+own live key:
+
+```
+tenant        tenant-6a39fca2-f6a2-4068-8c18-3952b544aad4  "Live E2E Ltd"  mode LIVE
+              created 09:09:22.910Z, by POST /v1/signup — nothing seeded, no id in any payload
+credential    its own live API key, minted through POST /v1/tenant/api-keys on a session from
+              POST /v1/auth/login. Every call from the subject onward used it.
+search        de734e90-4ded-4e05-b187-d5b9b0345571   environment live
+              execution SUCCEEDED   findings NO_MATCHES_FOUND   coverage INCOMPLETE
+              rung reached 6
+source        sec-litigation-releases | rung 1 | COMPLETED | "answered at rung 1 with 1
+              candidate(s)". No fixture source id appears anywhere in sourceOutcomes.
+result        1 finding stored, band AMBIGUOUS, category MARKET_ABUSE. The run says
+              NO_MATCHES_FOUND because an AMBIGUOUS band is not a match (FR-13) — that is the
+              banding engine being correct, not a retrieval failure.
+requests      1 to the feed URL, asserted from FixedFeedPollCache, not assumed.
+              Source budget moved by 3 for the whole run: the feed, robots.txt on a cold
+              process, and one document fetch for the one candidate.
+breaker       CLOSED before and after, lastFailure null.
+```
+
+A second tenant, onboarded the same way inside the suite, gets **404** on that search id — not 403,
+because a tenant is not told somebody else's record exists.
+
+**Found.**
+
+1. **The "~41 requests" figure had propagated into five documents without anybody measuring it.**
+   It shaped a risk assessment (D-052) and made the fix a prerequisite for handing out live keys.
+   The prerequisite was right for a different reason — the unenforced poll floor — but the number
+   was invented. Measure before quoting.
+2. **The stored SEC version records `freeTierHourlyBudget: 120`, not the `6` the registry file
+   recommends.** So the internal backstop is the SEC's entire hourly free tier rather than a
+   thousandth of it, which is why a bad afternoon on 2026-09-16 spent the hourly window and left a
+   lead rejected at stage `FETCH`. Left alone deliberately — changing it means a new version
+   through the D1 approval lifecycle, not a hand edit, and it is a decision about how much
+   headroom a local test should have. **Raise it before any live key reaches a tenant.**
+3. **`cascadeRung: undefined` is an artefact of how the record was read, not a configuration bug.**
+   The active SEC version stores its fields nested under `content`, so `document.cascadeRung` is
+   undefined while `document.content.cascadeRung` is `1`. Both readers that matter —
+   `SourceVersionService.loadActive` and `LadderBuilder.approvedSources` — read
+   `document.content ?? document`, and the live smoke test prints `Rung 1`. Nothing to fix. Worth
+   knowing that `approvedSources` drops a source with an unreadable rung **silently**, with no log.
+4. **The smoke script has to `process.exit`.** Building the whole application context to get the
+   real connector means holding a Mongo, an S3 and an SQS client whose providers are factories
+   with no destroy hook, so `app.close()` leaves the event loop alive. Correct for the API and the
+   worker; wrong for a command that prints an answer and should stop.
+
+5. **The live suite leaves `mode: LIVE` tenants behind, and that is correct.** It onboards two
+   real tenants per run and does not clean up: the run records are the evidence that the live path
+   worked, and a test that deleted them would leave the claim unverifiable. See T01 above for the
+   assertion that had to learn the difference.
+
+**Next session should:** raise the SEC source's `freeTierHourlyBudget` from `120` back to `6`
+through the D1 approval lifecycle — the one thing this session found and deliberately did not take,
+because it is a new version an approver signs, not a hand edit.
+
+**Decisions touched:** none opened or closed. D-052's reasoning is now on firmer ground: the
+shared SEC budget is still unprotected by any per-tenant bound, and that is the remaining
+production item, not the amplification.
+
+---
+
 ## 2026-09-17 (tenth) — Phase I: the flow closes, and the role gap that stopped it
 
 **Did.**

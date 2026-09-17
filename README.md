@@ -46,6 +46,11 @@ commit, and only a replica set provides them.
 
 ## Getting started
 
+> **Nothing running? Read [`RUNBOOK.md`](./RUNBOOK.md).** It is the short version of this: every
+> command in order, what each service is for, and what breaks if you skip one. Most of the time
+> the answer is that `pnpm local:bootstrap` was not re-run after `pnpm local:up`, so the SQS queue
+> does not exist and every search sits at `QUEUED`.
+
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
@@ -93,23 +98,26 @@ is test data.
 
 ## Commands
 
-| Command                                               | What it does                                                                           |
-| :---------------------------------------------------- | :------------------------------------------------------------------------------------- |
-| `pnpm local:up`                                       | Start dependencies; waits for each service's own healthcheck                           |
-| `pnpm local:down`                                     | Stop dependencies, **keeping** persisted volumes                                       |
-| `pnpm local:reset`                                    | Delete local volumes, behind an explicit typed confirmation                            |
-| `pnpm local:bootstrap`                                | Seed the selected local environment                                                    |
-| `pnpm dev:api` / `pnpm dev:worker`                    | Run the API and the worker. Both are needed for a search to finish                     |
-| `pnpm key:issue`                                      | Mint a machine API key. Prints the secret once (D-007: provider-managed)               |
-| `pnpm first-contact`                                  | The first deliberate live request (D17). Sends nothing without `--yes-contact-the-sec` |
-| `pnpm demo:api`                                       | End-to-end walkthrough over the real HTTP API, mock sources                            |
-| `pnpm lint` / `format` / `typecheck`                  | Quality gates                                                                          |
-| `pnpm test:unit`                                      | Domain unit tests                                                                      |
-| `pnpm test:invariants`                                | **The I1-I10 release gate.** Runs with no I/O dependency.                              |
-| `pnpm test:evaluation`                                | FR-16 metrics on the held-out split                                                    |
-| `pnpm test:integration` / `security` / `e2e` / `load` | _Not implemented_ — exit non-zero                                                      |
-| `pnpm verify:local`                                   | Aggregates mandatory non-live checks; fails on skipped required suites                 |
-| `pnpm lexicon:audit`                                  | Fails if any query term maps to a protected characteristic                             |
+| Command                                               | What it does                                                                                                                    |
+| :---------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm local:up`                                       | Start dependencies; waits for each service's own healthcheck                                                                    |
+| `pnpm local:down`                                     | Stop dependencies, **keeping** persisted volumes                                                                                |
+| `pnpm local:reset`                                    | Delete local volumes, behind an explicit typed confirmation                                                                     |
+| `pnpm local:bootstrap`                                | Seed the selected local environment                                                                                             |
+| `pnpm dev:api` / `pnpm dev:worker`                    | Run the API and the worker. Both are needed for a search to finish                                                              |
+| `pnpm key:issue`                                      | Mint a machine API key. Prints the secret once (D-007: provider-managed)                                                        |
+| `pnpm first-contact`                                  | The first deliberate live request (D17). Sends nothing without `--yes-contact-the-sec`                                          |
+| `pnpm source:health [sourceId] [--reset --reason …]`  | Read a source's breaker and budget; clear the recorded state locally. Never disables the breaker, refuses outside a local stack |
+| `pnpm sec:live-smoke`                                 | **One** real SEC poll, counted and reported. Sends nothing without `--yes-contact-the-sec`                                      |
+| `pnpm test:live`                                      | The live tenant end-to-end suite. In no default run; refuses without `SEC_LIVE_E2E=yes-contact-the-sec`                         |
+| `pnpm demo:api`                                       | End-to-end walkthrough over the real HTTP API, mock sources                                                                     |
+| `pnpm lint` / `format` / `typecheck`                  | Quality gates                                                                                                                   |
+| `pnpm test:unit`                                      | Domain unit tests                                                                                                               |
+| `pnpm test:invariants`                                | **The I1-I10 release gate.** Runs with no I/O dependency.                                                                       |
+| `pnpm test:evaluation`                                | FR-16 metrics on the held-out split                                                                                             |
+| `pnpm test:integration` / `security` / `e2e` / `load` | _Not implemented_ — exit non-zero                                                                                               |
+| `pnpm verify:local`                                   | Aggregates mandatory non-live checks; fails on skipped required suites                                                          |
+| `pnpm lexicon:audit`                                  | Fails if any query term maps to a protected characteristic                                                                      |
 
 Live-mode commands (`test:contract:live`, `measure:coverage`, `verify:aws`) do not exist yet.
 They will require configured access and owner authorisation. **Live mode defaults off.**
@@ -176,6 +184,7 @@ clean result for a run in which every source was blocked.
 
 | Document                            | Contents                                                                  |
 | :---------------------------------- | :------------------------------------------------------------------------ |
+| `RUNBOOK.md`                        | **What to start, in what order, and why.** Start here                     |
 | `docs/implementation-status.md`     | Gate-by-gate status, defects found, known gaps                            |
 | `docs/architecture.md`              | Package layout, pipeline, trust boundaries, threat summary                |
 | `docs/decisions.md`                 | Architecture decisions with rationale and cost                            |

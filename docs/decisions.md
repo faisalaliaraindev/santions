@@ -1919,14 +1919,22 @@ this phase.
 
 **What that leaves standing.** A verified address is a low bar, and the unmitigated consequence is
 the one the brief states plainly: the SEC's free tier is **120 requests an hour for the whole
-service**, a single search currently spends about 41 of them, and nothing yet stops one tenant
-spending the hour. Our contact URL is in the publisher's logs, so the complaint arrives at us.
+service**, and nothing yet stops one tenant spending the hour. Our contact URL is in the
+publisher's logs, so the complaint arrives at us.
 
-**So the fixed-feed fetch stops being an efficiency fix and becomes a prerequisite.** A `FIXED_FEED`
-is currently fetched once per planned query rather than once per run. Fixing it cuts the spend of
-a search by roughly forty times, and it is the cheapest thing standing between open signup and a
-shared budget somebody exhausts. It should land before live keys are issued to tenants nobody at
-Erly has spoken to.
+**Corrected 2026-09-17.** This paragraph used to say a single search spends "about 41" of those
+requests, and that the fixed-feed fetch was therefore a prerequisite. The number was an inference
+from the query plan's size that nobody had measured, and it was wrong: a guard in
+`RssNewsDiscoveryAdapter` already kept every family but F1 off a fixed feed. Measured against a
+live-sized plan, the cost was **one request per F1 query** — 1 for a single-name subject, 4 with
+three aliases — and it is **one per search** now that `FixedFeedPollCache` enforces the
+publisher's own poll floor.
+
+**The conclusion survives the correction, for a different reason.** The amplification was never
+what made this urgent; the absence of a per-tenant bound is. One tenant running forty searches in
+an hour still spends the whole service's budget, and no code change to the fetch path alters that.
+**The per-tenant live budget is the outstanding mitigation**, and it is a production item rather
+than a local-testing one.
 
 ---
 

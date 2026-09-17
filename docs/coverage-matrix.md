@@ -7,7 +7,8 @@ horizon.
 >
 > It is a template. Every cell is populated at **G10 — live free-source verification**, by
 > running contract tests against live endpoints and measuring end-to-end recall against the
-> labelled dataset. No live source has been contacted.
+> labelled dataset. **One** live source has been contacted — the SEC litigation-releases feed,
+> first on 2026-09-16 (`docs/sources/first-live-contact.md`). Every other row here is unverified.
 >
 > Per FR-03, a language is _enabled_ only when it carries a measured recall figure. No
 > language currently carries one, so **no language is enabled**, and every run's coverage

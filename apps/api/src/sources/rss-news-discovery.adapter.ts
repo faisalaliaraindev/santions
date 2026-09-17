@@ -62,9 +62,10 @@ import { Logger } from '@nestjs/common';
 import type { CountryCode } from '@erly/adverse-domain';
 
 import { buildEndpoint } from './discovery/endpoint.js';
+import type { FixedFeedPollCache } from './feed-poll-cache.js';
 import { leadsFrom, matchesQuery } from './discovery/lead-mapping.js';
 
-import type { EvidenceFetchPort, FetchAuthorisation } from './evidence-fetch.port.js';
+import type { EvidenceFetchPort, FetchAuthorisation, FetchResult } from './evidence-fetch.port.js';
 import type { FetchGateService } from './fetch-gate.service.js';
 import type { CascadeRung, DiscoveryQuery, Lead } from './lead.js';
 import type { ContractProbeResult, NewsDiscoveryPort } from './news-discovery.port.js';
@@ -111,6 +112,18 @@ export interface RssNewsDiscoveryOptions {
    * nothing changed. Persisting it is the scheduler's job (step 3's polling half).
    */
   readonly conditional?: { readonly etag: string | null; readonly lastModified: string | null };
+  /**
+   * The process's fixed-feed poll cache, when it has one.
+   *
+   * A `FIXED_FEED` is polled whole and matched locally, so its cost is one request per poll
+   * however many planned queries — or searches — are matched against it. Without this, `discover`
+   * opens a socket per F1 query and again for every subsequent run, which is how a fifteen-minute
+   * poll floor becomes a request per name form per language per jurisdiction per search.
+   *
+   * Absent means no reuse: every poll goes to the publisher. That is the honest default for a
+   * caller that has not been given one, not a silent optimisation.
+   */
+  readonly pollCache?: FixedFeedPollCache;
 }
 
 export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
@@ -229,24 +242,45 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
       );
     }
 
-    const result = await this.options.fetch.fetch({
-      url: endpoint.url,
-      attribution: {
-        tenantId: query.tenantId,
-        jobId: query.run.jobId,
-        subjectId: query.run.subjectId,
-        queryId: query.queryId,
-        sourceId: this.options.sourceId,
-        egressIdentityId: decision.egressIdentity.identityId,
-      },
-      authorisation: decision.authorisation satisfies FetchAuthorisation,
-      budget: FEED_BUDGET,
-      conditional: this.options.conditional ?? { etag: null, lastModified: null },
-      // Deterministic per source, query and day, so a redelivered job re-uses the stored
-      // response instead of asking the publisher the same thing twice (FR-06 idempotency).
-      fetchKey: `${this.options.sourceId}:${query.queryId}:${now.toISOString().slice(0, 10)}`,
-      allowRender: false,
-    });
+    const fixedFeed = version.endpointKind === 'FIXED_FEED';
+    const issue = async (): Promise<SourceOutcome<FetchResult>> =>
+      this.options.fetch.fetch({
+        url: endpoint.url,
+        attribution: {
+          tenantId: query.tenantId,
+          jobId: query.run.jobId,
+          subjectId: query.run.subjectId,
+          queryId: query.queryId,
+          sourceId: this.options.sourceId,
+          egressIdentityId: decision.egressIdentity.identityId,
+        },
+        authorisation: decision.authorisation satisfies FetchAuthorisation,
+        budget: FEED_BUDGET,
+        conditional: this.options.conditional ?? { etag: null, lastModified: null },
+        /**
+         * The FR-06 idempotency key. For a fixed feed it is **the resource**, not the query: the
+         * publisher's list does not change because we asked a different name, so keying it per
+         * query made every identical poll a distinct request to anything reading this key. A
+         * query feed keeps the query in the key, because there the URL genuinely differs.
+         */
+        fetchKey: fixedFeed
+          ? `${this.options.sourceId}:${endpoint.url}`
+          : `${this.options.sourceId}:${query.queryId}:${now.toISOString().slice(0, 10)}`,
+        allowRender: false,
+      });
+
+    // One poll per floor, not one per planned query. A fixed feed is matched locally, so every
+    // query after the first is answered from bytes we already hold. See `feed-poll-cache.ts`.
+    const result =
+      fixedFeed && this.options.pollCache !== undefined
+        ? await this.options.pollCache.poll({
+            url: endpoint.url,
+            sourceId: this.options.sourceId,
+            minIntervalMs: version.pollFloorMs,
+            now,
+            fetch: issue,
+          })
+        : await issue();
 
     if (result.status === 'FAILED') {
       // Passed through unchanged. The signal is what the FR-06 table classifies, and the fetch

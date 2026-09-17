@@ -96,10 +96,7 @@ export function extractToken(body: string): string | null {
 export class DevMailboxController {
   private readonly emails: Collection<OutboundEmailRecord>;
 
-  constructor(
-    @Inject(MONGO_DB) db: Db,
-    @Inject(APP_CONFIG) config: AppConfig,
-  ) {
+  constructor(@Inject(MONGO_DB) db: Db, @Inject(APP_CONFIG) config: AppConfig) {
     if (config.isProduction) {
       // Unreachable through AppModule, which is the point — this catches the refactor that
       // makes it reachable, at boot, rather than at the first request for somebody's token.

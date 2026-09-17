@@ -212,12 +212,34 @@ export class CascadeService {
     }
 
     if (result.status === 'FAILED') {
-      // Through the FR-06 table, so a source failing this run is already refused on the next.
-      await this.health.recordFailure({
-        sourceId: entry.sourceId,
-        signal: result.signal,
-        now: input.now,
-      });
+      // **Our** refusals are not the publisher's failures.
+      //
+      // A connector reports a gate refusal — no first-contact approval, a robots position nobody
+      // established, a source that does not cover this language — as a `FAILED` outcome carrying
+      // `policyRefusal`. That signal classifies as `HARD_BLOCK`, which opens the breaker and
+      // suspends the domain. Feeding it to source health therefore records a working publisher as
+      // one that refused us, on the strength of a decision we made about our own configuration,
+      // and the next run is refused before a socket opens. `failure-classification.ts` says it in
+      // as many words — "this signal must never be fed to a per-source breaker" — and
+      // `HttpEvidenceFetchAdapter` already honours it on the document path. This is the discovery
+      // path, which did not.
+      //
+      // It is still a recorded `FAILED` attempt and still a coverage gap. What it is not is
+      // evidence about the source's health, because nothing was asked of the source.
+      if (result.signal.policyRefusal === true || result.signal.robotsDisallow === true) {
+        this.logger.warn(
+          `${entry.sourceId} at rung ${String(entry.rung)}: refused by our own gate — ` +
+            `${result.detail} Not recorded against the source's health: we did not ask it ` +
+            `anything.`,
+        );
+      } else {
+        // Through the FR-06 table, so a source failing this run is already refused on the next.
+        await this.health.recordFailure({
+          sourceId: entry.sourceId,
+          signal: result.signal,
+          now: input.now,
+        });
+      }
       return {
         rung: entry.rung,
         sourceId: entry.sourceId,

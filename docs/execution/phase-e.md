@@ -15,8 +15,12 @@ D built — the registry, the four-eyes approval, the rights gate, the breakers,
 kill switch — exists so that this phase can be built without that being reckless. None of it has
 ever been exercised against a real socket.
 
-**No live source has been contacted by this project.** That is still true at the moment this
-brief is written, and every step below says explicitly whether it changes that.
+**No live source has been contacted by this project.** That was true at the moment this brief was
+written, and every step below says explicitly whether it changes that.
+
+> **No longer true, and left standing as the record of when it was.** First live contact happened
+> on **2026-09-16** — the SEC, under D17. See `../sources/first-live-contact.md`. Do not read the
+> sentence above as a current statement of fact; read it as what this phase started from.
 
 ## Why the execution order is not the step numbering
 

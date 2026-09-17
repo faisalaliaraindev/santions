@@ -43,6 +43,18 @@ export default defineConfig({
         // allowed to stand in for each other.
         test: { name: 'e2e-api', include: ['tests/e2e/**/*.test.ts'], environment: 'node' },
       },
+      {
+        /**
+         * The **live** suite. It contacts real publishers.
+         *
+         * Its own project, named, and nothing runs it by default: `pnpm verify:local` and CI both
+         * enumerate their projects by name and neither names this one. `pnpm test:live` runs it,
+         * and the suite itself still refuses without `SEC_LIVE_E2E=yes-contact-the-sec` — two
+         * gates, because one of them being wrong would mean a test making requests at somebody
+         * else's server.
+         */
+        test: { name: 'live', include: ['tests/live/**/*.test.ts'], environment: 'node' },
+      },
     ],
     coverage: {
       provider: 'v8',

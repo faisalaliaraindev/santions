@@ -224,6 +224,27 @@ not mean. It never says "clear" or "clean", and nothing downstream should add th
 
 ---
 
+## Step 9b — Doing it against the real SEC
+
+Everything above is the fixture server, and every record it produced is stamped `MOCK`. The live
+version of the same walk is Postman folder **14**, or `SEC_LIVE_E2E=yes-contact-the-sec pnpm
+test:live`.
+
+Three things to know before you run either:
+
+1. **Prove the connector first.** `pnpm sec:live-smoke --yes-contact-the-sec` makes **one**
+   request, prints the response, the leads it normalised and the request count, and moves the
+   source budget by two. That is a far cheaper place to find a problem than an eleven-step folder.
+2. **The name never reaches the SEC.** The litigation-releases feed is a `FIXED_FEED`: the whole
+   list is polled and matched locally. Take a name from what the smoke test printed, or expect an
+   honest `NO_MATCHES_FOUND`.
+3. **A 200 proves nothing.** A fixture run returns `SUCCEEDED` too. What tells them apart is
+   `mode: LIVE`, `sec-litigation-releases` in the coverage outcomes, and no fixture source id
+   anywhere in them. Folder 14.10 asserts all three.
+
+`pnpm source:health sec-litigation-releases` is the first thing to look at when a live run comes
+back `PARTIAL` / `UNRESOLVED` with a lead rejected at stage `FETCH`.
+
 ## Step 10 — Try the rest
 
 | Try this                                | To see                                               |

@@ -340,14 +340,16 @@ source: reading their robots is itself the outbound request D6's research questi
 publisher whose access policy is already known-permissive. The SEC's policy says it may change, so
 robots is re-read at fetch time rather than trusted from the registry record.
 
-**It has not happened yet.** At the time this is written, **no live source has been contacted by
-this project**. The gate in front of the request was the trip-wires, and they now pass. What
-remains is that the source version above is **proposed, approved and activated through the D1
-lifecycle** — engineering wrote the record and checked it against the schema; activating it is the
-source admin's act, not a deployment's. Note that the record carries
-`robotsPosition: NOT_ESTABLISHED`, which the fetch gate refuses, so the feed cannot be polled until
-the robots read has actually happened and the position has been updated through the lifecycle on
-what it said. That ordering is deliberate and it is what makes the robots read genuinely first.
+**It happened on 2026-09-16T10:56:04.310Z.** `GET https://www.sec.gov/robots.txt`, HTTP 200, 916
+bytes, verdict **ALLOWED** for the feed path — recorded by the script at the time in
+`docs/sources/sec-robots-evidence.json`. The source version was then approved and activated
+through the D1 lifecycle (`source:approve`, `source:activate` at 2026-09-16T11:00:03Z), its
+`robotsPosition` moved from `NOT_ESTABLISHED` to `HONOURED` on the strength of what the robots read
+actually said, and the feed has been polled successfully since.
+
+That ordering held: the robots read was genuinely first, and the gate's refusal of
+`NOT_ESTABLISHED` is what made it impossible to do it the other way round. The full record of what
+has been contacted and when is `docs/sources/first-live-contact.md`.
 
 **What closing this does not license.** One source, under one approval. Every other source —
 including every Costa Rican one, and including the press-releases feed named above — is a separate

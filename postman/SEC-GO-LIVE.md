@@ -42,9 +42,44 @@ four-eyes approval.
 | 3    | `POST /v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}/activate`                                | Runs the SEC-05 rights gate. If allowed, the version becomes `ACTIVE`; if refused, it returns the clearance and leaves the version readable. |
 | 4    | `GET /v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}`                                          | Confirms the version is `ACTIVE`. Only then can live mode fetch the SEC feed.                                                                |
 
-After activation, run live mode with `pnpm dev:live`. A live search only proves the feed can be
-polled and matched locally; it does not prove recall. The extractor is still rule-based and
-unbenchmarked.
+## After activation
+
+Run live mode with `pnpm dev:live`. A live search only proves the feed can be polled and matched
+locally; it does not prove recall. The extractor is still rule-based and unbenchmarked.
+
+**Prove the connector on its own first.** One request, counted, with everything about it printed:
+
+```bash
+pnpm sec:live-smoke                        # says what it would do, sends nothing
+pnpm sec:live-smoke --yes-contact-the-sec  # sends exactly one poll
+```
+
+It reports the leads it normalised — use one of those names as the subject, because a
+`FIXED_FEED` is matched locally and the name never reaches the SEC.
+
+**If it reports `SEC LIVE SMOKE TEST BLOCKED` on the breaker**, that is _our_ record of the source
+refusing us, not the SEC refusing us now:
+
+```bash
+pnpm source:health sec-litigation-releases
+pnpm source:health sec-litigation-releases --reset --reason "why"
+```
+
+The reset clears the recorded breaker, failure counts and budget windows. It does **not** weaken
+the breaker — the next failure opens it again on the same terms, including the D17 stop
+conditions — and it resets nothing at sec.gov. It refuses outside a local stack, refuses when
+`NODE_ENV=production`, and refuses to go around an engaged kill switch, which is released through
+the admin API under four eyes.
+
+**Then the whole customer flow**, either as Postman folder 14 (set `liveConfirm` to
+`yes-contact-the-sec`) or headlessly:
+
+```bash
+SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live
+```
+
+**What it costs the SEC:** one poll of the feed, one `robots.txt` on a cold process, and one
+document fetch per candidate. Three or four requests, out of 120 an hour for the whole service.
 
 ## Cleanup
 

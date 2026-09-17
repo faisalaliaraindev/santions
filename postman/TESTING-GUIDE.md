@@ -185,6 +185,38 @@ self-promotion.
 
 ---
 
+## Stage 6c — The whole customer join (folder 13), and the live one (folder 14)
+
+**Folder 13** is signup → verification token → verify → sign in → sandbox key → live key → subject
+→ search → poll → findings, against the fixture server. Every request from the subject onward
+authenticates with the key the tenant minted for itself seconds earlier — no seeded credential, no
+JWT, no tenant id in a payload. Runnable with **Run folder**: 31 requests, 28 assertions.
+
+It proves the seam nothing else crossed: a tenant can be provisioned with everything except the
+one thing that makes the product work. It was, once — signup granted `tenant_admin` but not
+`analyst`, so the administrator could issue keys and every one of them was refused at
+`POST /v1/searches`.
+
+**Folder 14 is the same join with a real publisher at the end of it, and it contacts the SEC.**
+
+| Guard | What it does                                                           |
+| :---- | :--------------------------------------------------------------------- |
+| 14.0  | Halts the folder unless `liveConfirm` is exactly `yes-contact-the-sec` |
+| 14.6  | Halts it if the SEC source's breaker is not `CLOSED` or `HALF_OPEN`    |
+
+Before running it: the API and worker must be in live mode (`pnpm dev:live`), and
+`pnpm sec:live-smoke --yes-contact-the-sec` should have passed. The smoke test makes **one**
+request and prints the names currently in the feed — set `liveSubjectName` to one of them, because
+a `FIXED_FEED` is matched locally and a name that is not in the list returns an honest
+`NO_MATCHES_FOUND`.
+
+**What 14.10 asserts, and why a 200 is not enough.** A fixture run returns `SUCCEEDED` too. So the
+assertions are about provenance: `mode` is `LIVE`, `sec-litigation-releases` appears in the
+coverage outcomes, and none of the eight fixture source ids appears anywhere in them.
+
+The headless equivalent, with the same two gates, is
+`SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live`.
+
 ## Stage 7 — Taking a real source live (folder 11)
 
 This is the only part that reaches outside the machine, and two steps are not developer actions.

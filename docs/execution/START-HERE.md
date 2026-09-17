@@ -57,7 +57,7 @@ of previous sessions. It is deliberately short.
 > login → **sandbox and live** keys → subject → search → poll → findings, with every customer
 > call on the tenant's own key. `tests/e2e/tenant-onboarding-e2e.test.ts` proves it: 16 passed.
 >
-> **A search needs the API *and* the worker** (`pnpm dev` runs both). A stale worker completes a
+> **A search needs the API _and_ the worker** (`pnpm dev` runs both). A stale worker completes a
 > run in ~130ms as `FAILED`, which looks exactly like a provisioning bug and is not one.
 >
 > **Next: I5/I6** — mostly assembly. A tenant can already hold both key kinds; what is left is
@@ -84,12 +84,39 @@ search against the SEC litigation-releases feed returns a real finding. What Pha
 in [`phase-f.md`](./phase-f.md) — **F3, the eight FR-07 validation rules**, is the next thing
 there, and `grep validateAssertion` still returns nothing.
 
-### The highest-value fix outstanding, in either phase
+### LOCAL LIVE TEST READY — reached 2026-09-17
 
-**A fixed feed is fetched once per planned query** — about 41 identical requests per run,
-retrieving the same bytes each time. That exhausts the SEC's 120-requests-an-hour free tier after
-two or three searches, and the symptom is `PARTIAL` / `UNRESOLVED` with a rejected lead at stage
-`FETCH`. It should be fetched once per run and matched many times.
+A newly signed-up tenant can run a real SEC-backed search on its own live key against the local
+stack, and did: `SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live`, 7 passed. See the
+2026-09-17 (eleventh) entry in the handoff log for the run's identifiers and counts, and
+`docs/sources/first-live-contact.md` for what has actually been contacted and when.
+
+Two commands matter before touching live again: `pnpm sec:live-smoke --yes-contact-the-sec` makes
+**one** counted request and reports on it, and `pnpm source:health <sourceId>` reads the breaker
+and budget (`--reset --reason "…"` clears the record locally without weakening the breaker).
+
+### Fixed-feed request amplification — fixed 2026-09-17
+
+This section used to say a fixed feed was fetched **once per planned query, about 41 identical
+requests per run**. That figure was an inference from the plan's size and it was wrong: a guard in
+`RssNewsDiscoveryAdapter` already answers `noResults` for any family but F1 on a fixed feed, so
+the measured cost was **one request per F1 query** — one per name form, per language, per
+jurisdiction. Measured with a counting fetch port against a live-sized plan: **53 planned queries →
+1 request** with no aliases, **56 → 4** with three aliases.
+
+The real defect was the one underneath it: **`pollFloorMs` was read from the approved source
+version and enforced nowhere**, so every search re-polled and nothing collapsed concurrent polls.
+`FixedFeedPollCache` (`apps/api/src/sources/feed-poll-cache.ts`) now holds the publisher's own
+floor — fifteen minutes for the SEC — and `apps/api/test/fixed-feed-amplification.test.ts` fails if
+any of that regresses.
+
+Fixed at the same time: `CascadeService` recorded **our own gate refusals** against source health.
+A refusal carries `policyRefusal`, which classifies as `HARD_BLOCK`, so a missing robots position
+or an unapproved configuration opened the breaker on a publisher that had done nothing — which is
+how the SEC source reached `OPEN` / `HARD_BLOCK` with zero consecutive failures.
+
+`pnpm source:health <sourceId>` reads the record; `--reset --reason "..."` clears it locally
+without weakening the breaker.
 
 ## 2. What to read, and what not to
 
@@ -163,8 +190,11 @@ product that states something untrue about a real person.
    `packages/evaluation/src/invariants/harness.ts`. If one fails, the code is wrong.
 2. **Never mark a suite passing that did not run.** Unimplemented commands exit non-zero
    deliberately.
-3. **Never claim a source was verified live.** No live call has ever been made from this
-   project. Fixtures are labelled and isolated from live mode.
+3. **Never claim a source was verified live beyond what was actually run.** First live contact
+   happened on **2026-09-16** — the SEC, under D17 — and the litigation-releases feed has been
+   polled successfully since. `docs/sources/first-live-contact.md` records what, when and with
+   what evidence. Every other source is still unverified, and fixtures remain labelled and
+   isolated from live mode.
 4. **Never enable a language without a measured recall figure** (FR-03). None is measured, so
    none is enabled, and the coverage statement must say so.
 5. **Keep `packages/domain` and `packages/evaluation` free of I/O.** Use a port.

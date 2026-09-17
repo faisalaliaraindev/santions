@@ -124,6 +124,9 @@ describe('T01 — fresh checkout and local bootstrap', () => {
     expect(body.mode).toBe('MOCK');
   });
 
+  /** The tenants `local:bootstrap` writes. Records outside these belong to whatever created them. */
+  const SEEDED_TENANTS = ['tenant-alpha', 'tenant-beta'];
+
   it('two synthetic tenants are seeded, so cross-tenant denial is testable', async () => {
     const tenants = await mongo.db().collection('tenants').find({}).toArray();
     const ids = new Set(tenants.map((t) => String(t['tenantId'])));
@@ -137,12 +140,35 @@ describe('T01 — fresh checkout and local bootstrap', () => {
 
   it('every seeded record is labelled MOCK, so a fixture cannot pass as a live result', async () => {
     // Test T55. The label lives on the data rather than in a config flag someone can flip.
-    for (const collection of ['tenants', 'sourceVersions', 'taxonomyVersions', 'policyVersions']) {
+    //
+    // **Scoped to what the bootstrap seeds**, for the same reason the tenant test above was
+    // scoped to presence rather than exclusivity: a tenant created by a live-mode process is
+    // correctly labelled `LIVE`, and counting it here made the label doing its job look like the
+    // label being absent. What T55 forbids is a **fixture** passing as a live result, and that is
+    // what is asserted — every seeded tenant's records, and every seeded source version, carry
+    // `MOCK`. It still fails if the bootstrap ever writes one that does not.
+    for (const collection of ['tenants', 'taxonomyVersions', 'policyVersions']) {
       const unlabelled = await mongo
         .db()
         .collection(collection)
-        .countDocuments({ mode: { $ne: 'MOCK' } });
-      expect(unlabelled, `${collection} holds records not labelled MOCK`).toBe(0);
+        .countDocuments({ tenantId: { $in: SEEDED_TENANTS }, mode: { $ne: 'MOCK' } });
+      expect(unlabelled, `${collection} holds seeded records not labelled MOCK`).toBe(0);
+    }
+
+    const unlabelledSources = await mongo
+      .db()
+      .collection('sourceVersions')
+      .countDocuments({ connectorType: 'FIXTURE_MOCK', mode: { $ne: 'MOCK' } });
+    expect(unlabelledSources, 'a fixture source version is not labelled MOCK').toBe(0);
+
+    // And the other half of the same rule: no record carries a mode this system does not have.
+    // An unrecognised value is how a label stops meaning anything.
+    for (const collection of ['tenants', 'sourceVersions', 'taxonomyVersions', 'policyVersions']) {
+      const strange = await mongo
+        .db()
+        .collection(collection)
+        .countDocuments({ mode: { $nin: ['MOCK', 'LIVE'] } });
+      expect(strange, `${collection} holds a record with an unrecognised mode`).toBe(0);
     }
   });
 

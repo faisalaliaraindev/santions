@@ -32,11 +32,12 @@ import type { CascadeRung } from '@erly/adverse-domain';
 
 import type { EvidenceFetchPort } from '../sources/evidence-fetch.port.js';
 import type { FetchGateService } from '../sources/fetch-gate.service.js';
+import type { FixedFeedPollCache } from '../sources/feed-poll-cache.js';
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import type { NewsDiscoveryPort } from '../sources/news-discovery.port.js';
 import { GdeltDiscoveryAdapter } from '../sources/gdelt-discovery.adapter.js';
 import { RssNewsDiscoveryAdapter } from '../sources/rss-news-discovery.adapter.js';
-import type { OperatingMode, SourceOutcome } from '../sources/source-adapter.js';
+import type { Clock, OperatingMode, SourceOutcome } from '../sources/source-adapter.js';
 import type { SourceVersionReader } from '../sources/source-version.service.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
 import type { WebDiscoveryPort } from '../sources/web-discovery.port.js';
@@ -95,6 +96,21 @@ export interface LiveDiscoveryDeps {
   readonly gate: FetchGateService;
   /** Null when this process has no honest fetch adapter — no contact URL, or no source health. */
   readonly evidenceFetch: EvidenceFetchPort | null;
+  /**
+   * The process's fixed-feed poll cache.
+   *
+   * One per process, shared by every connector it builds, because the thing being bounded is the
+   * number of requests **the publisher** sees — which is a property of the process, not of a run.
+   * A per-run cache would still poll once per search, which is the second half of the same bug.
+   */
+  readonly pollCache?: FixedFeedPollCache;
+  /**
+   * The clock the connectors read.
+   *
+   * Injected rather than taken from `Date` inside each adapter so the poll floor is testable:
+   * a floor whose only clock is wall time can be asserted to hold, never to expire.
+   */
+  readonly clock?: Clock;
 }
 
 export class LadderBuilder {
@@ -266,6 +282,10 @@ export class LadderBuilder {
       versions: this.live.versions,
       gate: this.live.gate,
       fetch: this.live.evidenceFetch,
+      // Absent rather than null when the process has none: `exactOptionalPropertyTypes` makes
+      // the difference visible, and an adapter without a cache polls every time, honestly.
+      ...(this.live.pollCache === undefined ? {} : { pollCache: this.live.pollCache }),
+      ...(this.live.clock === undefined ? {} : { clock: this.live.clock }),
     };
     const adapter =
       kind === 'GDELT' ? new GdeltDiscoveryAdapter(shared) : new RssNewsDiscoveryAdapter(shared);
@@ -306,6 +326,17 @@ export class LadderBuilder {
       const content = (document['content'] as Record<string, unknown> | undefined) ?? document;
       const rung: unknown = content['cascadeRung'];
       if (typeof rung !== 'number' || !Number.isInteger(rung) || rung < 0 || rung > 6) {
+        // Logged rather than skipped in silence. An approved source that is not on the ladder and
+        // says nothing about why is a source an operator will look for in the registry, find
+        // ACTIVE, and have no way to connect to the rung reporting `NO_SOURCE`. Rung 7 is the
+        // terminus and nothing is approved for it, so this really is a configuration error.
+        this.logger.warn(
+          `${String(document['sourceId'] ?? '(no sourceId)')} is ACTIVE and records ` +
+            `cascadeRung ${JSON.stringify(rung)}, which is not an integer rung 0-6. It is not on ` +
+            `the ladder. Note that the field is read from the record's own shape: a version ` +
+            `written by the approval lifecycle nests it under \`content\`, the bootstrap writes ` +
+            `it flat, and both are read here.`,
+        );
         continue;
       }
 
