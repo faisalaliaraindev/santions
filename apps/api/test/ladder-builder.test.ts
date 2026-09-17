@@ -264,6 +264,7 @@ describe('the gate still stands in front of the connector', () => {
         },
       },
       queryId: 'q-1',
+      family: 'F1',
       text: 'Jane Whitfield',
       language: 'en',
       country: 'US',

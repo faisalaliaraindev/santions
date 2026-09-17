@@ -59,8 +59,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/health/live",
-              "host": ["{{baseUrl}}"],
-              "path": ["health", "live"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
             },
             "description": "Is the process running? Says nothing about its dependencies.",
             "auth": {
@@ -72,7 +77,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('alive', () => pm.response.to.have.status(200));"]
+                "exec": [
+                  "pm.test('alive', () => pm.response.to.have.status(200));"
+                ]
               }
             }
           ]
@@ -84,8 +91,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/health/ready",
-              "host": ["{{baseUrl}}"],
-              "path": ["health", "ready"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
             },
             "description": "Can it serve traffic? A 503 usually means the stack is not bootstrapped.",
             "auth": {
@@ -112,8 +124,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/health/dependencies",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "health", "dependencies"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "health",
+                "dependencies"
+              ]
             },
             "description": "Per-dependency health, for an authorised operator. Needs `platform:read_health` - `pnpm key:issue --role platform_operator`."
           }
@@ -131,8 +149,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "login"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
             },
             "description": "Starts the OIDC authorisation-code flow. Returns a 302 to Keycloak. Follow it in a browser.",
             "auth": {
@@ -147,8 +170,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/auth/callback",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "callback"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "callback"
+              ]
             },
             "description": "Completes sign-in and sets the session cookie. Called by the identity provider, not by you.",
             "auth": {
@@ -163,8 +191,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/auth/session",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "session"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "session"
+              ]
             },
             "description": "The current principal. Works with an API key too, which is the quickest way to confirm a key is live and which roles it carries."
           }
@@ -181,8 +214,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/auth/logout",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "logout"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
             },
             "description": "Revokes the session. A cookie-authenticated request needs the CSRF header; an API key does not.",
             "body": {
@@ -209,8 +247,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/subjects",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "subjects"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
             },
             "description": "Create the person being screened.\n\nHOW AN INTEGRATOR ACTUALLY CALLS THIS: `fullName` is a per-request payload field. The tenant\nsends the name on every call. There is no configured subject anywhere in the service.\n\nThe {{subjectName}} / {{subjectJurisdiction}} placeholders below are a POSTMAN CONVENIENCE ONLY.\nPostman substitutes them before sending, so the request on the wire is an ordinary body:\n\n    { \"fullName\": \"Rodrigo Alberto Vargas Méndez\", \"countryContext\": [\"CR\"], ... }\n\nThey exist so one collection can drive the six fixture people without editing the body each\ntime. Replace them with a literal name and the request behaves identically.\n\nThe TENANT is never taken from the body — it is derived from the API key, so a caller cannot\nclaim to be someone else. `purpose` is mandatory and comes from a fixed list: nobody is\nscreened without a recorded lawful reason.",
             "body": {
@@ -241,8 +284,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/subjects/{{subjectId}}/versions/{{subjectVersion}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "subjects", "{{subjectId}}", "versions", "{{subjectVersion}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects",
+                "{{subjectId}}",
+                "versions",
+                "{{subjectVersion}}"
+              ]
             },
             "description": "Subjects are versioned and immutable. A search pins the exact version it ran against, so a six-month-old result can still say who it was about at the time."
           }
@@ -269,8 +320,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/searches",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
             },
             "description": "Returns **202** and a `searchId`. The run is queued; the worker does the work.\n\nA queued run reports `findings: NOT_EVALUATED`. Rendering that would show someone \"nothing found\" about a search that has not started.\n\n`Idempotency-Key`: send the same value twice and you get **200** with the same id, not a second search.",
             "body": {
@@ -314,8 +370,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/searches",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
             },
             "description": "THE INTEGRATOR PATH. One call: send the name, get a screening.\n\nsubjectRef and subjectSnapshot are mutually exclusive - send exactly one. With subjectSnapshot the service creates the versioned subject and queues the search in the same request, so a tenant that just wants \"screen this name\" does not have to make two calls.\n\nUse subjectRef instead when you already hold a subjectId and want repeat screenings pinned to the same identity snapshot.\n\nStill 202. The work is queued either way - poll the status URL."
           },
@@ -341,8 +402,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/searches/{{searchId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches", "{{searchId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{searchId}}"
+              ]
             },
             "description": "Run until `execution` is `SUCCEEDED`, `PARTIAL`, `FAILED` or `CANCELLED`.\n\nIn a Collection Run this re-runs itself until the run settles. `ETag` carries the revision."
           },
@@ -394,8 +461,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/searches?limit=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -418,8 +490,15 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/searches/{{searchId}}/cancel",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches", "{{searchId}}", "cancel"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{searchId}}",
+                "cancel"
+              ]
             },
             "description": "Only while it is still running. A finished search stays finished - cancelling is not a way to erase a result.",
             "body": {
@@ -441,8 +520,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/searches/{{searchId}}/findings",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches", "{{searchId}}", "findings"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{searchId}}",
+                "findings"
+              ]
             },
             "description": "There is deliberately **no endpoint that returns findings alone**.\n\n- `findings` - each with its band, four axis values and rationale\n- `coverage` - whether everything promised was searched\n- `sourceOutcomes` - **the FR-05 ladder**: what each rung did, including the rungs nothing is approved for\n- `rejectedLeads` - candidates deliberately not promoted, with reasons. Diligence, not noise\n- `noMatchStatement` - what an absence does and does not mean\n- `mode` - `MOCK` or `LIVE`\n\nA `band` is not a score. Do not rank, average or threshold it into a number."
           },
@@ -478,8 +564,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/searches/{{searchId}}/associations",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches", "{{searchId}}", "associations"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{searchId}}",
+                "associations"
+              ]
             },
             "description": "The company graph, frozen to this run. An officer who resolved only partially attaches **no** companies - a partial identity match is not an association."
           }
@@ -497,8 +590,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources?limit=50",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "sources"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -516,8 +615,17 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "sources", "{{recordId}}", "versions", "{{recordVersion}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}"
+              ]
             },
             "description": "One version, with its content, rights policy, data profile and history."
           }
@@ -534,8 +642,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "sources"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources"
+              ]
             },
             "description": "**Step 1 of taking the SEC source live.**\n\nThe body is exactly what `apps/api/src/sources/registry/sec-litigation-releases.ts` holds, so what you propose here is what is written down and reviewable in the repo.\n\nNote `robotsPosition: NOT_ESTABLISHED` - deliberate. Nobody has read their robots.txt, and the fetch gate refuses that value. Run `pnpm first-contact` before changing it, and change it through this lifecycle rather than by hand.",
             "body": {
@@ -572,8 +686,17 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "sources", "{{recordId}}", "versions", "{{recordVersion}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}"
+              ]
             },
             "description": "A draft may be incomplete - that is what a draft is. Conformance against the FR-05 field list is enforced at **submit**, so nobody is asked to approve a record that cannot be interpreted.",
             "body": {
@@ -598,7 +721,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -632,7 +757,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -666,7 +793,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -696,7 +825,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/activate",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -726,7 +857,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -760,7 +893,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -794,7 +929,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/{{recordId}}/versions/{{recordVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -825,8 +962,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/taxonomy?limit=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "taxonomy"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "taxonomy"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -844,8 +987,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/policies?limit=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "policies"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "policies"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -863,8 +1012,17 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/taxonomy/{{recordId}}/versions/{{recordVersion}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "taxonomy", "{{recordId}}", "versions", "{{recordVersion}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "taxonomy",
+                "{{recordId}}",
+                "versions",
+                "{{recordVersion}}"
+              ]
             },
             "description": "Its content includes the lexicon. Spanish terms are marked `UNREVIEWED_AUTHORED` - no Spanish reader has reviewed them (D-033)."
           }
@@ -882,8 +1040,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/coverage/CR",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "coverage", "CR"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "coverage",
+                "CR"
+              ]
             },
             "description": "Read this for CR after a search and compare it with the coverage line on the result."
           },
@@ -912,8 +1077,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/coverage",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "coverage"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "coverage"
+              ]
             },
             "description": "Revisable without a deployment. What is **not** revisable is the rule that anything other than SUPPORTED means an empty result is `NOT_ESTABLISHED`.",
             "body": {
@@ -935,8 +1106,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/source-health",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "source-health"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "source-health"
+              ]
             },
             "description": "Breaker state, budget spend, licence clock and kill switch, per source."
           },
@@ -981,8 +1158,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "sources", "fixture-newsroom", "kill-switch"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "fixture-newsroom",
+                "kill-switch"
+              ]
             },
             "description": "One person, effective immediately, **mid-run**. The reason is mandatory and reaches the coverage statement of every run that wanted this source, so write it for a reviewer.",
             "body": {
@@ -1003,8 +1188,17 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/fixture-newsroom/kill-switch/release",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "sources", "fixture-newsroom", "kill-switch", "release"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources",
+                "fixture-newsroom",
+                "kill-switch",
+                "release"
+              ]
             },
             "description": "**Four eyes.** With the same key that engaged it this returns 403 - the check working. Stopping is the safe direction and needs one person; starting again needs two.",
             "body": {
@@ -1026,8 +1220,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/plans",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "plans"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "plans"
+              ]
             },
             "description": "Plan management is deferred (D-007)."
           },
@@ -1055,8 +1255,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/plans",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "plans"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "plans"
+              ]
             },
             "description": "",
             "body": {
@@ -1072,8 +1278,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/tenants/{{tenantId}}/usage",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "tenants", "{{tenantId}}", "usage"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tenants",
+                "{{tenantId}}",
+                "usage"
+              ]
             },
             "description": "Usage metering is deferred. Counters are recorded but not exposed or billed."
           }
@@ -1090,8 +1304,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/tenants/{{tenantId}}/usage",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "tenants", "{{tenantId}}", "usage"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tenants",
+                "{{tenantId}}",
+                "usage"
+              ]
             },
             "description": "",
             "body": {
@@ -1107,8 +1329,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/usage",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "usage"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "usage"
+              ]
             },
             "description": "Tenant usage reporting is deferred."
           }
@@ -1125,8 +1353,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/usage",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "usage"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "usage"
+              ]
             },
             "description": "",
             "body": {
@@ -1148,8 +1382,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/searches",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
             },
             "description": "An unauthenticated request gets 401 with no detail about what exists.",
             "auth": {
@@ -1161,7 +1400,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('401', () => pm.response.to.have.status(401));"]
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));"
+                ]
               }
             }
           ]
@@ -1178,8 +1419,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/subjects",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "subjects"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
             },
             "description": "The service will not hold a person's name without a recorded reason for screening them.",
             "body": {
@@ -1211,8 +1457,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/subjects",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "subjects"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
             },
             "description": "Schemas are strict. A typo is rejected rather than silently dropped, so a client mistake fails loudly instead of quietly narrowing a search.",
             "body": {
@@ -1248,8 +1499,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/searches",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
             },
             "description": "FR-05: \"EU\", \"LATAM\" and \"GLOBAL\" are **not** source permissions. Naming one is rejected explicitly rather than silently widening a search's scope.",
             "body": {
@@ -1276,8 +1532,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/searches/00000000-0000-0000-0000-000000000000",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "searches", "00000000-0000-0000-0000-000000000000"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "00000000-0000-0000-0000-000000000000"
+              ]
             },
             "description": "A tenant learns nothing about what exists outside its own scope - 404, not 403."
           },
@@ -1300,8 +1562,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/source-health",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "admin", "source-health"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "source-health"
+              ]
             },
             "description": "Run this with an `analyst` key. Permission is checked per route, not per prefix."
           },
@@ -1335,7 +1603,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -1393,7 +1663,9 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}/transitions",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -1467,7 +1739,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}/activate",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -1512,7 +1786,9 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/admin/sources/sec-litigation-releases/versions/{{secVersion}}",
-              "host": ["{{baseUrl}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
               "path": [
                 "v1",
                 "admin",
@@ -1563,8 +1839,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
             },
             "description": "Roles must be ones you already hold. Omit `scopes` to get the scopes those roles can use — an explicit list can only narrow, never widen.\n\n`expiresInDays` may be null for a key that never expires, which is a choice rather than a default."
           },
@@ -1595,8 +1877,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
             },
             "description": "Every key this tenant holds. Carries no secret and no hash of one — the listing is not a slower way of handing the secret back.\n\n`status` is derived at read time, so a key whose expiry passed while nothing was running still reads EXPIRED."
           },
@@ -1637,8 +1925,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
             },
             "description": "Worth running once. Without this rule the weakest tenant_admin credential mints a platform_admin one and the role model is decoration.\n\nThe refusal names the specific role you were missing, because \"forbidden\" on its own sends an integrator back to re-read the role table."
           },
@@ -1673,8 +1967,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
             },
             "description": "Run this with a SANDBOX {{apiKey}}. Two independent conditions gate a live key: your tenant must be entitled to live, and your own credential must be live.\n\nEntitlement is a commercial act by the provider. Self-service issues credentials within what was sold; it does not sell."
           },
@@ -1713,8 +2013,16 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys/{{issuedKeyId}}/disable",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys", "{{issuedKeyId}}", "disable"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys",
+                "{{issuedKeyId}}",
+                "disable"
+              ]
             },
             "description": "The key stops authenticating immediately - and `enable` brings it back with the same secret and the same key id, so nothing in your configuration changes.\n\n**Not for a leaked secret.** Anything reversible is the wrong answer to a credential somebody else now holds; use `DELETE`, which is permanent. This is for a paused integration, a rotation window, or a key you want out of service while a question is answered.\n\nList your keys after this and the entry reads `status: \"DISABLED\"` with the reason you gave. A revoked key answers 409 here rather than pretending to pause."
           },
@@ -1747,8 +2055,16 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys/{{issuedKeyId}}/enable",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys", "{{issuedKeyId}}", "enable"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys",
+                "{{issuedKeyId}}",
+                "enable"
+              ]
             },
             "description": "The same secret works again the moment this returns. Nothing is re-issued.\n\nA **revoked** key answers 409 instead: `revokedAt` is one-way and this route cannot touch it. That is the whole distinction between the two - both stop the key, and only one of them can be undone."
           },
@@ -1781,8 +2097,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys/{{issuedKeyId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys", "{{issuedKeyId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys",
+                "{{issuedKeyId}}"
+              ]
             },
             "description": "Immediate and irreversible. The reason is mandatory and is written to the audit trail.\n\nA key belonging to another tenant answers 404, not 403 — the second would confirm that it exists."
           },
@@ -1802,11 +2125,11 @@
       ]
     },
     {
-      "name": "13 - Tenant: signing yourself up",
-      "description": "Self-service tenant creation (phase I step I1, decision D-053). Open signup: no invite code,\nno credential, and nobody at Erly involved.\n\nThis is the ONLY route in the service that writes without a credential, so three things are\nworth seeing here:\n  * the tenant id is GENERATED. There is no field for one, and sending `tenantId` is refused\n    rather than ignored — a caller who could name their own id could name somebody else's\n  * all four records (tenant, entitlement, taxonomy, policy) are written in one transaction.\n    A tenant missing its taxonomy fails at its first search with something that reads like a\n    bug in search rather than a signup that stopped halfway\n  * the entitlement grants live, and live is still not available yet. `liveAccess` in the\n    response says so, and says what would change it: a confirmed contact address (D-052)\n\nSignups are bounded per client address. The sixth in an hour answers 429, which is retryable.\n\nRequests 3-6 are the I2 account flow: confirming the address, which is what unlocks a live key, and getting back in after losing a password. No mail server runs on this stack, so the tokens are read out of the `outboundEmails` collection - that collection is the inbox (D-058).\n\nRequests 7-9 are I3: signing in with the password from request 1, using the session to issue a key, and signing out. Together with 1-6 they are the whole phase - a customer who has never spoken to anybody at Erly ends up holding a working credential.",
+      "name": "13 - Tenant E2E: signup to adverse search",
+      "description": "THE WHOLE FLOW, RUNNABLE WITH \"RUN FOLDER\" AND NOTHING ELSE.\n\nA stranger signs up, confirms an address, signs in, issues its own sandbox AND live keys, and uses the sandbox one to run an adverse-media search to a terminal result. No Mongo shell, no seeded credential, no editing variables between requests.\n\nEvery request from 13.7 onward OVERRIDES the collection-level auth and sends `Authorization: ApiKey {{issuedKey}}` - the key the tenant minted for itself at 13.5. That is the point of the folder: proving a brand-new tenant consumes the API exactly as an external customer would, not as the seeded tenant-alpha.\n\nEach request stops the run on an unexpected response rather than cascading failures.\n\nRequires the local stack: pnpm local:up && pnpm local:bootstrap",
       "item": [
         {
-          "name": "1. Sign up",
+          "name": "13.1 Sign up",
           "request": {
             "auth": {
               "type": "noauth"
@@ -1820,14 +2143,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"organisationName\": \"Acme Compliance Ltd\",\n  \"contactEmail\": \"compliance@acme.example\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+              "raw": "{\n  \"organisationName\": \"Acme Compliance Ltd\",\n  \"contactEmail\": \"{{$guid}}@example.test\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/signup",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "signup"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup"
+              ]
             },
-            "description": "No credential. `auth` is explicitly noauth so the collection-level key is not attached - signup has to work for somebody who does not have one yet.\n\nThe password creates the tenant's administrator, in the same transaction as the tenant (I2, D-051). It is stored as an argon2id hash and returned by nothing. It is refused if it is too short, a known-bad value, or contains the address or the organisation name.\n\nThe response carries the generated tenant id, the admin user id and the three version numbers a support conversation starts from. It carries no secret: signup issues no credential."
+            "description": "No credential: signup has to work for somebody who does not have one yet.\n\nThe address is a fresh {{$guid}} every run, so the folder is re-runnable without hitting D-057's 409 for an address already registered.\n\nWrites tenant, entitlement, taxonomy, policy AND the administrator in ONE transaction. The administrator is granted tenant_admin AND analyst: the first carries apikey:manage so they can issue a key, the second carries search:create and is the only role mapped to the search:write scope. Without both, the key issued at 13.5 could not run a search."
           },
           "event": [
             {
@@ -1836,47 +2164,57 @@
                 "type": "text/javascript",
                 "exec": [
                   "const b = pm.response.json();",
-                  "pm.test('created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "pm.test('201 created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
                   "if (pm.response.code === 201) {",
+                  "  pm.environment.set('signupEmail', b.contactEmail);",
                   "  pm.environment.set('signedUpTenantId', b.tenantId);",
-                  "  pm.environment.set('signedUpEmail', b.contactEmail);",
+                  "  pm.environment.set('signupPassword', 'harbour-lantern-drift-98');",
                   "  console.log('tenant ' + b.tenantId + '  admin ' + b.adminUserId);",
                   "  console.log('live access: ' + (b.liveAccess.granted ? 'granted' : 'blocked by ' + b.liveAccess.blockedBy));",
-                  "  console.log('verification email sent: ' + b.verificationEmail.sent);",
                   "}",
                   "pm.test('the tenant id was generated, not chosen', () => pm.expect(b.tenantId).to.match(/^tenant-[0-9a-f-]{36}$/));",
-                  "pm.test('an administrator was created with it', () => pm.expect(b.adminUserId).to.be.a('string'));",
-                  "pm.test('both environments are granted (D-053)', () => pm.expect(b.entitlement.environments).to.eql(['sandbox', 'live']));",
-                  "pm.test('live still waits for a confirmed address (D-052)', () => pm.expect(b.liveAccess.granted).to.eql(false));",
-                  "pm.test('no secret and no hash comes back', () => pm.expect(JSON.stringify(b)).to.not.include('argon2'));"
+                  "pm.test('both environments granted (D-053)', () => pm.expect(b.entitlement.environments).to.eql(['sandbox', 'live']));",
+                  "pm.test('live still waits for a confirmed address (D-052)', () => pm.expect(b.liveAccess.granted).to.eql(false));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "2. Naming your own tenant id is refused",
+          "name": "13.2 Get the verification token",
           "request": {
             "auth": {
               "type": "noauth"
             },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json; charset=utf-8"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"organisationName\": \"Impostor Ltd\",\n  \"contactEmail\": \"impostor@acme.example\",\n  \"tenantId\": \"tenant-alpha\"\n}"
-            },
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/v1/signup",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "signup"]
+              "raw": "{{baseUrl}}/v1/dev/outbound-emails/latest?kind=EMAIL_VERIFICATION&email={{signupEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "dev",
+                "outbound-emails",
+                "latest"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "EMAIL_VERIFICATION"
+                },
+                {
+                  "key": "email",
+                  "value": "{{signupEmail}}"
+                }
+              ]
             },
-            "description": "Refused, not ignored. The schema is strict, so an unknown field answers UNKNOWN_FIELD — a client that believes it chose its tenant id is told it did not, rather than discovering later that it is working in a tenant it did not expect."
+            "description": "DEVELOPMENT ONLY, AND ABSENT IN PRODUCTION.\n\nNo mail transport is configured (D-058): the local stack writes every message to an outboundEmails collection, and that collection IS the inbox. This route reads the latest message for ONE named address and returns the token, so the flow no longer leaves Postman for a Mongo shell.\n\nIt is not registered at all when NODE_ENV=production — the path does not exist there, rather than existing behind a check somebody could inverit. `email` is required, so this is never a listing of who the customers are.\n\nIt only reads. The token it shows is the same single-use, expiring token the email carries; 13.3 still spends it."
           },
           "event": [
             {
@@ -1884,15 +2222,24 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('refused', () => pm.expect(pm.response.code).to.eql(400));",
-                  "pm.test('and says which field', () => pm.expect(pm.response.json().code).to.eql('UNKNOWN_FIELD'));"
+                  "const b = pm.response.json();",
+                  "pm.test('200 and a message', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "pm.test('a token was parsed out of the body', () => pm.expect(b.token).to.be.a('string'));",
+                  "if (b.token) {",
+                  "  pm.environment.set('verificationToken', b.token);",
+                  "  console.log('verification token saved to {{verificationToken}}');",
+                  "}"
                 ]
               }
             }
           ]
         },
         {
-          "name": "3. Confirm the email address",
+          "name": "13.3 Verify the email address",
           "request": {
             "auth": {
               "type": "noauth"
@@ -1910,10 +2257,16 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/signup/verify",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "signup", "verify"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "verify"
+              ]
             },
-            "description": "The token arrives by email. No mail server runs on this stack, so read it out of the `outboundEmails` collection in MongoDB - that collection is the inbox (D-058):\n\n    db.outboundEmails.find({ kind: \"EMAIL_VERIFICATION\" }).sort({ sentAt: -1 }).limit(1)\n\nSet {{verificationToken}} to the token in the body, then send this.\n\nTHIS IS THE CALL THAT UNLOCKS A LIVE KEY (D-052). It sets `emailVerifiedAt` on the tenant, which is the value key issuance reads - so `liveAccessUnlocked` in the response is the same answer POST /v1/tenant/api-keys will now give.\n\nThe token works once. Sending it again answers 400, with the same message an invented token gets - a caller able to tell those apart could probe which links were issued."
+            "description": "THIS IS THE CALL THAT UNLOCKS A LIVE KEY (D-052).\n\nIt sets emailVerifiedAt on the tenant, which is the value key issuance reads — so liveAccessUnlocked here is the same answer POST /v1/tenant/api-keys will now give.\n\nThe token works once. Sending it again is refused."
           },
           "event": [
             {
@@ -1922,7 +2275,11 @@
                 "type": "text/javascript",
                 "exec": [
                   "const b = pm.response.json();",
-                  "pm.test('confirmed', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('200 confirmed', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
                   "pm.test('and it says what that unlocked', () => pm.expect(b.liveAccessUnlocked).to.eql(true));"
                 ]
               }
@@ -1930,7 +2287,7 @@
           ]
         },
         {
-          "name": "4. Ask for the confirmation link again",
+          "name": "13.4 Sign in",
           "request": {
             "auth": {
               "type": "noauth"
@@ -1944,122 +2301,20 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{signedUpEmail}}\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/v1/signup/resend-verification",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "signup", "resend-verification"]
-            },
-            "description": "202, always, with the same body - for an address that has an account, one that does not, and one already confirmed.\n\nTry it with an address you invent: the answer is identical. That is deliberate. An endpoint answering differently would be a list of this service's customers, readable by anybody with a word list. Signup is the one documented exception (D-057), because it has to answer with a tenant id.\n\nA new link spends the previous one, so the older email stops working."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));",
-                  "pm.test('and promises nothing', () => pm.expect(pm.response.json().accepted).to.eql(true));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "5. Ask for a password reset",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json; charset=utf-8"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{signedUpEmail}}\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/v1/account/password-reset",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "account", "password-reset"]
-            },
-            "description": "Public, because somebody who has lost their password has no credential to present. 202 and the same body for every address, for the same reason as the request above.\n\nRead the token from `outboundEmails` with kind PASSWORD_RESET. It expires in an hour - it is a live credential for whoever holds it."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": ["pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));"]
-              }
-            }
-          ]
-        },
-        {
-          "name": "6. Set a new password",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json; charset=utf-8"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"quiet-harbour-at-midnight-7\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/v1/account/password-reset/confirm",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "account", "password-reset", "confirm"]
-            },
-            "description": "The token works once. The new password meets the same bar as a signup password, checked BEFORE the token is spent - so a weak choice can be corrected with the same link rather than a new one.\n\nA reset ends every session that user holds, and `sessionsEnded` says how many. A reset may be an account being taken back from somebody who should not have it, and leaving the other party signed in would make it cosmetic. It also clears a lockout: whoever holds the mailbox has proved more than a password would."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('reset', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('and every session for that user ended', () => pm.expect(pm.response.json().sessionsEnded).to.be.a('number'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "7. Sign in",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json; charset=utf-8"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{signedUpEmail}}\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+              "raw": "{\n  \"email\": \"{{signupEmail}}\",\n  \"password\": \"{{signupPassword}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "auth", "login"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
             },
-            "description": "The way in for a caller that is not a browser. `GET /auth/login` next door is the OIDC redirect journey the control panel uses; this is the same session, obtained without one (D-059).\n\nPresent the token afterwards as `Authorization: Session <token>` - its own scheme, like ApiKey, so a session is never fed to the JWT verifier.\n\nEVERY FAILURE IS ONE 401 WITH ONE SENTENCE. Wrong password, unknown address, locked, suspended - try them and see. The service records which; you never learn it. Saying an account is locked would confirm the address is real.\n\n`environment` is derived from what the tenant may actually use - a live entitlement AND a confirmed address. Sign in before confirming and you get a sandbox session; confirm and sign in again and it is live. There is no environment field to ask with."
+            "description": "Signing in AFTER confirming matters. The session environment is DERIVED from what the tenant is entitled to and has done (decideLiveAccess), never requested. A session created before confirmation is sandbox, and a sandbox session cannot mint a live key (T62) however good the entitlement is. So this must come after 13.3.\n\nPresent the token as `Authorization: Session <token>` — its own scheme, like ApiKey, so a session is never fed to the JWT verifier.\n\nEVERY FAILURE IS ONE 401 WITH ONE SENTENCE. Wrong password, unknown address, locked, suspended — the service records which; you never learn it."
           },
           "event": [
             {
@@ -2068,22 +2323,28 @@
                 "type": "text/javascript",
                 "exec": [
                   "const b = pm.response.json();",
-                  "pm.test('signed in', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('200 signed in', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
                   "if (pm.response.code === 200) {",
                   "  pm.environment.set('sessionToken', b.sessionToken);",
                   "  console.log('session for ' + b.userId + ' in ' + b.tenantId + ' (' + b.environment + ')');",
-                  "  console.log('expires ' + b.expiresAt + ', idle timeout ' + b.idleTimeoutSeconds + 's');",
                   "}",
-                  "pm.test('the session carries the roles', () => pm.expect(b.roles).to.include('tenant_admin'));",
-                  "pm.test('environment was derived, not asked for', () => pm.expect(['sandbox', 'live']).to.include(b.environment));"
+                  "pm.test('the session carries both roles', () => pm.expect(b.roles).to.include.members(['tenant_admin', 'analyst']));",
+                  "pm.test('and it is LIVE, because the address was confirmed first', () => pm.expect(b.environment).to.eql('live'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "8. Issue your first key from that session",
+          "name": "13.5 Issue the SANDBOX API key",
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
               {
@@ -2097,17 +2358,20 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"label\": \"issued from a signed-in session\",\n  \"roles\": [\n    \"tenant_admin\"\n  ]\n}"
+              "raw": "{\n  \"label\": \"sandbox key, issued from a signed-in session\",\n  \"roles\": [\n    \"tenant_admin\",\n    \"analyst\"\n  ],\n  \"environment\": \"sandbox\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/tenant/api-keys",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "tenant", "api-keys"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
             },
-            "description": "The end of the whole phase: signup, confirm, sign in, issue your own key - nobody at Erly involved at any point.\n\nSends `Authorization: Session {{sessionToken}}` rather than an API key. The route does not care which kind of credential authenticated it, only what the principal may do.\n\nA live key from a sandbox session is refused with SANDBOX_CANNOT_ACCESS_LIVE however good the entitlement is - confirm the address first, then sign in again.",
-            "auth": {
-              "type": "noauth"
-            }
+            "description": "Authenticated with the SESSION, not a key — this is the tenant minting its first credential. The route does not care which kind of credential authenticated it, only what the principal may do.\n\nanalyst is requested because it is the only role carrying search:create and mapping to the search:write scope. A key with tenant_admin alone is refused at POST /v1/searches.\n\nTHE SECRET IS SHOWN ONCE. Only a hash is stored: no endpoint can return it again and no support process can recover it."
           },
           "event": [
             {
@@ -2116,10 +2380,295 @@
                 "type": "text/javascript",
                 "exec": [
                   "const b = pm.response.json();",
-                  "pm.test('issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "pm.test('201 issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
                   "if (pm.response.code === 201) {",
                   "  pm.environment.set('issuedKey', b.secret);",
-                  "  console.log('SECRET SHOWN ONCE - saved to {{issuedKey}}');",
+                  "  pm.environment.set('issuedKeyId', b.keyId);",
+                  "  console.log('SANDBOX SECRET SHOWN ONCE - saved to {{issuedKey}}');",
+                  "}",
+                  "pm.test('it is a sandbox key', () => pm.expect(b.environment).to.eql('sandbox'));",
+                  "pm.test('and it carries search:write, or it could not search', () => pm.expect(b.scopes).to.include('search:write'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13.6 Issue the LIVE API key",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "Authorization",
+                "value": "Session {{sessionToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"live key, issued from a signed-in session\",\n  \"roles\": [\n    \"tenant_admin\",\n    \"analyst\"\n  ],\n  \"environment\": \"live\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
+            },
+            "description": "Three independent conditions, ALL required: the entitlement includes live (granted at signup, D-053), the calling credential is itself live (the session from 13.4, because 13.3 confirmed the address), and the tenant state permits live today (D-052).\n\nRemove any one and this answers 403 SANDBOX_CANNOT_ACCESS_LIVE. Try it: run the folder skipping 13.3 and watch this request refuse.\n\nTHE LIVE KEY IS ISSUED HERE BUT NOT USED TO SEARCH BELOW. A live search contacts real publishers under our contact URL, against a rate budget shared across every tenant. The searches in 13.7-13.10 are sandbox, against the local fixture server."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('201 issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('issuedLiveKey', b.secret);",
+                  "  pm.environment.set('issuedLiveKeyId', b.keyId);",
+                  "  console.log('LIVE SECRET SHOWN ONCE - saved to {{issuedLiveKey}}');",
+                  "}",
+                  "pm.test('it is a live key', () => pm.expect(b.environment).to.eql('live'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13.7 Create a subject - with the tenant OWN key",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{issuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"María Fernanda Solís Rojas\",\n  \"aliases\": [],\n  \"countryContext\": [\n    \"CR\"\n  ],\n  \"dateOfBirth\": {\n    \"value\": \"1972-03-15\",\n    \"precision\": \"DAY\"\n  },\n  \"knownCompanies\": [\n    {\n      \"registrationNumber\": \"CR-3101-100001\",\n      \"jurisdiction\": \"CR\"\n    }\n  ],\n  \"externalSubjectRef\": \"postman-e2e-{{$guid}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
+            },
+            "description": "FROM HERE ON EVERY REQUEST USES {{issuedKey}} — the key this tenant minted for itself seconds ago. The collection-level auth ({{apiKey}}, the seeded tenant-alpha key) is overridden per request, deliberately: the point of this folder is proving a brand-new tenant consumes the API exactly as an external customer would.\n\nThe accents in the name matter. The fixture match folds accents, so a body sent as anything but UTF-8 folds to something else and matches nothing — an honest NO_MATCHES_FOUND that looks like a matching bug.\n\nThere is no tenantId field to send. The tenant comes from the credential, and the schema is strict, so a tenantId here is refused with UNKNOWN_FIELD rather than ignored."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('201 created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('subjectId', b.subjectId);",
+                  "  pm.environment.set('subjectVersion', b.version);",
+                  "}",
+                  "pm.test('it belongs to the newly signed-up tenant', () => pm.expect(b.tenantId).to.eql(pm.environment.get('signedUpTenantId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13.8 Start the adverse search",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{issuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{subjectId}}\",\n    \"version\": {{subjectVersion}}\n  },\n  \"externalCaseRef\": \"postman-e2e-case\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"CR\"\n    ],\n    \"languages\": [\n      \"es\",\n      \"en\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"sandbox\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
+            },
+            "description": "202, not 200. A submitted search is a RECEIPT, not an answer — the run is queued, a worker consumes it, and 13.9 polls for the outcome.\n\nsandbox, against the local fixture server. This is the request that needs search:write, which the key only has because the administrator holds analyst.\n\nSending the same Idempotency-Key twice returns the SAME search, not a second one."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('202 accepted - a receipt, not an answer', () => pm.expect(pm.response.code).to.eql(202));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 202) {",
+                  "  pm.environment.set('searchId', b.searchId);",
+                  "  pm.environment.set('pollTries', 0);",
+                  "}",
+                  "pm.test('it starts QUEUED', () => pm.expect(b.execution).to.eql('QUEUED'));",
+                  "// The 202 body is a RECEIPT - searchId and execution, nothing more. Ownership is asserted at\n// 13.9, where the full summary carries tenantId."
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13.9 Poll until terminal",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{issuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{searchId}}"
+              ]
+            },
+            "description": "Re-sends itself until `execution` is terminal, BOUNDED at 40 tries, then gives up rather than looping for ever.\n\nExecution, findings and coverage are THREE INDEPENDENT FIELDS, not one status. \"The job finished\", \"we found nothing\" and \"we searched everything we said we would\" are different facts, and collapsing them is how a screening product reports a clean result for a run in which every source was blocked.\n\nTerminal execution states: SUCCEEDED, PARTIAL, FAILED, CANCELLED. The first two are results; the last two are not."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "const tries = Number(pm.environment.get('pollTries') || 0) + 1;",
+                  "pm.environment.set('pollTries', tries);",
+                  "",
+                  "if (terminal.indexOf(b.execution) === -1) {",
+                  "  if (tries >= 40) {",
+                  "    pm.test('reached a terminal state within 40 tries', () => pm.expect.fail(",
+                  "      'Still ' + b.execution + ' after ' + tries + ' polls. Is the worker consuming? Is the queue reachable?'));",
+                  "    postman.setNextRequest(null);",
+                  "  } else {",
+                  "    console.log('poll ' + tries + ': ' + b.execution + ' - waiting');",
+                  "    postman.setNextRequest('13.9 Poll until terminal');",
+                  "  }",
+                  "} else {",
+                  "  console.log('terminal after ' + tries + ' polls: execution=' + b.execution +",
+                  "    ' findings=' + b.findings + ' coverage=' + b.coverage);",
+                  "  pm.test('reached a terminal state', () => pm.expect(terminal).to.include(b.execution));",
+                  "  pm.test('the run did not fail outright', () => pm.expect(['SUCCEEDED', 'PARTIAL']).to.include(b.execution));",
+                  "  pm.test('the result belongs to the new tenant', () => pm.expect(b.tenantId).to.eql(pm.environment.get('signedUpTenantId')));",
+                  "  if (['FAILED', 'CANCELLED'].indexOf(b.execution) !== -1) {",
+                  "    console.error('Search ended ' + b.execution + '. Check source health: an open circuit breaker, ' +",
+                  "      'or no ACTIVE source at any cascade rung, leaves nothing to answer - and a run nothing ' +",
+                  "      'answered is reported as a failure, never as a clean result.');",
+                  "    postman.setNextRequest(null);",
+                  "  }",
                   "}"
                 ]
               }
@@ -2127,35 +2676,68 @@
           ]
         },
         {
-          "name": "9. Sign out",
+          "name": "13.10 Retrieve the findings and their coverage",
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json; charset=utf-8"
-              },
-              {
-                "key": "Authorization",
-                "value": "Session {{sessionToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/auth/logout",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "auth", "logout"]
-            },
-            "description": "Ends whichever session authenticated the call. Immediate and cluster-wide, because the session is a server-side record rather than something the client forgets - so the token stops working everywhere at once, not just here.\n\nSend request 8 again afterwards: it answers 401.",
             "auth": {
-              "type": "noauth"
-            }
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{issuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{searchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{searchId}}",
+                "findings"
+              ]
+            },
+            "description": "THE END OF THE FLOW: a tenant that did not exist a minute ago, holding a key it issued itself, reading its own adverse-media result.\n\nThere is deliberately no endpoint serving findings WITHOUT their coverage. A reviewer reading a narrow result has to be able to see that it was narrow.\n\nmode is MOCK (T55): fixture data must be unmistakable in a record, so it can never be mistaken for a live result.\n\nnoMatchStatement never reads as an all-clear. An empty result means \"we looked and found nothing in what we could see\", not \"this person is clean\"."
           },
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('signed out', () => pm.expect(pm.response.code).to.eql(200));"]
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "pm.test('findings never travel without their coverage', () => {",
+                  "  ['execution', 'findingsState', 'coverage', 'noMatchStatement', 'findings', 'rejectedLeads', 'sourceOutcomes', 'unmeasuredLanguages', 'mode'].forEach((f) =>",
+                  "    pm.expect(b, 'missing ' + f).to.have.property(f));",
+                  "});",
+                  "pm.test('fixture data is stamped MOCK (T55)', () => pm.expect(b.mode).to.eql('MOCK'));",
+                  "pm.test('every language is reported unmeasured (FR-03)', () => pm.expect(b.unmeasuredLanguages).to.include('es'));",
+                  "pm.test('the statement never reads as an all-clear', () => {",
+                  "  const s = JSON.stringify(b.noMatchStatement || {}).toLowerCase();",
+                  "  ['no adverse media', 'clear of', 'clean'].forEach((w) => pm.expect(s).to.not.contain(w));",
+                  "});",
+                  "console.log('findings: ' + (b.findings || []).length + '  state: ' + b.findingsState + '  coverage: ' + b.coverage);"
+                ]
               }
             }
           ]

@@ -281,6 +281,7 @@ export class GdeltDiscoveryAdapter implements NewsDiscoveryPort {
         taxonomy: probeTaxonomy(version, now),
       },
       queryId: 'contract-probe',
+      family: 'F3',
       // A term common enough that a working service returns something. Zero articles for it is
       // the signal, not a coincidence.
       text: 'fraud',

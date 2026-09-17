@@ -27,6 +27,89 @@ Say what you did about it.
 
 ---
 
+## 2026-09-17 (tenth) — Phase I: the flow closes, and the role gap that stopped it
+
+**Did.**
+
+1. **Found and fixed the defect that made the whole phase unusable.** `SignupService` created the
+   tenant's administrator with `roles: ['tenant_admin']`. `tenant_admin` carries `apikey:manage`
+   but **not** `search:create`, and `scopesForRoles` maps `search:write` from **`analyst` alone**.
+   The key route refuses to mint a key carrying a role the caller does not hold — so a
+   self-signed-up administrator could issue only `tenant_admin` keys, and every one of them was
+   refused at `POST /v1/searches`. **A tenant could sign up, verify, log in, issue a key and never
+   run a search**, and every suite stayed green because no test crossed that seam. Signup now
+   grants `['tenant_admin', 'analyst']`. Fixed in provisioning rather than by widening
+   `tenant_admin` or relaxing the escalation check: both of those would change what every existing
+   tenant_admin may do, including seeded and operator-issued ones.
+
+2. **`GET /v1/dev/outbound-emails/latest`** (`apps/api/src/dev/dev-mailbox.controller.ts`) — reads
+   the D-058 mailbox over HTTP so the verification token no longer requires a Mongo shell.
+   **Registration is the gate**: `DEV_ONLY_CONTROLLERS` in `app.module.ts` is empty when
+   `NODE_ENV=production`, so the path does not exist there rather than existing behind a check
+   somebody could invert. The constructor also throws if it is ever registered in production.
+   `email` is required, so it is never a listing of customers. It only reads — the token stays
+   single-use and expiring, and `POST /v1/signup/verify` still spends it.
+
+3. **Postman folder 13 is now the whole flow, runnable with "Run folder".** 13.1 signup →
+   13.2 token → 13.3 verify → 13.4 login → 13.5 sandbox key → **13.6 live key** → 13.7 subject →
+   13.8 search → 13.9 bounded poll (40 tries) → 13.10 findings. **Every request from 13.7 on
+   overrides the collection-level auth with `ApiKey {{issuedKey}}`** — the seeded `tenant-alpha`
+   key is not used past signup. Each request halts the folder on an unexpected response.
+
+4. **`tests/e2e/tenant-onboarding-e2e.test.ts`** — 16 tests across the seam nothing covered:
+   provisioning (roles, ADVERSE_MEDIA, active taxonomy with CR+US, active policy), both keys bound
+   to the new tenant, the search to `SUCCEEDED` with findings, and cross-tenant isolation (404 not
+   403, and no tenantId honoured from a payload).
+
+**Verified.** Everything below actually ran.
+
+```
+lint            clean          typecheck       clean
+unit            896 passed     invariants      29 passed     evaluation   12 passed
+security        181 passed     integration     214 passed / 1 failed (see Found 3)
+e2e onboarding   16 passed     newman folder 13: 39 requests, 28 assertions, 0 failed
+```
+
+Newman's terminal line: `execution=SUCCEEDED findings=POTENTIAL_MATCHES coverage=INCOMPLETE`,
+2 findings, `mode: MOCK`.
+
+**Found.**
+
+1. **A search needs BOTH processes.** `main.js` runs the API and the outbox publisher;
+   `worker-main.js` is a separate process (D-016) and is what consumes the queue. With no worker
+   the run sits at `QUEUED` for ever; with a **stale** worker (one started before a rebuild) it
+   completes in ~130ms with `execution: FAILED`, which reads exactly like a provisioning bug and
+   is not one. Both symptoms cost most of a session to tell apart. `pnpm dev` runs both.
+2. **`FIXTURE_SERVER_URL` was missing from the e2e `TEST_ENV`.** In mock mode every adapter reads
+   from that host; without it discovery runs, every rung answers with nothing, and the run is
+   `FAILED` / `INCOMPLETE`. Added to the new suite. **`tests/e2e/api-lifecycle.test.ts` still omits
+   it** and fails the same way — not fixed here, it was out of the asked scope.
+3. **The dev server on :3000 was running `ADVERSE_SEARCH_MODE=live`, not mock.** Two newman runs
+   against it before I noticed created **2 tenants stamped `mode: LIVE`**, and
+   `tests/integration/local-stack.test.ts` T01 ("every seeded record is labelled MOCK") now fails
+   on exactly those two. They are my artifacts, not the user's data. **Left in place deliberately
+   — deleting records is the user's call.** Cleanup is in the session's final message.
+   The `sec.gov` breaker is also `OPEN` (`HARD_BLOCK`, last success 07:42 today), consistent with
+   real SEC contact having been made from that process.
+4. **I killed the user's `pnpm dev` processes** while stopping the API and worker I had started to
+   verify without disturbing :3000. They need restarting.
+
+**Left half-done.** Nothing in the asked scope. **A live search has never been run** and was not
+run here: the live key is issued and proven to authenticate, but every search in this work is
+`sandbox` against the fixture server, stamped `MOCK`. The fixed-feed fetch (~41 identical requests
+per run) is still the prerequisite before any live key drives real traffic, and D-052 still leaves
+the shared SEC budget unprotected by any per-tenant bound.
+
+**Next session should:** decide whether to delete the two `mode: LIVE` tenants to restore T01, then
+add `FIXTURE_SERVER_URL` to `api-lifecycle.test.ts`'s `TEST_ENV` so the older suite stops failing
+for the same reason the new one did. After that, the fixed-feed fetch.
+
+**Decisions touched:** none opened or closed. The role grant is a change to what D-053's open
+signup provisions, not a new decision — but if a future phase adds a narrower first-user role, this
+is the line it has to change, and the reason is in the comment at `signup.service.ts`.
+
+---
+
 ## 2026-09-16 (ninth) — Phase I step I3: a password buys a session, and the phase closes its loop
 
 **Did.**

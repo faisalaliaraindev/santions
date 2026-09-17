@@ -17,7 +17,7 @@
  * ports differ in how they are *asked*, not in what they return.
  */
 
-import type { CascadeRung, PreciseDate, TaxonomyVersion } from '@erly/adverse-domain';
+import type { CascadeRung, PreciseDate, QueryFamily, TaxonomyVersion } from '@erly/adverse-domain';
 
 import type { AdapterProvenance } from './source-adapter.js';
 
@@ -113,6 +113,8 @@ export interface DiscoveryQuery {
   readonly run: DiscoveryRunContext;
   /** The FR-04 planned query this executes. Its id ends up on every resulting lead. */
   readonly queryId: string;
+  /** The FR-04 family this query came from. Fixed feeds use it to avoid non-name polls. */
+  readonly family: QueryFamily;
   readonly text: string;
   /** BCP 47, or null for a language-neutral query. */
   readonly language: string | null;

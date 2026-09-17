@@ -200,6 +200,10 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
       );
     }
 
+    if (version.endpointKind === 'FIXED_FEED' && query.family !== 'F1') {
+      return noResults(this.descriptorFor(version), now);
+    }
+
     const endpoint = buildEndpoint(version, query.text);
     if (endpoint.kind === 'REFUSED') {
       return failed(this.descriptorFor(version), now, { policyRefusal: true }, endpoint.detail);
@@ -367,6 +371,7 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
         taxonomy: probeTaxonomy(version, now),
       },
       queryId: 'contract-probe',
+      family: 'F1',
       // A term that appears in almost any feed. The probe asks "does this still parse?", not
       // "does this source know about anyone".
       text: '',

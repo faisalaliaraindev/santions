@@ -210,9 +210,27 @@ export class SignupService {
               tenantId,
               email: input.contactEmail,
               password: input.password,
-              // The tenant's first user administers it: they have to be able to issue the first
-              // key and manage the ones after it. Narrower roles are theirs to hand out.
-              roles: ['tenant_admin'],
+              // The tenant's first user administers it AND is, until they hand out narrower
+              // roles, its only analyst. Both are needed, for two different reasons:
+              //
+              // - `tenant_admin` carries `apikey:manage`, so they can issue the first key and
+              //   manage the ones after it.
+              // - `analyst` carries `search:create`, and is the ONLY role `scopesForRoles` maps
+              //   to `search:write`.
+              //
+              // Without the second, a self-signed-up tenant can never run a search. Not because
+              // of its entitlement — that grants `adverse_media` — but because the key route
+              // refuses to mint a key carrying a role the caller does not hold, so a caller
+              // holding only `tenant_admin` can only ever mint `tenant_admin` keys, and those
+              // get 403 at `POST /v1/searches`. The product would be sold, provisioned and
+              // unusable, and the refusal would name a scope rather than the missing role.
+              //
+              // Fixed here, in provisioning, rather than by widening `tenant_admin` or relaxing
+              // the escalation check. Both of those would change what every existing
+              // tenant_admin may do, including seeded and operator-issued ones. This changes
+              // only what the first user of a self-service tenant is granted at creation, which
+              // is a provisioning decision and reversible per tenant.
+              roles: ['tenant_admin', 'analyst'],
               displayName: input.organisationName,
               now,
             },

@@ -33,6 +33,7 @@ import { AttemptLimiter } from './common/attempt-limiter.js';
 import { ApiExceptionFilter } from './common/exception.filter.js';
 import { ReservedController } from './common/reserved.controller.js';
 import { loadConfig, type AppConfig } from './config/config.js';
+import { DevMailboxController } from './dev/dev-mailbox.controller.js';
 import { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
 import { HealthController } from './health/health.controller.js';
 import {
@@ -93,6 +94,27 @@ import { PolicyService } from './tenancy/policy.service.js';
 export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
 
 /**
+ * Controllers that exist only on a non-production stack.
+ *
+ * `DevMailboxController` reads verification and password-reset tokens out of the local mailbox
+ * (D-058) so the onboarding flow can be completed from Postman without a Mongo shell. In
+ * production the path must not exist at all.
+ *
+ * **Registration is the gate, deliberately.** The alternative — always register it and check
+ * `isProduction` inside the handler — puts an unauthenticated token oracle one inverted boolean
+ * away from being live. Here, getting it wrong produces a route that is missing on a developer's
+ * machine, which is loud and harmless, rather than a route that is present on a customer's,
+ * which is neither.
+ *
+ * Read from `process.env` rather than from the injected `AppConfig` because Nest evaluates this
+ * when the module is *defined*, before any provider — including a test's `overrideProvider` —
+ * exists. `NODE_ENV` is the same value `loadConfig` derives `isProduction` from, and the
+ * controller's constructor asserts the two agree.
+ */
+const DEV_ONLY_CONTROLLERS =
+  process.env['NODE_ENV'] === 'production' ? [] : [DevMailboxController];
+
+/**
  * Guard order is deliberate and enforced by registration order:
  *
  *   1. AuthGuard        — who is calling, from a validated credential
@@ -119,6 +141,8 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
     TenantApiKeysController,
     ReservedController,
     AdminController,
+    // Absent in production, rather than present and guarded. See DEV_ONLY_CONTROLLERS.
+    ...DEV_ONLY_CONTROLLERS,
   ],
   providers: [
     {

@@ -413,6 +413,7 @@ export class SearchPipeline {
             taxonomy: input.taxonomy,
           },
           queryId: query.queryId,
+          family: query.family,
           text: query.query,
           language: query.language,
           country: query.jurisdiction,

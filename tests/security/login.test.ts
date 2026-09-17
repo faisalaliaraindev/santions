@@ -196,7 +196,9 @@ describe('I3 — a password buys a session that works like any other', () => {
     expect(body['sessionToken']).toBeTypeOf('string');
     expect(body['userId']).toBe(account.userId);
     expect(body['tenantId']).toBe(account.tenantId);
-    expect(body['roles']).toEqual(['tenant_admin']);
+    // Both roles the administrator was provisioned with; `analyst` is what lets the keys they
+    // issue actually run a search.
+    expect(body['roles']).toEqual(['tenant_admin', 'analyst']);
     // Both expiries, because a client that knows only the absolute one will be surprised by the
     // idle one at the worst possible moment.
     expect(body['expiresAt']).toBeTypeOf('string');

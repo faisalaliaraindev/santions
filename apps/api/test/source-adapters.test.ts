@@ -511,6 +511,7 @@ describe('news discovery', () => {
     // against this; making it optional would make the gate something a caller can forget.
     run: TEST_RUN_CONTEXT,
     queryId: 'q1',
+    family: 'F1' as const,
     text: DISCOVERY_QUERY_WITH_RESULTS,
     language: null,
     country: 'CR',
@@ -571,6 +572,7 @@ describe('web discovery', () => {
     tenantId: 't',
     run: TEST_RUN_CONTEXT,
     queryId: 'q1',
+    family: 'F1' as const,
     text: DISCOVERY_QUERY_WITH_RESULTS,
     language: null,
     country: 'CR',

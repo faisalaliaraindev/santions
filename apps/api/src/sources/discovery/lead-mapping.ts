@@ -152,23 +152,16 @@ export function fold(value: string): string {
  * whose weights belong to the labelled corpus rather than to a guess here.
  */
 export function matchesQuery(queryText: string, candidate: RawCandidate): boolean {
-  const haystack = `${fold(candidate.title ?? '')} ${fold(candidate.snippet ?? '')}`;
-
-  const phrases = [...queryText.matchAll(/"([^"]+)"/g)]
-    .map((match) => fold(match[1] ?? '').trim())
-    .filter((phrase) => phrase.length > 1);
-
-  if (phrases.length > 0) {
-    return phrases.every((phrase) => haystack.includes(phrase));
-  }
-
-  const terms = fold(queryText)
-    .split(/\s+/)
-    .filter((term) => term.length > 1);
+  const terms = tokens(queryText).filter((term) => term.length > 1);
   if (terms.length === 0) {
     return true;
   }
+  const haystack = tokens(`${candidate.title ?? ''} ${candidate.snippet ?? ''}`).join(' ');
   return terms.every((term) => haystack.includes(term));
+}
+
+function tokens(value: string): readonly string[] {
+  return fold(value).match(/[\p{Letter}\p{Number}]+/gu) ?? [];
 }
 
 /**

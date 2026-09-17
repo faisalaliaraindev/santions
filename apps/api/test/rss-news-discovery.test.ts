@@ -210,6 +210,7 @@ function queryFor(overrides: Partial<DiscoveryQuery> = {}): DiscoveryQuery {
       taxonomy: TAXONOMY,
     },
     queryId: 'q-1',
+    family: 'F1',
     text: 'Jane Marie Whitfield',
     language: 'en',
     country: 'US',
@@ -372,9 +373,19 @@ describe('a parse failure is never an empty result', () => {
 });
 
 describe('the leads it produces', () => {
+  it('does not poll a fixed feed for non-F1 queries', async () => {
+    const { adapter, fetch } = adapterFor(FIXED_FEED_SOURCE);
+    const outcome = await adapter.discover(
+      queryFor({ family: 'F3', text: '"Jane Marie Whitfield" fraud' }),
+    );
+
+    expect(outcome.status).toBe('NO_RESULTS');
+    expect(fetch.requests).toHaveLength(0);
+  });
+
   it('matches the planned query against a fixed feed the publisher was never asked', async () => {
     const { adapter } = adapterFor(FIXED_FEED_SOURCE);
-    const outcome = await adapter.discover(queryFor());
+    const outcome = await adapter.discover(queryFor({ text: '"Jane Marie Whitfield"' }));
 
     expect(hasData(outcome)).toBe(true);
     if (!hasData(outcome)) {

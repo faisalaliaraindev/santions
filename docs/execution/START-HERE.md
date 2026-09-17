@@ -49,6 +49,17 @@ of previous sessions. It is deliberately short.
 > **Signup → confirm → sign in → issue your own key now runs end to end**, with nobody at Erly
 > involved. `tests/security/login.test.ts` does exactly that.
 >
+> **Done (2026-09-17): the flow closes.** Signup now grants the first user
+> `['tenant_admin', 'analyst']` — without `analyst` there is no `search:create` and no
+> `search:write` scope, so a self-signed-up tenant could issue keys and never use them. A
+> dev-only `GET /v1/dev/outbound-emails/latest` reads the verification token over HTTP (absent in
+> production by registration, not by a guard). Postman folder 13 runs signup → token → verify →
+> login → **sandbox and live** keys → subject → search → poll → findings, with every customer
+> call on the tenant's own key. `tests/e2e/tenant-onboarding-e2e.test.ts` proves it: 16 passed.
+>
+> **A search needs the API *and* the worker** (`pnpm dev` runs both). A stale worker completes a
+> run in ~130ms as `FAILED`, which looks exactly like a provisioning bug and is not one.
+>
 > **Next: I5/I6** — mostly assembly. A tenant can already hold both key kinds; what is left is
 > the single response that hands over both with each secret shown once (I6), and a decision about
 > whether signup itself should issue the sandbox key rather than making the customer sign in for

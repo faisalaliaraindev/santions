@@ -233,8 +233,13 @@ describe('I2 — signup creates the administrator, and stores a hash', () => {
     expect(user).not.toBeNull();
     expect(user?.['userId']).toBe(account.adminUserId);
     expect(user?.['email']).toBe(account.email);
-    // The first user administers the tenant: they have to be able to issue the first key.
-    expect(user?.['roles']).toEqual(['tenant_admin']);
+    // The first user administers the tenant AND is its only analyst until it hands out
+    // narrower roles. `tenant_admin` carries `apikey:manage`, so they can issue the first key;
+    // `analyst` carries `search:create` and is the only role mapped to the `search:write` scope.
+    // Without the second the tenant can issue keys and never use them — the key route will not
+    // mint a role the caller does not hold, so a `tenant_admin`-only admin can only ever mint
+    // `tenant_admin` keys, and those are refused at POST /v1/searches.
+    expect(user?.['roles']).toEqual(['tenant_admin', 'analyst']);
   });
 
   it('stores an argon2id hash, and never the password', async () => {
