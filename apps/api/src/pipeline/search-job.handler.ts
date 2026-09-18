@@ -154,6 +154,10 @@ export class SearchJobHandler implements JobHandler {
               findings: aggregate.findings,
               coverage: aggregate.coverage,
               sourceOutcomes: result.sourceOutcomes,
+              // What the live connectors put on the wire (D-060). Stored on the run because it
+              // is a fact about this execution, not about the source registry: re-reading the
+              // registry later cannot reconstruct how many requests this particular run made.
+              liveDiscovery: result.liveDiscovery,
               completedAt: now,
               progress: {
                 // Six: associations, plan, discovery, fetch, extraction, banding.

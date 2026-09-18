@@ -9,6 +9,7 @@ import { FindingsService } from './pipeline/findings.service.js';
 import { SearchJobHandler } from './pipeline/search-job.handler.js';
 import { CascadeService } from './pipeline/cascade.service.js';
 import { LadderBuilder } from './pipeline/ladder.builder.js';
+import { DiscoveryRequestLog } from './sources/discovery-request-log.js';
 import { FixedFeedPollCache } from './sources/feed-poll-cache.js';
 import { SearchPipeline } from './pipeline/search-pipeline.service.js';
 import { FetchGateService } from './sources/fetch-gate.service.js';
@@ -529,6 +530,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         config: AppConfig,
         ladder: LadderBuilder,
         cascade: CascadeService,
+        requestLog: DiscoveryRequestLog,
       ) =>
         new SearchPipeline(
           subjects,
@@ -543,6 +545,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
           config.mode,
           ladder,
           cascade,
+          requestLog,
         ),
       inject: [
         SubjectsService,
@@ -557,8 +560,13 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         APP_CONFIG,
         LadderBuilder,
         CascadeService,
+        DiscoveryRequestLog,
       ],
     },
+    // What the live discovery connectors put on the wire (D-060). A singleton for the same
+    // reason the poll cache is one: it measures traffic the publisher sees, which is a property
+    // of the process. A diagnostic — nothing reads it back to decide anything.
+    DiscoveryRequestLog,
     // The fixed-feed poll floor. A singleton because what it bounds is the number of requests
     // the publisher sees, which is a property of the process rather than of any one run.
     FixedFeedPollCache,
@@ -573,6 +581,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         versions: SourceVersionService,
         gate: FetchGateService,
         pollCache: FixedFeedPollCache,
+        requestLog: DiscoveryRequestLog,
       ) =>
         new LadderBuilder(db, adapters, {
           mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
@@ -585,6 +594,9 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
           // One per process, so a fixed feed costs one request per poll floor however many
           // queries or searches are matched against it.
           pollCache,
+          // So a QUERY_FEED's per-query request count and a FIXED_FEED's collapsed one are both
+          // numbers on the response rather than claims in a comment.
+          requestLog,
         }),
       inject: [
         MONGO_DB,
@@ -593,6 +605,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         SourceVersionService,
         FetchGateService,
         FixedFeedPollCache,
+        DiscoveryRequestLog,
       ],
     },
     {

@@ -3246,6 +3246,891 @@
           ]
         }
       ]
+    },
+    {
+      "name": "15 - Mixed Live E2E: SEC + GDELT",
+      "description": "THE MIXED LIVE TEST. Two source SHAPES on one ladder, at two real publishers.\n\n  www.sec.gov            FIXED_FEED   rung 1   litigation releases + press releases\n  api.gdeltproject.org   QUERY_FEED   rung 3   GDELT DOC 2.0\n\nWHAT IT PROVES THAT A 200 DOES NOT. A fixture run returns SUCCEEDED too. What separates this from one is provenance and shape: mode is LIVE, no fixture source id appears anywhere, and liveDiscovery reports what each connector actually put on the wire.\n\nTHE ARCHITECTURAL CLAIM UNDER TEST, in one sentence: a FIXED_FEED costs one request per poll floor HOWEVER LARGE the query plan is, and a QUERY_FEED costs one request per planned query, BOUNDED BY ITS BUDGET — and neither of those is a claim you can check from a list of source ids.\n\nIT WILL NOT RUN BY ACCIDENT. 15.0 halts unless mixedLiveConfirm is exactly: yes-contact-sec-and-gdelt\nThat is a different variable from folder 14’s liveConfirm on purpose — arming folder 14 must not arm a folder that contacts a publisher this project has no relationship with.\n\nIT WILL NOT RUN IF THE LIFECYCLE HAS NOT BEEN COMPLETED. 15.6 and 15.7 read the registry and halt unless all three sources hold an ACTIVE version with a named first-contact approval and an established robots position. Nothing in this folder activates a source. See docs/sources/mixed-live-go-live.md for what a person has to do first.\n\nFOLDER 14 IS UNAFFECTED. It still runs on its own guard, its own variables and its own tenant, and nothing here reads or writes any of them.\n\nA PARTIAL RESULT IS A GOOD RESULT HERE. GDELT’s hourly budget is deliberately smaller than one full query plan, so the fan-out stops inside the run and the coverage state says so. That is the budget working, reported honestly — not a broken search.",
+      "item": [
+        {
+          "name": "15.0 STOP - confirm you mean to contact the SEC and GDELT",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "A harmless readiness check whose only job is to read the confirmation variable and the environment this folder needs, and to halt before anything else runs.\n\nTHIS FOLDER CONTACTS TWO REAL PUBLISHERS: www.sec.gov and api.gdeltproject.org.\n\nIt will not run unless mixedLiveConfirm is exactly: yes-contact-sec-and-gdelt\n\nA separate variable from folder 14 on purpose. Folder 14 contacts one publisher this project has an established relationship with; this folder adds one it does not. Arming folder 14 must not arm this.\n\nWHAT THIS COSTS. SEC: one poll of each approved feed, plus robots.txt on a cold process, plus one document fetch per candidate. GDELT: one request per eligible planned query, hard-bounded by the source’s recorded hourly budget — 24 on the proposed record. The fan-out stopping at the budget is not a failure; it is the property this folder exists to demonstrate, and it is reported as a PARTIAL/INCOMPLETE coverage state.\n\nBEFORE YOU RUN IT:\n  1. The API and the worker must be in LIVE mode — pnpm dev:live. In mock mode no live      connector is constructed at all and every rung answers with nothing.\n  2. All three sources must be ACTIVE. 15.6 and 15.7 check and halt if not.\n  3. Run pnpm sec:live-smoke --yes-contact-the-sec first if the SEC path has not been      exercised recently. One request, fully reported, is a cheaper place to find a      problem than a thirteen-step folder."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const confirmed = pm.environment.get('mixedLiveConfirm') === 'yes-contact-sec-and-gdelt';",
+                  "pm.test('mixedLiveConfirm is set to yes-contact-sec-and-gdelt', () => pm.expect(confirmed).to.eql(true));",
+                  "",
+                  "const required = ['baseUrl', 'operatorKey', 'mixedSubjectName'];",
+                  "const missing = required.filter(function (name) {",
+                  "  const value = pm.environment.get(name);",
+                  "  return value === undefined || value === null || String(value).trim() === '';",
+                  "});",
+                  "pm.test('every environment variable this folder needs is set', () => pm.expect(missing, 'missing: ' + missing.join(', ')).to.eql([]));",
+                  "",
+                  "pm.test('the service is ready', () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "if (!confirmed || missing.length > 0 || pm.response.code !== 200) {",
+                  "  console.error('Folder 15 makes REAL requests to www.sec.gov AND api.gdeltproject.org, and is not armed.');",
+                  "  console.error('Set mixedLiveConfirm to: yes-contact-sec-and-gdelt');",
+                  "  if (missing.length > 0) { console.error('Also set: ' + missing.join(', ')); }",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.1 Sign up",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "signup"]
+            },
+            "description": "No credential — signup has to work for somebody who does not have one. A fresh {{$guid}} address every run, so the folder is re-runnable without D-057’s 409.\n\nSIGNUP IS RATE LIMITED: 5 per origin per hour (D-056). A sixth run inside the hour returns 429 and the folder halts. That is the limiter working. Either wait, or clear the bucket on a local stack:\n\n    mongosh \"$MONGODB_URI\" --eval 'db.attemptLog.deleteMany({bucket:\"SIGNUP\"})'",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organisationName\": \"Mixed Live E2E Ltd\",\n  \"contactEmail\": \"{{$guid}}@example.test\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('mixedSignupEmail', b.contactEmail);",
+                  "  pm.environment.set('mixedTenantId', b.tenantId);",
+                  "  console.log('tenant ' + b.tenantId);",
+                  "}",
+                  "pm.test('the tenant id was generated, not chosen', () => pm.expect(b.tenantId).to.match(/^tenant-[0-9a-f-]{36}$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.2 Get the verification token",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/dev/outbound-emails/latest?kind=EMAIL_VERIFICATION&email={{mixedSignupEmail}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "dev", "outbound-emails", "latest"],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "EMAIL_VERIFICATION"
+                },
+                {
+                  "key": "email",
+                  "value": "{{mixedSignupEmail}}"
+                }
+              ]
+            },
+            "description": "The dev mailbox (D-058). This route does not exist when NODE_ENV=production — it is absent from the module, not hidden behind a guard. It only reads: the token stays single-use and 15.3 still spends it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('mixedVerificationToken', pm.response.json().token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.3 Verify the email address",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "signup", "verify"]
+            },
+            "description": "Sets tenants.emailVerifiedAt — the one thing standing between a self-signed-up tenant and a live key (D-052).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{mixedVerificationToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.4 Sign in",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "auth", "login"]
+            },
+            "description": "AFTER confirming, deliberately. The session’s environment is DERIVED by decideLiveAccess, never requested — a session created before confirmation is sandbox, and T62 refuses it a live key.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{mixedSignupEmail}}\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 200) { pm.environment.set('sessionToken', b.sessionToken); }",
+                  "pm.test('the session is live, because the address is confirmed', () => pm.expect(b.environment).to.eql('live'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.5 Issue the LIVE API key",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "Session {{sessionToken}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "tenant", "api-keys"]
+            },
+            "description": "The secret is shown ONCE. Both roles: tenant_admin carries apikey:manage, analyst is the only role mapped to search:write. Every request from 15.8 on uses this key — not the collection-level {{apiKey}}, and not any seeded credential.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"postman mixed live e2e\",\n  \"roles\": [\n    \"tenant_admin\",\n    \"analyst\"\n  ],\n  \"environment\": \"live\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('mixedIssuedKey', b.secret);",
+                  "  pm.environment.set('mixedIssuedKeyId', b.keyId);",
+                  "}",
+                  "pm.test('it is a live key', () => pm.expect(b.environment).to.eql('live'));",
+                  "pm.test('it belongs to the tenant that just signed up', () => pm.expect(b.tenantId).to.eql(pm.environment.get('mixedTenantId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.6 Pre-flight: both SEC sources are approved and ACTIVE",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{adminKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources?limit=200",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "200"
+                }
+              ]
+            },
+            "description": "Read from the registry rather than assumed. Both SEC feeds must hold an ACTIVE version, and both must be recorded as FIXED_FEED — which is what makes their request cost one poll per feed however large the query plan is.\n\nThis folder never activates anything. A source that is not ACTIVE halts it, because activating one to make a test pass is the four-eyes lifecycle being bypassed by the thing that is supposed to be checking it. Use folder 5 (propose → submit → approve → activate) with a second credential, and see docs/sources/mixed-live-go-live.md."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const items = pm.response.json().items || [];",
+                  "const wanted = [\"sec-litigation-releases\",\"sec-press-releases\"];",
+                  "const active = {};",
+                  "items.forEach(function (item) {",
+                  "  if (wanted.indexOf(item.recordId) !== -1 && item.status === 'ACTIVE') { active[item.recordId] = item; }",
+                  "});",
+                  "let ok = true;",
+                  "wanted.forEach(function (sourceId) {",
+                  "  const record = active[sourceId];",
+                  "  pm.test('SEC: ' + sourceId + ' has an ACTIVE approved version', () => pm.expect(record, 'not ACTIVE in the registry').to.be.an('object'));",
+                  "  if (!record) { ok = false; return; }",
+                  "  const content = record.content || {};",
+                  "  const policy = content.accessPolicy || {};",
+                  "  console.log(sourceId + '  v' + record.version + '  ' + content.connectorType + '  rung ' + content.cascadeRung + '  ' + policy.endpointKind + '  queryParam=' + policy.queryParam + '  robots=' + content.robotsPosition + '  hourly=' + content.freeTierHourlyBudget);",
+                  "  const expected = {\"sec-litigation-releases\":{\"endpointKind\":\"FIXED_FEED\",\"connectorType\":\"NEWS_DISCOVERY_RSS\",\"cascadeRung\":1,\"queryParam\":null},\"sec-press-releases\":{\"endpointKind\":\"FIXED_FEED\",\"connectorType\":\"NEWS_DISCOVERY_RSS\",\"cascadeRung\":1,\"queryParam\":null}}[sourceId];",
+                  "  pm.test('SEC: ' + sourceId + ' is a ' + expected.endpointKind, () => pm.expect(policy.endpointKind).to.eql(expected.endpointKind));",
+                  "  pm.test('SEC: ' + sourceId + ' uses ' + expected.connectorType, () => pm.expect(content.connectorType).to.eql(expected.connectorType));",
+                  "  pm.test('SEC: ' + sourceId + ' sits at rung ' + expected.cascadeRung, () => pm.expect(content.cascadeRung).to.eql(expected.cascadeRung));",
+                  "  pm.test('SEC: ' + sourceId + ' records a query parameter only if it is a QUERY_FEED', function () {",
+                  "    if (expected.endpointKind === 'QUERY_FEED') { pm.expect(policy.queryParam).to.eql(expected.queryParam); }",
+                  "    else { pm.expect(policy.queryParam === null || policy.queryParam === undefined).to.eql(true); }",
+                  "  });",
+                  "  pm.test('SEC: ' + sourceId + ' carries a named first-contact approval (D-042)', () => pm.expect(policy.firstContactApproval, 'the fetch gate refuses a source without one').to.be.an('object'));",
+                  "  pm.test('SEC: ' + sourceId + ' has an established robots position', () => pm.expect(['HONOURED', 'EXCEPTION_APPROVED']).to.include(content.robotsPosition));",
+                  "  if (expected.hourlyBudget !== undefined) {",
+                  "    pm.environment.set('mixedSecHourlyBudget', content.freeTierHourlyBudget);",
+                  "    pm.test('SEC: ' + sourceId + ' records an hourly budget, which bounds the fan-out', () => pm.expect(content.freeTierHourlyBudget).to.be.a('number'));",
+                  "  }",
+                  "});",
+                  "if (!ok) {",
+                  "  console.error('SEC: a required source is not ACTIVE. Take it through propose -> approve -> activate (folder 5) before running this folder. Nothing here activates a source, deliberately.');",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.7 Pre-flight: the GDELT source is approved and ACTIVE",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{adminKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources?limit=200",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "sources"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "200"
+                }
+              ]
+            },
+            "description": "The QUERY_FEED half. The record must say QUERY_FEED and must name the query parameter, because a connector never guesses where the query goes.\n\nIt must also carry a named first-contact approval and an established robots position. The proposed record carries NEITHER — deliberately, because this project has never contacted GDELT. Both are human acts:\n  1. read https://api.gdeltproject.org/robots.txt and record the position;\n  2. read and name GDELT’s terms;\n  3. record a named first-contact approval (the SEC’s D17 does not cover this publisher);\n  4. propose → approve → activate, with two people.\nUntil all four have happened this request halts the folder, which is the safe direction."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const items = pm.response.json().items || [];",
+                  "const wanted = [\"gdelt-doc-v2\"];",
+                  "const active = {};",
+                  "items.forEach(function (item) {",
+                  "  if (wanted.indexOf(item.recordId) !== -1 && item.status === 'ACTIVE') { active[item.recordId] = item; }",
+                  "});",
+                  "let ok = true;",
+                  "wanted.forEach(function (sourceId) {",
+                  "  const record = active[sourceId];",
+                  "  pm.test('GDELT: ' + sourceId + ' has an ACTIVE approved version', () => pm.expect(record, 'not ACTIVE in the registry').to.be.an('object'));",
+                  "  if (!record) { ok = false; return; }",
+                  "  const content = record.content || {};",
+                  "  const policy = content.accessPolicy || {};",
+                  "  console.log(sourceId + '  v' + record.version + '  ' + content.connectorType + '  rung ' + content.cascadeRung + '  ' + policy.endpointKind + '  queryParam=' + policy.queryParam + '  robots=' + content.robotsPosition + '  hourly=' + content.freeTierHourlyBudget);",
+                  "  const expected = {\"gdelt-doc-v2\":{\"endpointKind\":\"QUERY_FEED\",\"connectorType\":\"NEWS_DISCOVERY_GDELT\",\"cascadeRung\":3,\"queryParam\":\"query\",\"hourlyBudget\":true}}[sourceId];",
+                  "  pm.test('GDELT: ' + sourceId + ' is a ' + expected.endpointKind, () => pm.expect(policy.endpointKind).to.eql(expected.endpointKind));",
+                  "  pm.test('GDELT: ' + sourceId + ' uses ' + expected.connectorType, () => pm.expect(content.connectorType).to.eql(expected.connectorType));",
+                  "  pm.test('GDELT: ' + sourceId + ' sits at rung ' + expected.cascadeRung, () => pm.expect(content.cascadeRung).to.eql(expected.cascadeRung));",
+                  "  pm.test('GDELT: ' + sourceId + ' records a query parameter only if it is a QUERY_FEED', function () {",
+                  "    if (expected.endpointKind === 'QUERY_FEED') { pm.expect(policy.queryParam).to.eql(expected.queryParam); }",
+                  "    else { pm.expect(policy.queryParam === null || policy.queryParam === undefined).to.eql(true); }",
+                  "  });",
+                  "  pm.test('GDELT: ' + sourceId + ' carries a named first-contact approval (D-042)', () => pm.expect(policy.firstContactApproval, 'the fetch gate refuses a source without one').to.be.an('object'));",
+                  "  pm.test('GDELT: ' + sourceId + ' has an established robots position', () => pm.expect(['HONOURED', 'EXCEPTION_APPROVED']).to.include(content.robotsPosition));",
+                  "  if (expected.hourlyBudget !== undefined) {",
+                  "    pm.environment.set('mixedGdeltHourlyBudget', content.freeTierHourlyBudget);",
+                  "    pm.test('GDELT: ' + sourceId + ' records an hourly budget, which bounds the fan-out', () => pm.expect(content.freeTierHourlyBudget).to.be.a('number'));",
+                  "  }",
+                  "});",
+                  "if (!ok) {",
+                  "  console.error('GDELT: a required source is not ACTIVE. Take it through propose -> approve -> activate (folder 5) before running this folder. Nothing here activates a source, deliberately.');",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.8 Pre-flight: the breakers permit execution, on both domains",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/source-health",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "admin", "source-health"]
+            },
+            "description": "Read with platform:read_health, which grants no access to any customer finding (T06). Breaker state and budget spend are properties of the publisher, not of anybody’s data.\n\nA source with NO record has simply never been called from this database — which is the normal state for GDELT before its first run, and is not a refusal. A source WITH a record must have a closed or half-open breaker, or the run would be refused before a socket opens and would prove nothing.\n\nAn OPEN breaker is OUR record of the source refusing us, not the publisher refusing us right now. Clear it locally with:\n    pnpm source:health <sourceId> --reset --reason \"why\""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const sources = pm.response.json().sources || [];",
+                  "const wanted = [\"sec-litigation-releases\",\"sec-press-releases\",\"gdelt-doc-v2\"];",
+                  "let blocked = [];",
+                  "wanted.forEach(function (sourceId) {",
+                  "  const record = sources.filter(function (s) { return s.sourceId === sourceId; })[0];",
+                  "  if (!record) {",
+                  "    console.log(sourceId + ': no health record - never called from this database. Not a refusal.');",
+                  "    return;",
+                  "  }",
+                  "  console.log(sourceId + '  breaker ' + record.breaker + '  hourly ' + JSON.stringify(record.hourly) + '  daily ' + JSON.stringify(record.daily) + '  lastSuccess ' + record.lastSuccessAt + '  lastFailure ' + record.lastFailureAt + ' ' + (record.lastFailureClass || ''));",
+                  "  pm.test(sourceId + ': the breaker permits a request', () => pm.expect(['CLOSED', 'HALF_OPEN']).to.include(record.breaker));",
+                  "  pm.test(sourceId + ': no kill switch is engaged', () => pm.expect(record.killSwitch).to.eql(null));",
+                  "  if (['CLOSED', 'HALF_OPEN'].indexOf(record.breaker) === -1 || record.killSwitch) { blocked.push(sourceId); }",
+                  "  if (sourceId === 'gdelt-doc-v2') { pm.environment.set('mixedGdeltSpentBefore', record.hourly ? record.hourly.spent : 0); }",
+                  "  if (sourceId === 'sec-litigation-releases') { pm.environment.set('mixedSecSpentBefore', record.hourly ? record.hourly.spent : 0); }",
+                  "});",
+                  "if (pm.environment.get('mixedGdeltSpentBefore') === undefined || pm.environment.get('mixedGdeltSpentBefore') === null) { pm.environment.set('mixedGdeltSpentBefore', 0); }",
+                  "if (pm.environment.get('mixedSecSpentBefore') === undefined || pm.environment.get('mixedSecSpentBefore') === null) { pm.environment.set('mixedSecSpentBefore', 0); }",
+                  "if (blocked.length > 0) {",
+                  "  console.error('Blocked before a socket opens: ' + blocked.join(', '));",
+                  "  console.error('    pnpm source:health <sourceId> --reset --reason \"why\"');",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.9 Create a subject that generates F2-F4 query families",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{mixedIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "subjects"]
+            },
+            "description": "US, because that is the jurisdiction both live sources are approved for. A scope a source does not cover takes it off the ladder and the run proves nothing.\n\nWHY THE COMPANY. F2 (identity plus role) and F6 (company-anchored) are anchored on a company the association graph RESOLVED — FR-02 is explicit that resolution happens before company queries are dispatched. Without a knownCompany the plan contains no F2 at all, and this folder could not show F2 reaching the wire. If the company does not resolve, F2 is simply absent and 15.12 says so rather than failing: an unresolved company is a coverage fact, not a bug.\n\nF3 comes from the tenant’s taxonomy lexicon, which signup seeds. F4 is generated for every jurisdiction and is never dropped by plan truncation.\n\nPICK A BENIGN SUBJECT. This is a transport, planning, coverage and provenance test. Do not point it at a private individual in order to manufacture adverse findings. A name that returns nothing is a perfectly good result here — NO_MATCHES_FOUND is an honest terminal state, and the architecture assertions in 15.12 do not depend on findings.\n\nNote that the SEC feeds are FIXED_FEEDs: the name NEVER reaches the SEC. The whole list is polled and matched locally. It DOES reach GDELT, which is a QUERY_FEED.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{mixedSubjectName}}\",\n  \"aliases\": [],\n  \"countryContext\": [\n    \"US\"\n  ],\n  \"knownCompanies\": [\n    {\n      \"name\": \"{{mixedCompanyName}}\",\n      \"jurisdiction\": \"GB\",\n      \"registrationNumber\": null\n    }\n  ],\n  \"externalSubjectRef\": \"postman-mixed-{{$guid}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('mixedSubjectId', b.subjectId);",
+                  "  pm.environment.set('mixedSubjectVersion', b.version);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.10 Start the MIXED LIVE adverse search",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{mixedIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches"]
+            },
+            "description": "THIS IS THE REQUEST THAT REACHES BOTH PUBLISHERS. 202, not 200: a submitted search is a receipt and the worker runs it.\n\nNeeds the API AND the worker running in live mode (pnpm dev:live). With no worker the run sits at QUEUED for ever; with a stale worker it completes in ~130ms as FAILED, which reads exactly like a provisioning bug and is not one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{mixedSubjectId}}\",\n    \"version\": {{mixedSubjectVersion}}\n  },\n  \"externalCaseRef\": \"postman-mixed-live-e2e\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"US\"\n    ],\n    \"languages\": [\n      \"en\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 accepted - a receipt, not an answer', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "if (pm.response.code === 202) {",
+                  "  pm.environment.set('mixedSearchId', b.searchId);",
+                  "  pm.environment.set('mixedPollTries', 0);",
+                  "}",
+                  "pm.test('it starts QUEUED', () => pm.expect(b.execution).to.eql('QUEUED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.11 Poll until terminal",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{mixedIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{mixedSearchId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{mixedSearchId}}"]
+            },
+            "description": "Bounded at 90 tries. A mixed live run makes one request per eligible planned query to GDELT as well as fetching real documents, so it is slower than folder 14’s.\n\nPARTIAL is terminal and is an honest live outcome — a source refused mid-run, or a query feed whose budget was spent, is a coverage gap rather than a failure of the path. FAILED is not: nothing usable came back."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Wait before polling. Without this the tries complete in milliseconds and the run",
+                  "// reports \"still QUEUED\" while the worker is simply still working — which reads as a",
+                  "// broken worker and is not one. A busy wait, deliberately: the Postman sandbox does not",
+                  "// reliably hold a run open for setTimeout.",
+                  "const waited = Number(pm.environment.get('mixedPollTries') || 0) > 0 ? 2000 : 1000;",
+                  "const until = Date.now() + waited;",
+                  "while (Date.now() < until) {",
+                  "  /* wait */",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "const tries = Number(pm.environment.get('mixedPollTries') || 0) + 1;",
+                  "pm.environment.set('mixedPollTries', tries);",
+                  "if (terminal.indexOf(b.execution) === -1) {",
+                  "  if (tries > 90) {",
+                  "    console.error('Still ' + b.execution + ' after 90 tries. Is the worker running in LIVE mode? pnpm dev:live');",
+                  "    postman.setNextRequest(null);",
+                  "  } else {",
+                  "    postman.setNextRequest('15.11 Poll until terminal');",
+                  "  }",
+                  "} else {",
+                  "  console.log('execution=' + b.execution + ' findings=' + b.findings + ' coverage=' + b.coverage + ' rung=' + (b.progress && b.progress.cascadeRungReached));",
+                  "  pm.test('it reached a terminal state', () => pm.expect(terminal).to.include(b.execution));",
+                  "  pm.test('it is not FAILED - something usable came back', () => pm.expect(['SUCCEEDED', 'PARTIAL']).to.include(b.execution));",
+                  "  pm.test('the run is live, not sandbox', () => pm.expect(b.environment).to.eql('live'));",
+                  "  pm.test('it belongs to the tenant that signed up', () => pm.expect(b.tenantId).to.eql(pm.environment.get('mixedTenantId')));",
+                  "  // Rung 3 is GDELT. Reaching it is what says the walk did not stop at the SEC rung.",
+                  "  pm.test('the cascade reached at least rung 3, where GDELT sits', () => pm.expect(b.progress.cascadeRungReached).to.be.at.least(3));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15.12 PROVE the architecture - provenance, shapes, counts and budget",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{mixedIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{mixedSearchId}}/findings",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "searches", "{{mixedSearchId}}", "findings"]
+            },
+            "description": "The assertions that separate a real mixed run from a fixture one, and a working architecture from a green tick.\n\nA fixture run returns SUCCEEDED too, so what is checked here is PROVENANCE and SHAPE:\n  - mode is LIVE and no fixture source id appears anywhere;\n  - both live source ids appear in the coverage outcomes when they contributed one;\n  - liveDiscovery reports what each connector put on the wire (D-060);\n  - the SEC feeds are FIXED_FEED and issued ONE request each, whatever the plan’s size;\n  - GDELT is QUERY_FEED, issued MORE than one request, and one distinct endpoint per request — which is what proves distinct planned queries were not collapsed;\n  - GDELT’s request count never exceeds its recorded hourly budget;\n  - two distinct publisher hosts were addressed.\n\nliveDiscovery carries NO query text and NO URLs. Endpoint identity is counted through a one-way digest, because a planned query is the subject’s name plus a conduct term and an audit field is the wrong place for it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect([200, 201, 202]).to.include(pm.response.code));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "",
+                  "// ---- provenance: live, and not a fixture ------------------------------------------",
+                  "pm.test('execution mode is LIVE, not MOCK', () => pm.expect(b.mode).to.eql('LIVE'));",
+                  "const outcomes = b.sourceOutcomes || [];",
+                  "const outcomeIds = outcomes.map(function (o) { return o.sourceId; });",
+                  "console.log('source outcomes: ' + JSON.stringify(outcomes.map(function (o) { return o.sourceId + '=' + o.outcome; })));",
+                  "const fixtures = [\"fixture-newsroom\",\"fixture-court\",\"src-mock-news-discovery\",\"src-mock-web-discovery\",\"src-mock-primary\",\"src-mock-cr-registry\",\"src-mock-fetch\",\"src-mock-extraction\"];",
+                  "const serialised = JSON.stringify(b);",
+                  "fixtures.forEach(function (id) {",
+                  "  pm.test('no fixture source stood in for a live one: ' + id, () => pm.expect(serialised).to.not.include(id));",
+                  "});",
+                  "",
+                  "// ---- the request-count diagnostic --------------------------------------------------",
+                  "pm.test('the run reports what its live connectors put on the wire (D-060)', () => pm.expect(b.liveDiscovery, 'null means this run was not measured; empty sources means no live connector made an attempt').to.be.an('object'));",
+                  "const live = b.liveDiscovery || { sources: [], totalRequestsIssued: 0 };",
+                  "const bySource = {};",
+                  "(live.sources || []).forEach(function (s) { bySource[s.sourceId] = s; });",
+                  "console.log('liveDiscovery: ' + JSON.stringify(live));",
+                  "",
+                  "pm.test('the diagnostic carries no URLs', () => pm.expect(JSON.stringify(live)).to.not.include('http'));",
+                  "",
+                  "// ---- FIXED_FEED: bounded, and not multiplied by the query plan ---------------------",
+                  "const secIds = [\"sec-litigation-releases\",\"sec-press-releases\"];",
+                  "secIds.forEach(function (sourceId) {",
+                  "  const stat = bySource[sourceId];",
+                  "  if (!stat) {",
+                  "    console.log(sourceId + ': made no attempt in this run. Check 15.6 and the run scope.');",
+                  "    return;",
+                  "  }",
+                  "  pm.test(sourceId + ' behaves as a FIXED_FEED', () => pm.expect(stat.endpointKind).to.eql('FIXED_FEED'));",
+                  "  pm.test(sourceId + ' issued at most one request for the whole plan', () => pm.expect(stat.requestsIssued).to.be.at.most(1));",
+                  "  pm.test(sourceId + ' addressed exactly one endpoint', () => pm.expect(stat.distinctEndpoints).to.be.at.most(1));",
+                  "  pm.test(sourceId + ' was offered more queries than it issued requests, or exactly one of each', function () {",
+                  "    pm.expect(stat.queriesOffered).to.be.at.least(stat.requestsIssued);",
+                  "  });",
+                  "  pm.test(sourceId + ' appears in the run’s source outcomes, so its contribution is auditable', () => pm.expect(outcomeIds).to.include(sourceId));",
+                  "});",
+                  "",
+                  "// ---- QUERY_FEED: one request per planned query, bounded by the budget --------------",
+                  "const gdelt = bySource['gdelt-doc-v2'];",
+                  "pm.test('GDELT made attempts in this run', () => pm.expect(gdelt, 'no GDELT attempt: is the source ACTIVE and is the run in scope for it?').to.be.an('object'));",
+                  "if (gdelt) {",
+                  "  pm.test('GDELT appears in the run’s source outcomes, so its contribution is auditable', () => pm.expect(outcomeIds).to.include('gdelt-doc-v2'));",
+                  "  pm.test('GDELT behaves as a QUERY_FEED', () => pm.expect(gdelt.endpointKind).to.eql('QUERY_FEED'));",
+                  "  pm.test('GDELT issued more than one request - the fan-out is real', () => pm.expect(gdelt.requestsIssued).to.be.above(1));",
+                  "  pm.test('every GDELT request went to its own endpoint - distinct queries were not collapsed', () => pm.expect(gdelt.distinctEndpoints).to.eql(gdelt.requestsIssued));",
+                  "  pm.test('no GDELT request was served from a cache', () => pm.expect(gdelt.servedWithoutRequest).to.eql(0));",
+                  "  const budget = Number(pm.environment.get('mixedGdeltHourlyBudget') || 0);",
+                  "  if (budget > 0) {",
+                  "    pm.test('GDELT fan-out stopped at the recorded hourly budget of ' + budget, () => pm.expect(gdelt.requestsIssued).to.be.at.most(budget));",
+                  "  }",
+                  "  pm.test('GDELT issued far more requests than any SEC feed did', function () {",
+                  "    secIds.forEach(function (sourceId) {",
+                  "      const stat = bySource[sourceId];",
+                  "      if (stat) { pm.expect(gdelt.requestsIssued).to.be.above(stat.requestsIssued); }",
+                  "    });",
+                  "  });",
+                  "",
+                  "  // ---- F2-F4 tied to GDELT execution ----------------------------------------------",
+                  "  const families = gdelt.familiesRequested || [];",
+                  "  console.log('families that reached GDELT: ' + families.join(', '));",
+                  "  pm.test('F1 reached the GDELT wire', () => pm.expect(families).to.include('F1'));",
+                  "  pm.test('F3 reached the GDELT wire', () => pm.expect(families).to.include('F3'));",
+                  "  pm.test('F4 reached the GDELT wire', () => pm.expect(families).to.include('F4'));",
+                  "  if ((gdelt.families || []).indexOf('F2') !== -1) {",
+                  "    pm.test('F2 reached the GDELT wire', () => pm.expect(families).to.include('F2'));",
+                  "  } else {",
+                  "    console.log('F2 was not planned in this run: the association graph resolved no company, so FR-02 anchored nothing. A coverage fact, not a failure.');",
+                  "  }",
+                  "}",
+                  "",
+                  "// ---- two publishers, and the coverage statement ------------------------------------",
+                  "const hosts = {};",
+                  "(live.sources || []).forEach(function (s) { (s.hosts || []).forEach(function (h) { hosts[h] = true; }); });",
+                  "console.log('hosts addressed: ' + Object.keys(hosts).join(', '));",
+                  "pm.test('at least two publisher hosts were addressed', () => pm.expect(Object.keys(hosts).length).to.be.at.least(2));",
+                  "pm.test('coverage is always stated', () => pm.expect(b).to.have.property('coverage'));",
+                  "pm.test('a no-match is a statement, never the word clear', () => pm.expect(b).to.have.property('noMatchStatement'));",
+                  "",
+                  "// ---- a failing source is represented honestly --------------------------------------",
+                  "const failed = outcomes.filter(function (o) { return o.outcome === 'FAILED' || o.outcome === 'SKIPPED' || o.outcome === 'REFUSED'; });",
+                  "if (failed.length > 0) {",
+                  "  console.log('sources that did not complete: ' + JSON.stringify(failed));",
+                  "  pm.test('a run with a failed or refused source does not claim COMPLETE coverage', () => pm.expect(b.coverage).to.not.eql('COMPLETE'));",
+                  "  failed.forEach(function (o) { pm.test(o.sourceId + ' says why it did not complete', () => pm.expect(o.detail, 'a gap with no reason cannot be audited').to.be.a('string')); });",
+                  "}",
+                  "",
+                  "console.log('mode=' + b.mode + ' findings=' + (b.findings || []).length + ' state=' + b.findingsState + ' coverage=' + b.coverage + ' totalRequests=' + live.totalRequestsIssued);",
+                  "console.log('Budget movement is on the source-health route: GET /v1/admin/source-health with {{operatorKey}}.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

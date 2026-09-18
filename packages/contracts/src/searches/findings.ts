@@ -188,6 +188,73 @@ export const rejectedLeadSchema = z
   })
   .strict();
 
+/**
+ * What each live discovery connector put on the wire for this run (**D-060**).
+ *
+ * # Why a response carries request counts at all
+ *
+ * The FR-05 ladder now holds two shapes of source, and the difference between them is a
+ * statement about **how many requests a run makes**:
+ *
+ * - a `FIXED_FEED` — the SEC's lists — is polled whole and matched locally, so its cost is one
+ *   request per poll floor *however large the query plan is*;
+ * - a `QUERY_FEED` — GDELT — takes the planned query as a parameter, so its cost is one request
+ *   per planned query, bounded by the source's budget.
+ *
+ * Neither claim can be checked against a result that says `SUCCEEDED` and lists source ids, and
+ * "the architecture behaves as designed" is exactly the thing a reviewer or an auditor has to be
+ * able to check rather than believe. So the counts are reported.
+ *
+ * # What it deliberately does not contain
+ *
+ * **No query text and no URLs.** A planned query is the subject's name plus a conduct term, and
+ * a query-feed URL contains it verbatim. `endpointDigest` counts stand in for both: they answer
+ * "were these distinct network operations?" without moving personal data into an audit field.
+ *
+ * # Null versus empty
+ *
+ * `null` means this run cannot say — no request log was held by the process that ran it. An
+ * empty `sources` list means no **live** discovery connector made an attempt, which is what a
+ * mock-mode run looks like. They are different facts and are never collapsed: reporting zero
+ * requests for a run that was not measured would be reporting a cheap search that never happened.
+ */
+export const liveDiscoverySourceStatSchema = z
+  .object({
+    sourceId: z.string(),
+    sourceName: z.string(),
+    /** What the approved source version records. Not inferred from behaviour. */
+    endpointKind: z.enum(['FIXED_FEED', 'QUERY_FEED']),
+    /** The hosts addressed, so a reader can see that more than one publisher was attempted. */
+    hosts: z.array(z.string()),
+    /** Planned queries this connector was asked to serve. */
+    queriesOffered: z.number().int().nonnegative(),
+    /** Of those, how many opened a socket. What the publisher's own log would show. */
+    requestsIssued: z.number().int().nonnegative(),
+    /** Offered minus issued: served from the fixed-feed poll cache inside the poll floor. */
+    servedWithoutRequest: z.number().int().nonnegative(),
+    /**
+     * Distinct endpoints actually requested.
+     *
+     * The cache-collapse guard. Many offered queries against **one** distinct endpoint is
+     * correct for a fixed feed and is a defect for a query feed.
+     */
+    distinctEndpoints: z.number().int().nonnegative(),
+    /** FR-04 families offered to this connector. */
+    families: z.array(z.string()),
+    /** FR-04 families that produced a real outbound request. */
+    familiesRequested: z.array(z.string()),
+  })
+  .strict();
+
+export const liveDiscoverySchema = z
+  .object({
+    sources: z.array(liveDiscoverySourceStatSchema),
+    totalRequestsIssued: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type LiveDiscoverySummary = z.infer<typeof liveDiscoverySchema>;
+
 export const findingsPageSchema = z
   .object({
     searchId: z.string(),
@@ -239,6 +306,13 @@ export const findingsPageSchema = z
     sinceSuspendedSources: z.array(z.object({ sourceId: z.string(), note: z.string() }).strict()),
     /** MOCK for the whole run when no live source was contacted. */
     mode: z.enum(['MOCK', 'LIVE']),
+    /**
+     * Request counts per live discovery source. Null when this run was not measured.
+     *
+     * Optional on the wire so an older stored run — one completed before this field existed —
+     * reads back without being retro-fitted with a count nobody recorded.
+     */
+    liveDiscovery: liveDiscoverySchema.nullable().optional(),
   })
   .strict();
 

@@ -118,6 +118,34 @@ how the SEC source reached `OPEN` / `HARD_BLOCK` with zero consecutive failures.
 `pnpm source:health <sourceId>` reads the record; `--reset --reason "..."` clears it locally
 without weakening the breaker.
 
+### Two source shapes on the ladder — added 2026-09-18
+
+The FR-05 ladder is no longer all fixed feeds. Two proposals now exist **in code and not in the
+registry**, and the difference matters:
+
+| Source id                 | Shape        | Rung | Publisher            | State                          |
+| :------------------------ | :----------- | :--- | :------------------- | :----------------------------- |
+| `sec-litigation-releases` | `FIXED_FEED` | 1    | www.sec.gov          | **ACTIVE** since 2026-09-16    |
+| `sec-press-releases`      | `FIXED_FEED` | 1    | www.sec.gov          | proposal in code, **not live** |
+| `gdelt-doc-v2`            | `QUERY_FEED` | 3    | api.gdeltproject.org | proposal in code, **not live** |
+
+A `FIXED_FEED` costs **one request per poll floor however large the query plan is**. A `QUERY_FEED`
+costs **one request per planned query, bounded by its budget**. Neither claim was checkable from
+anything the API returned, so `GET /v1/searches/{id}/findings` now carries **`liveDiscovery`**
+(**D-060**): per source, the recorded `endpointKind`, hosts, queries offered, requests issued,
+requests served without a socket, **distinct endpoints**, and the FR-04 families that reached the
+wire. No query text and no URLs — endpoint identity is a one-way digest.
+
+**Postman folder 15 — Mixed Live E2E: SEC + GDELT** runs the mixed live search and asserts the
+architecture rather than `SUCCEEDED`. It is armed by `mixedLiveConfirm = yes-contact-sec-and-gdelt`,
+which is **not** folder 14's `liveConfirm`. It halts unless all three sources are ACTIVE, and it
+activates nothing.
+
+**Nothing has contacted GDELT.** Activating either proposal takes acts by people — robots, terms,
+endpoint verification, a named first-contact approval, four-eyes propose → approve → activate. The
+SEC's D17 covers the press-releases feed and does **not** cover GDELT.
+[`docs/sources/mixed-live-go-live.md`](../sources/mixed-live-go-live.md) is the runbook.
+
 ## 2. What to read, and what not to
 
 Read, in this order:

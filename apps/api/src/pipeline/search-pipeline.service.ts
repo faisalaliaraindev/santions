@@ -107,6 +107,10 @@ import type { Lead } from '../sources/lead.js';
 import { hasData } from '../sources/source-adapter.js';
 import { SourceHealthService } from '../sources/source-health.service.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
+import {
+  type DiscoveryRequestLog,
+  type DiscoveryRequestSummary,
+} from '../sources/discovery-request-log.js';
 import { EvidenceStagingService } from '../storage/evidence-staging.service.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
 import { PolicyService } from '../tenancy/policy.service.js';
@@ -121,6 +125,14 @@ export interface PipelineResult {
   readonly cascadeRungReached: number | null;
   readonly warnings: readonly string[];
   readonly unmeasuredLanguages: readonly string[];
+  /**
+   * What the live discovery connectors actually put on the wire (**D-060**).
+   *
+   * Null when this process holds no request log — a mock run, or a live one built without one.
+   * Null and an empty list are different statements and are kept different: null is "this run
+   * cannot tell you", empty is "no live connector made an attempt".
+   */
+  readonly liveDiscovery: DiscoveryRequestSummary | null;
 }
 
 /** A lead paired with the query that found it, so provenance survives deduplication. */
@@ -161,6 +173,14 @@ export class SearchPipeline {
      */
     private readonly ladder: LadderBuilder,
     private readonly cascade: CascadeService,
+    /**
+     * What the live discovery connectors put on the wire, for this run.
+     *
+     * Null in a process that has none, and the null is not padded into an empty summary: a run
+     * that cannot say what it requested must say *that*, rather than report zero requests and
+     * let a reader conclude the sources were cheap.
+     */
+    private readonly requestLog: DiscoveryRequestLog | null = null,
   ) {}
 
   async execute(input: {
@@ -327,7 +347,24 @@ export class SearchPipeline {
       cascadeRungReached: rungReached,
       warnings,
       unmeasuredLanguages: unmeasured,
+      liveDiscovery: this.readRequestLog(input.searchId),
     };
+  }
+
+  /**
+   * Read this run's request counts and drop them.
+   *
+   * Read **once**, at the end, and forgotten immediately: the log is a process-global map, and a
+   * run that read its summary and left the entries behind would be the leak the bounds in
+   * `DiscoveryRequestLog` exist to catch rather than to rely on.
+   */
+  private readRequestLog(searchId: string): DiscoveryRequestSummary | null {
+    if (this.requestLog === null) {
+      return null;
+    }
+    const summary = this.requestLog.summaryFor(searchId);
+    this.requestLog.forget(searchId);
+    return summary;
   }
 
   /** The lease was lost mid-run. Return what is known; the fence refuses any write anyway. */
@@ -345,6 +382,9 @@ export class SearchPipeline {
       cascadeRungReached: null,
       warnings: [...warnings, 'The worker lost its lease mid-run; this attempt wrote nothing.'],
       unmeasuredLanguages: unmeasured,
+      // An abandoned run is not told what it cost. The entries are dropped by the next run's
+      // eviction rather than reported against a result that wrote nothing.
+      liveDiscovery: null,
     };
   }
 

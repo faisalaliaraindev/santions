@@ -62,6 +62,7 @@ import { Logger } from '@nestjs/common';
 import type { CountryCode } from '@erly/adverse-domain';
 
 import { buildEndpoint } from './discovery/endpoint.js';
+import { endpointDigest, hostOf, type DiscoveryRequestLog } from './discovery-request-log.js';
 import type { FixedFeedPollCache } from './feed-poll-cache.js';
 import { leadsFrom, matchesQuery } from './discovery/lead-mapping.js';
 
@@ -124,6 +125,15 @@ export interface RssNewsDiscoveryOptions {
    * caller that has not been given one, not a silent optimisation.
    */
   readonly pollCache?: FixedFeedPollCache;
+  /**
+   * Where this connector records what it put on the wire, when the process has one.
+   *
+   * A diagnostic, never a decision. For a fixed feed the interesting number is not the request
+   * count on its own but the gap between **offered** and **issued**: that gap is the
+   * amplification `FixedFeedPollCache` removes, and reporting only the second would make the
+   * cache's work invisible in exactly the response that has to prove it.
+   */
+  readonly requestLog?: DiscoveryRequestLog;
 }
 
 export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
@@ -243,8 +253,32 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
     }
 
     const fixedFeed = version.endpointKind === 'FIXED_FEED';
-    const issue = async (): Promise<SourceOutcome<FetchResult>> =>
-      this.options.fetch.fetch({
+
+    /**
+     * Whether this call reached the socket, as opposed to being served from the poll cache.
+     *
+     * Set inside `issue`, which is the one place a request is actually made: the cache calls it
+     * for a cold poll and does not call it when it serves a stored response or joins one already
+     * in flight. So the flag is the truth about this attempt rather than an inference from it.
+     */
+    let issued = false;
+    const note = (): void => {
+      this.options.requestLog?.record({
+        jobId: query.run.jobId,
+        sourceId: this.options.sourceId,
+        sourceName: version.sourceName,
+        endpointKind: version.endpointKind,
+        family: query.family,
+        queryId: query.queryId,
+        host: hostOf(endpoint.url),
+        endpointDigest: endpointDigest(endpoint.url),
+        issued,
+      });
+    };
+
+    const issue = async (): Promise<SourceOutcome<FetchResult>> => {
+      issued = true;
+      return this.options.fetch.fetch({
         url: endpoint.url,
         attribution: {
           tenantId: query.tenantId,
@@ -268,6 +302,7 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
           : `${this.options.sourceId}:${query.queryId}:${now.toISOString().slice(0, 10)}`,
         allowRender: false,
       });
+    };
 
     // One poll per floor, not one per planned query. A fixed feed is matched locally, so every
     // query after the first is answered from bytes we already hold. See `feed-poll-cache.ts`.
@@ -281,6 +316,9 @@ export class RssNewsDiscoveryAdapter implements NewsDiscoveryPort {
             fetch: issue,
           })
         : await issue();
+
+    // After the poll, so `issued` says what actually happened rather than what was intended.
+    note();
 
     if (result.status === 'FAILED') {
       // Passed through unchanged. The signal is what the FR-06 table classifies, and the fetch

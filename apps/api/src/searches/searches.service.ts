@@ -16,6 +16,7 @@ import type {
   CreateSearchInput,
   Finding,
   FindingsPage,
+  LiveDiscoverySummary,
   SearchSummary,
 } from '@erly/adverse-contracts';
 import {
@@ -70,6 +71,14 @@ interface SearchRecord {
    * so a redelivered message cannot make one outage look like three.
    */
   readonly sourceOutcomes?: readonly SourceCoverageOutcome[];
+  /**
+   * What the live discovery connectors put on the wire (D-060).
+   *
+   * Optional and nullable, and the two mean different things. Absent is a run completed before
+   * this was recorded at all; `null` is a run whose process held no request log. Neither is
+   * rewritten into zero — a count nobody took is not a count of nothing.
+   */
+  readonly liveDiscovery?: LiveDiscoverySummary | null;
   readonly progress: SearchSummary['progress'];
   /** Optimistic concurrency for review actions and cancellation (FR-12). */
   readonly revision: number;
@@ -716,6 +725,7 @@ export class SearchesService {
         note,
       })),
       mode: this.mode === 'live' ? 'LIVE' : 'MOCK',
+      liveDiscovery: run.liveDiscovery ?? null,
     };
   }
 

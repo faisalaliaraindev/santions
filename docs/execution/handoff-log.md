@@ -27,6 +27,148 @@ Say what you did about it.
 
 ---
 
+## 2026-09-18 (twelfth) — Two source shapes on one ladder: SEC FIXED_FEED + GDELT QUERY_FEED, and the counts that prove it
+
+**Did.**
+
+1. **Audited first, and most of what was "missing" already existed.** `LIVE_CONNECTORS` in
+   `ladder.builder.ts` has mapped `NEWS_DISCOVERY_GDELT -> GDELT` since the connector was written;
+   `GdeltDiscoveryAdapter` is complete; `GDELT_TEMPLATE` already records
+   `https://api.gdeltproject.org/api/v2/doc/doc`, `endpointKind: QUERY_FEED`, `queryParam: 'query'`,
+   rung 3; `buildEndpoint` already serialises a query feed safely; `FixedFeedPollCache` is
+   FIXED_FEED-only, so distinct GDELT queries were never collapsible. **SEC press releases needs no
+   adapter change** — the RSS connector is registry-driven (D-043). What was genuinely missing was
+   two registry records and, more importantly, **observability**.
+
+2. **`apps/api/src/sources/registry/sec-press-releases.ts`** — `sec-press-releases`, a _separate_
+   source at `https://www.sec.gov/news/pressreleases.rss`. `NEWS_DISCOVERY_RSS`, `FIXED_FEED`,
+   rung 1, tier 1, its own parser version (`sec-press-rss-1`) and its own budget (6/120). It
+   **reuses** the publisher's stop conditions, ceiling, poll floor, policy page and licence terms,
+   and the `www.sec.gov` domain — so it already shares the `sec.gov` domain breaker, which is keyed
+   on the registrable domain. It does **not** reuse the parser version or the budget, both of which
+   are properties of the feed. `firstContactApproval` carries **D17**, which is not borrowed: D17's
+   own text names this feed ("with the press-releases feed as a second, later").
+   `robotsPosition` is `NOT_ESTABLISHED` — the recorded robots evidence checked the _litigation_
+   path, and recording a position for a path nobody checked is the one thing this file must not do.
+
+3. **`apps/api/src/sources/registry/gdelt-doc-v2.ts`** — the GDELT **proposal**, derived from
+   `GDELT_TEMPLATE` rather than restating it, so the two cannot drift. `discovery-rungs.ts` is
+   untouched and its tests still pass. Two overrides: budgets sized for a query feed
+   (**24/hour, 200/day**) and `pollFloorSeconds: null`. The budget is deliberately **below one full
+   query plan** — a live plan for one subject in one language is ~53 queries — so fan-out
+   truncation happens inside a single run, visibly, rather than at an unpredictable point in the
+   next one. It stays **inert**: `firstContactApproval: null`, `robotsPosition: NOT_ESTABLISHED`,
+   `licenceTermsVersion: 'UNVERIFIED'`, `ENDPOINT NOT VERIFIED` in the record's own policy summary.
+
+4. **`apps/api/src/sources/discovery-request-log.ts`** — the new thing, and recorded as **D-060**.
+   Folder 14 said in as many words: _"Request count is NOT visible over HTTP."_ That was survivable
+   while every live source was a fixed feed, because a fixed feed's cost is a constant. With a query
+   feed on the ladder, the whole FIXED_FEED-versus-QUERY_FEED distinction is a claim about **counts**
+   that nothing outside the worker could check. `DiscoveryRequestLog` is a process singleton beside
+   `FixedFeedPollCache`; both live connectors record one entry per attempt; the pipeline reads the
+   run's summary once and forgets it; the run stores it; the findings response returns it as
+   **`liveDiscovery`**.
+
+   **It carries no query text and no URLs.** A planned query is the subject's name plus a conduct
+   term. Endpoint identity is `endpointDigest` — twelve hex characters of a SHA-256 of the URL —
+   which answers the only question the counts cannot: _distinct network operations, or one counted
+   many times?_ `distinctEndpoints` is the load-bearing field: `requestsIssued` can be inflated by a
+   retry, `distinctEndpoints` cannot.
+
+   `null` (not measured) and `{sources: []}` (no live connector attempted anything) are kept
+   different. A mock run reports the second, which is itself a fixture-versus-live signal.
+
+5. **Postman folder 15 — Mixed Live E2E: SEC + GDELT**, 13 requests. Folder 14 is byte-identical and
+   still halts on its own guard. Folder 15 has its own confirmation variable,
+   **`mixedLiveConfirm = yes-contact-sec-and-gdelt`** — deliberately _not_ folder 14's `liveConfirm`,
+   because arming a folder that contacts a publisher we have a relationship with must not arm one
+   that contacts a publisher we do not. 15.6/15.7 read the **registry** and halt unless all three
+   sources hold an ACTIVE version with a named first-contact approval and an established robots
+   position; 15.8 reads source health and halts on an open breaker or an engaged kill switch,
+   treating "no record" as never-called rather than as a refusal. **Nothing in the folder activates
+   a source.** 15.12 asserts the architecture rather than `SUCCEEDED`: mode LIVE, no fixture id
+   anywhere, SEC `requestsIssued <= 1` each, GDELT `requestsIssued > 1` and
+   `distinctEndpoints === requestsIssued` and `<= budget`, F1/F3/F4 in `familiesRequested` (F2 when
+   the graph resolved a company), and at least two hosts.
+
+6. **`docs/sources/mixed-live-go-live.md`** — what a person has to do before folder 15 can run, and
+   why none of it is a script.
+
+**Verified.** Everything below actually ran, on 2026-09-18.
+
+```
+lint            clean          typecheck       clean          format:check  clean
+unit            960 passed  (was 917; +43 new)
+invariants       29 passed     evaluation       12 passed
+integration     215 passed     security        181 passed     e2e (API)     26 passed
+```
+
+New suites: `apps/api/test/mixed-live-sources.test.ts` (19) and
+`apps/api/test/live-source-proposals.test.ts` (24). Nothing existing was weakened;
+`discovery-rungs.test.ts`, `fixed-feed-amplification.test.ts` and `sec-source-config.test.ts` are
+untouched and green.
+
+**Newman, against the local stack in mock mode** (newman is not installed locally — run through
+`pnpm dlx newman@6`):
+
+```
+folder 13 (tenant E2E, fixtures)   12 requests, 28 assertions, 0 failed
+folder 14 unarmed                   1 request  - halted at 14.0, no SEC contact
+folder 15 unarmed                   1 request  - halted at 15.0, no SEC and no GDELT contact
+collection                         93 requests, every test script parses, imports cleanly
+```
+
+A sandbox search over real HTTP (signup → verify → login → key → subject → search → poll →
+findings) returned `mode: MOCK` and `liveDiscovery: {"sources":[],"totalRequestsIssued":0}` — the
+honest "no live connector made an attempt".
+
+**LIVE VALIDATION WAS NOT RUN, and the blocker is a real one.** Read directly from the local
+registry on 2026-09-18:
+
+```
+sec-litigation-releases  v5  ACTIVE        robots HONOURED     breaker CLOSED   hourly 3/6
+sec-press-releases       --  NO VERSION EXISTS IN THE REGISTRY
+gdelt-doc-v2             --  NO VERSION EXISTS IN THE REGISTRY
+domainHealth             sec.gov CLOSED; api.gdeltproject.org has no record - never contacted
+```
+
+Both new sources exist as **content in code**, which is not an approval. Getting them live needs
+acts by people, and each one is a statement about a third party that this service must not make on
+their behalf: establish the robots position for `/news/pressreleases.rss`; read
+`api.gdeltproject.org/robots.txt` (a **first contact with a new publisher**, which is D17's own
+class of decision and needs its own); name GDELT's terms; verify the endpoint; record a named
+first-contact approval for GDELT — **the SEC's D17 must never be copied into it**; then propose →
+approve → activate with two people, twice. `docs/sources/mixed-live-go-live.md` is the runbook.
+
+**Found.**
+
+1. **The "missing" GDELT support was mostly already there.** Four of the six things this milestone
+   was scoped to add already existed and were untested together. The gap was not execution, it was
+   that nothing outside the worker could tell a query feed from a fixed feed after the fact.
+2. **Folder 14's pre-flight halts when a source has no health record.** Correct for folder 14 — the
+   SEC has been called. Wrong as a copy for folder 15, where GDELT will have no record before its
+   first run. 15.8 treats absent as never-called and says so rather than halting.
+3. **The GDELT connector never took a `pollCache`,** so the poll-cache collapse this milestone was
+   asked to guard against was structurally impossible rather than fixed. The regression test now
+   hands a cache to the same process anyway and asserts `cache.statsFor(GDELT_URL).requests === 0`
+   and `distinctEndpoints === queries.length`, so a future refactor that routed a query feed through
+   it fails loudly.
+4. **Newman is not installed** in this workspace any more; the eleventh session's figures were taken
+   with it available. `pnpm dlx newman@6` works and is what the numbers above came from.
+5. **`pnpm dev` binds the API to :3000, not :28100.** The e2e project starts its own on 28100 and
+   tears it down, which is a five-minute trap for anyone driving the running stack by hand.
+
+**Next session should:** take `sec-press-releases` through propose → approve → activate using folder
+5 and the body in `SEC_PRESS_RELEASES_CONTENT`, setting `robotsPosition: HONOURED` from the
+already-recorded evidence for `/news/pressreleases.rss`. It is the smaller of the two go-lives and
+needs no new publisher relationship. GDELT needs its own first-contact decision first.
+
+**Decisions touched:** **D-060** recorded (a run reports what its live connectors put on the wire,
+in counts and never in URLs). D17 is cited, not widened — its own text already names the SEC
+press-releases feed. No decision closed.
+
+---
+
 ## 2026-09-17 (eleventh) — Fixed-feed amplification, the breaker that opened itself, and the local live path
 
 **Did.**

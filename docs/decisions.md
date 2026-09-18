@@ -2129,3 +2129,59 @@ few milliseconds **by design** — so an unbounded login route is a way to spend
 with nothing but a socket. It is a different axis from the per-account lockout: that stops somebody
 grinding one customer's password, this stops a spray across many accounts, which the per-account
 counter cannot see. Neither substitutes for the other.
+
+---
+
+## D-060 — A run reports what its live connectors put on the wire, in counts and never in URLs
+
+**Status:** Accepted · **Decided at:** SEC + GDELT mixed live milestone, 2026-09-18
+
+**Context.** The FR-05 ladder now holds two shapes of live source, and the difference between them
+is a statement about request counts:
+
+- a `FIXED_FEED` — the SEC's lists — is polled whole and matched locally, so its cost is one
+  request per poll floor **however large the query plan is**;
+- a `QUERY_FEED` — GDELT DOC 2.0 — takes the planned query as a parameter, so its cost is one
+  request per planned query, bounded by the source's budget.
+
+Neither claim could be checked from anything the API returned. Request counts existed in exactly
+one place — `FixedFeedPollCache.statsFor`, in the worker's memory, for fixed feeds only — and
+Postman folder 14 said so in as many words: _"Request count is NOT visible over HTTP."_ That was
+tolerable while every live source was a fixed feed, because a fixed feed's cost is a constant. It
+stopped being tolerable the moment a query feed joined the ladder, because "the architecture
+behaves as designed" then became a claim about numbers that nobody outside the process could read.
+
+The alternative was to assert it in Postman from `SUCCEEDED` and a list of source ids, which is
+precisely the kind of assertion that passes while the thing it names is broken.
+
+**Decision.** `DiscoveryRequestLog` — a process singleton beside `FixedFeedPollCache` — records
+one entry per attempt by a **live** discovery connector to serve one planned query. The pipeline
+reads the run's summary once at the end of discovery and forgets it; the run record stores it; the
+findings response returns it as `liveDiscovery`.
+
+Per source it reports the recorded `endpointKind`, the hosts addressed, queries offered, requests
+issued, how many were served without a request, **distinct endpoints requested**, and the FR-04
+families offered and requested.
+
+**No query text and no URLs, ever.** A planned query is the subject's name plus a conduct term,
+and a query-feed URL contains it verbatim. This field exists to be quotable in an audit, which is
+the worst possible place for either. Endpoint identity is carried as `endpointDigest` — twelve hex
+characters of a SHA-256 of the URL — which answers the only question the counts cannot: _were
+these distinct network operations, or one operation counted many times?_ It is one-way, it is per
+URL rather than per subject, and it reveals nothing about the person searched.
+
+`distinctEndpoints` is the load-bearing number. `requestsIssued` can be inflated by a retry;
+`distinctEndpoints` cannot. A cache or a key that collapsed distinct planned queries would show
+many offered queries against **one** distinct endpoint — correct for a fixed feed, a defect for a
+query feed — and that is the regression this field makes visible in a response rather than only in
+a unit test.
+
+**Null and empty are different, and are never collapsed.** `null` means the run was not measured:
+the process held no request log. An empty `sources` list means no live discovery connector made an
+attempt, which is what a mock-mode run looks like. Reporting zero requests for a run nobody
+measured would describe a cheap search that never happened.
+
+**It is a diagnostic, not evidence.** Nothing in the pipeline reads it back to decide anything. It
+is written by the two live connectors, read once, and dropped. Bounded at 2,000 attempts per job
+and 64 jobs, oldest evicted first, so a run that dies between the attempt and the read cannot leak
+— the bound is the backstop, and `forget` is the normal path.

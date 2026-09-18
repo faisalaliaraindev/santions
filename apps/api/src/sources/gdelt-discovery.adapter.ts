@@ -41,6 +41,7 @@ import { Logger } from '@nestjs/common';
 import type { CountryCode } from '@erly/adverse-domain';
 
 import { buildEndpoint } from './discovery/endpoint.js';
+import { endpointDigest, hostOf, type DiscoveryRequestLog } from './discovery-request-log.js';
 import { leadsFrom, matchesQuery, type RawCandidate } from './discovery/lead-mapping.js';
 import type { EvidenceFetchPort, FetchAuthorisation } from './evidence-fetch.port.js';
 import type { FetchGateService } from './fetch-gate.service.js';
@@ -90,6 +91,14 @@ export interface GdeltDiscoveryOptions {
   readonly gate: FetchGateService;
   readonly fetch: EvidenceFetchPort;
   readonly clock?: Clock;
+  /**
+   * Where this connector records what it put on the wire, when the process has one.
+   *
+   * A diagnostic, never a decision: nothing here reads it back. It exists because the claim
+   * "a QUERY_FEED makes one request per planned query, bounded by the budget" is a claim about
+   * counts, and a result that reports only source ids cannot support it.
+   */
+  readonly requestLog?: DiscoveryRequestLog;
 }
 
 export type GdeltParseResult =
@@ -171,6 +180,21 @@ export class GdeltDiscoveryAdapter implements NewsDiscoveryPort {
         `${decision.refusal}: ${decision.detail}`,
       );
     }
+
+    // Recorded immediately before the socket opens, and only here. Every earlier return in this
+    // method is a refusal that cost the publisher nothing, and counting those as requests would
+    // make a gate refusal look like traffic.
+    this.options.requestLog?.record({
+      jobId: query.run.jobId,
+      sourceId: this.options.sourceId,
+      sourceName: version.sourceName,
+      endpointKind: version.endpointKind,
+      family: query.family,
+      queryId: query.queryId,
+      host: hostOf(endpoint.url),
+      endpointDigest: endpointDigest(endpoint.url),
+      issued: true,
+    });
 
     const result = await this.options.fetch.fetch({
       url: endpoint.url,

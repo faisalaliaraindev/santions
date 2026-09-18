@@ -2428,7 +2428,47 @@
               "additionalProperties": false
             }
           },
-          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] }
+          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] },
+          "liveDiscovery": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": { "type": "string" },
+                    "sourceName": { "type": "string" },
+                    "endpointKind": { "type": "string", "enum": ["FIXED_FEED", "QUERY_FEED"] },
+                    "hosts": { "type": "array", "items": { "type": "string" } },
+                    "queriesOffered": { "type": "integer", "minimum": 0 },
+                    "requestsIssued": { "type": "integer", "minimum": 0 },
+                    "servedWithoutRequest": { "type": "integer", "minimum": 0 },
+                    "distinctEndpoints": { "type": "integer", "minimum": 0 },
+                    "families": { "type": "array", "items": { "type": "string" } },
+                    "familiesRequested": { "type": "array", "items": { "type": "string" } }
+                  },
+                  "required": [
+                    "sourceId",
+                    "sourceName",
+                    "endpointKind",
+                    "hosts",
+                    "queriesOffered",
+                    "requestsIssued",
+                    "servedWithoutRequest",
+                    "distinctEndpoints",
+                    "families",
+                    "familiesRequested"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "totalRequestsIssued": { "type": "integer", "minimum": 0 }
+            },
+            "required": ["sources", "totalRequestsIssued"],
+            "additionalProperties": false,
+            "nullable": true
+          }
         },
         "required": [
           "searchId",

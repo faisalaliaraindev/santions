@@ -32,6 +32,7 @@ import type { CascadeRung } from '@erly/adverse-domain';
 
 import type { EvidenceFetchPort } from '../sources/evidence-fetch.port.js';
 import type { FetchGateService } from '../sources/fetch-gate.service.js';
+import type { DiscoveryRequestLog } from '../sources/discovery-request-log.js';
 import type { FixedFeedPollCache } from '../sources/feed-poll-cache.js';
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import type { NewsDiscoveryPort } from '../sources/news-discovery.port.js';
@@ -111,6 +112,15 @@ export interface LiveDiscoveryDeps {
    * a floor whose only clock is wall time can be asserted to hold, never to expire.
    */
   readonly clock?: Clock;
+  /**
+   * Where the live connectors record what they put on the wire.
+   *
+   * One per process, like the poll cache, and for a related reason: what it measures is the
+   * traffic **the publisher** sees. A diagnostic only — nothing in the pipeline reads it back to
+   * make a decision, and a process without one simply reports no request counts rather than
+   * reporting zero.
+   */
+  readonly requestLog?: DiscoveryRequestLog;
 }
 
 export class LadderBuilder {
@@ -286,6 +296,7 @@ export class LadderBuilder {
       // the difference visible, and an adapter without a cache polls every time, honestly.
       ...(this.live.pollCache === undefined ? {} : { pollCache: this.live.pollCache }),
       ...(this.live.clock === undefined ? {} : { clock: this.live.clock }),
+      ...(this.live.requestLog === undefined ? {} : { requestLog: this.live.requestLog }),
     };
     const adapter =
       kind === 'GDELT' ? new GdeltDiscoveryAdapter(shared) : new RssNewsDiscoveryAdapter(shared);
