@@ -25,7 +25,8 @@ force, it is stated as such and the code reflects that it is provisional.
 | **D15**   | What the Costa Rican primary-source evidence base is, given depersonalised judgments                                                   | Product + source admin                | G6                                | Open — raised 2026-09-11, **untouched; re-raised 2026-09-14**                                                                                                                                                                                      |
 | **D16**   | Whether shared source-registry administration should need a platform role rather than any `source_admin`                               | Product + security                    | G8                                | Open — raised by D1, 2026-09-11                                                                                                                                                                                                                    |
 | **D17**   | Which source receives this project's **first deliberate live request**, under whose approval, at what rate, and on what stop condition | Source admin (approver) + engineering | G10, **and before any live call** | **CLOSED 2026-09-15** — SEC litigation-releases RSS, approved by Faisal Ali (see below, and D-041)                                                                                                                                                 |
-| **D18**   | Whether to adopt `fast-xml-parser` v5, once its six 2026-created runtime dependencies have been looked at                              | Engineering                           | Before v5 is needed               | Open — raised 2026-09-15 by D-039; **4.5.7 is pinned and nothing needs v5**                                                                                                                                                                        |
+| **D18**   | Whether this service may make its **first live request to `api.gdeltproject.org`**, under whose approval, at what rate                 | Source admin (approver) + engineering | Before any GDELT call             | **CLOSED 2026-09-18** — approved by Faisal Ali, Source admin; see `docs/decisions.md` D18 and `docs/sources/gdelt-evidence.json`                                                                                                                   |
+| **D19**   | Whether to adopt `fast-xml-parser` v5, once its six 2026-created runtime dependencies have been looked at                              | Engineering                           | Before v5 is needed               | Open — raised 2026-09-15 by D-039 **as D18**, renumbered 2026-09-18 (see the note below); **4.5.7 is pinned and nothing needs v5**                                                                                                                 |
 | **D-051** | Whether customer identity lives in Keycloak or in our own password store                                                               | Engineering + product                 | Before Phase I step I2            | **Closed 2026-09-16** — our own store, in our database, against the recommendation on file. Passwords are argon2id hashes, not reversible encryption; we now own reset, lockout, MFA and breach response. See [decisions.md D-051](./decisions.md) |
 | **D-052** | Whether a self-signed-up tenant may hold a live key with no verification, and on what budget                                           | Product + compliance                  | Before Phase I ships              | **Closed 2026-09-16** — live key after email verification; **no** per-tenant live budget in this phase. That leaves the shared 120/hour SEC budget unprotected, so the fixed-feed-per-query fetch must be fixed before live keys are handed out    |
 | **D-053** | Whether signup is open to anyone, or invite-only at first                                                                              | Product                               | Before Phase I step I1            | **Closed 2026-09-16** — open, no invite code, both key kinds from day one. Payment and live-key approval are later, and live issuance reads tenant state so the gate is not a retrofit                                                             |
@@ -299,6 +300,22 @@ blast radius a deliberate grant rather than a side effect of a tenant-scoped rol
 
 **Must close by G8**, because the control panel will render whatever this decides, and shipping
 the panel against option 1 makes option 2 a migration rather than a configuration change.
+
+### A note on the D18 number
+
+**`D18` means the GDELT first-contact approval.** It was raised and closed on 2026-09-18 and is
+written into the active `gdelt-doc-v2` source version, into its audit trail, and into
+`docs/decisions.md`.
+
+The number was already in use: on 2026-09-15, `D-039` opened "whether to adopt `fast-xml-parser`
+v5" as D18. That item is **now D19**. It was the one that moved because it is an open engineering
+question referenced only in narrative — the phase-E brief and two handoff entries — whereas the
+GDELT approval is a governance fact recorded inside an activated source version and an append-only
+audit log, where a number cannot be corrected after the fact without rewriting the thing that
+exists to be unrewritable.
+
+Handoff entries dated on or before 2026-09-15 that say "D18" mean the parser question, now D19.
+They are left as written: a handoff log is a record of what a session actually said.
 
 ### D17 — The first deliberate live request — CLOSED 2026-09-15
 

@@ -87,6 +87,18 @@ export interface FetchAuthorisation {
   readonly robotsPosition: RobotsPosition;
   /** Set only when `robotsPosition` is `EXCEPTION_APPROVED`: who approved it (FR-06, D6). */
   readonly robotsExceptionApprovedBy: string | null;
+  /**
+   * The ceiling the approved version records, in requests per second, or null when it records
+   * none.
+   *
+   * On the authorisation for the same reason `licenceTermsVersion` is: it is what was approved at
+   * the instant this request was authorised, and the registry is mutable afterwards. The adapter
+   * needs it because **fetching robots.txt is itself a request to the publisher** — it leaves
+   * this process, it appears in their logs, and it is refused by their rate limiter exactly as
+   * any other request is. Pacing the document fetch while hammering robots.txt would honour the
+   * ceiling everywhere except the one request that decides whether we may make the others.
+   */
+  readonly requestCeilingPerSecond: number | null;
   readonly jurisdictionEnabled: boolean;
   readonly languageEnabled: boolean;
   /** `screenUrl` passed on this exact URL. */

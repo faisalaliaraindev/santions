@@ -590,7 +590,7 @@ with every secret left empty — keep it that way.
 | `postman/TESTING-GUIDE.md`              | Which endpoint does what, in order            |
 | `postman/INTEGRATOR-GUIDE.md`           | Integrating as a tenant                       |
 | `postman/SEC-GO-LIVE.md`                | Taking a real source live                     |
-| `docs/open-decisions.md`                | D1–D18, each with an owner                    |
+| `docs/open-decisions.md`                | D1–D19, each with an owner                    |
 | `CLAUDE.md`                             | The three rules that override convenience     |
 
 ## Three things to understand before changing anything

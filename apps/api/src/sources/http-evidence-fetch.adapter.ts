@@ -65,6 +65,7 @@ import {
   type SourceCoverageOutcome,
 } from '@erly/adverse-domain';
 
+import { minIntervalMsFor, requestPacer, type RequestPacer } from './request-pacer.js';
 import {
   assertAttributable,
   assertAuthorised,
@@ -181,6 +182,8 @@ export interface HttpEvidenceFetchOptions {
   readonly clock?: Clock;
   /** How long a parsed robots.txt is trusted. Publishers change them; a day is the convention. */
   readonly robotsTtlMs?: number;
+  /** Enforces the approved `requestCeilingPerSecond`, including on the robots.txt read. */
+  readonly pacer?: RequestPacer;
   /** A robots.txt larger than this is treated as unavailable rather than parsed. */
   readonly maxRobotsBytes?: number;
 }
@@ -210,6 +213,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
   private readonly clock: Clock;
   private readonly userAgent: string;
   private readonly robotsTtlMs: number;
+  private readonly pacer: RequestPacer;
   private readonly maxRobotsBytes: number;
   /** Per host, not per URL: robots.txt is a property of the host and is fetched once for it. */
   private readonly robotsCache = new Map<string, CachedRobots>();
@@ -228,6 +232,7 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     this.clock = options.clock ?? ((): Date => new Date());
     this.userAgent = `${options.serviceName ?? 'ErlyAdverseSearch'}/1.0 (+${options.contactUrl})`;
     this.robotsTtlMs = options.robotsTtlMs ?? 24 * 60 * 60 * 1000;
+    this.pacer = options.pacer ?? requestPacer;
     this.maxRobotsBytes = options.maxRobotsBytes ?? 512 * 1024;
   }
 
@@ -323,6 +328,15 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
         );
       }
 
+      // The choke point. Every outbound request this service makes to a publisher passes through
+      // here — first hop and every redirect — so this is where a recorded ceiling has to be
+      // honoured for it to mean anything. Keyed on the host of the URL actually being requested,
+      // so a redirect onto another host is paced against that host rather than the original.
+      await this.pacer.pace(
+        new URL(currentUrl).host,
+        minIntervalMsFor(request.authorisation.requestCeilingPerSecond),
+      );
+
       const result = await this.transport.send({
         url: currentUrl,
         headers: this.headersFor(request, hops === 0),
@@ -382,10 +396,11 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
       return null;
     }
 
-    const robots = await this.robotsFor(url, {
-      sourceId: request.attribution.sourceId,
-      deadline,
-    });
+    const robots = await this.robotsFor(
+      url,
+      { sourceId: request.attribution.sourceId, deadline },
+      request.authorisation.requestCeilingPerSecond,
+    );
     const verdict = robotsVerdict(robots, this.userAgent, `${url.pathname}${url.search}`);
     if (verdict === 'ALLOWED') {
       return null;
@@ -434,6 +449,15 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
   private async robotsFor(
     url: URL,
     charge: { readonly sourceId: string; readonly deadline: number } | null,
+    /**
+     * The approved ceiling for the source this read is on behalf of, in requests per second.
+     *
+     * robots.txt is a request to the publisher like any other. GDELT's rate limiter refuses it
+     * exactly as it refuses a query, and a refused robots.txt reads as "permission could not be
+     * established" — so an unpaced robots read turns a working, permitting publisher into one
+     * this service believes has not answered.
+     */
+    ceilingPerSecond: number | null = null,
   ): Promise<RobotsFile> {
     const cached = this.robotsCache.get(url.host);
     const now = this.clock().getTime();
@@ -459,6 +483,13 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
       return robotsUnavailable();
     }
 
+    // Honour the publisher's ceiling for this request too, on the **same key** the document
+    // fetch uses. Keyed on the host, never on the source id: the thing being rate-limited is the
+    // publisher's view of us, and a robots read on one key followed immediately by a document
+    // fetch on another is two requests with no gap between them — which is precisely how the
+    // 2026-09-18 live run was rate-limited by GDELT despite "being paced".
+    await this.pacer.pace(url.host, minIntervalMsFor(ceilingPerSecond));
+
     const result = await this.transport.send({
       url: `${url.origin}/robots.txt`,
       headers: { 'user-agent': this.userAgent, accept: 'text/plain', 'accept-encoding': 'gzip' },
@@ -468,7 +499,17 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
     });
 
     const robots = interpretRobotsResponse(result);
-    this.robotsCache.set(url.host, { robots, expiresAt: now + this.robotsTtlMs });
+    // Only a **known** answer is cached. `robotsUnavailable()` means "we could not establish a
+    // position just now" — a 429, a timeout, an HTML error page — and caching that for the full
+    // TTL turns one transient refusal into a day of refusing a publisher who never said no. The
+    // branch fifteen lines up already declines to cache a refusal for exactly this reason; this
+    // is the same fact arriving over the wire instead of from the budget.
+    //
+    // An absent robots.txt (404/410) *is* a known answer — the site has restricted nothing — and
+    // is cached like any other.
+    if (robots.known) {
+      this.robotsCache.set(url.host, { robots, expiresAt: now + this.robotsTtlMs });
+    }
     return robots;
   }
 

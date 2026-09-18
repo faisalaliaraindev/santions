@@ -304,6 +304,51 @@
         }
       }
     },
+    "/v1/screen": {
+      "post": {
+        "operationId": "screenSynchronously",
+        "tags": ["searches"],
+        "summary": "Run one screening synchronously",
+        "description": "Creates a real subject version and search run, then executes that run through the\nworker's own handler under the same stage lease the asynchronous worker would take.\n\nThe request remains open until the run finishes or fails. Use `POST /v1/searches`\nfor volume, retries and polling; use this route when a caller needs one completed\nanswer and has nowhere to put a callback.\n\nThe response repeats the three result dimensions and includes the same findings page\n`GET /v1/searches/{searchId}/findings` would return for the created run.",
+        "parameters": [{ "$ref": "#/components/parameters/CsrfToken" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ScreenRequest" },
+              "example": {
+                "fullName": "Rodrigo Alberto Vargas Mendez",
+                "aliases": [],
+                "dateOfBirth": { "value": "1978-09-20", "precision": "DAY" },
+                "countryContext": ["CR"],
+                "purpose": "CUSTOMER_ONBOARDING",
+                "jurisdictions": ["US"],
+                "languages": ["en"],
+                "includeFormerDirectorships": false,
+                "externalCaseRef": "CASE-2026-00471",
+                "environment": "sandbox"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The completed run and its findings page.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ScreenResult" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error400" },
+          "401": { "$ref": "#/components/responses/Error401" },
+          "403": { "$ref": "#/components/responses/Error403" },
+          "409": { "$ref": "#/components/responses/Error409" },
+          "413": { "$ref": "#/components/responses/Error413" },
+          "422": { "$ref": "#/components/responses/Error422" },
+          "429": { "$ref": "#/components/responses/Error429" },
+          "500": { "$ref": "#/components/responses/Error500" }
+        }
+      }
+    },
     "/v1/searches/{searchId}": {
       "get": {
         "operationId": "getSearch",
@@ -1815,7 +1860,14 @@
       },
       "FindingsState": {
         "type": "string",
-        "enum": ["POTENTIAL_MATCHES", "NO_MATCHES_FOUND", "UNRESOLVED", "NOT_EVALUATED"]
+        "enum": [
+          "CONFIRMED_MATCHES_FOUND",
+          "AMBIGUOUS_MATCHES_FOUND",
+          "NO_MATCHES_FOUND",
+          "UNRESOLVED",
+          "NOT_EVALUATED",
+          "POTENTIAL_MATCHES"
+        ]
       },
       "CoverageState": {
         "type": "string",
@@ -1894,6 +1946,18 @@
           "execution": { "$ref": "#/components/schemas/ExecutionState" },
           "findings": { "$ref": "#/components/schemas/FindingsState" },
           "coverage": { "$ref": "#/components/schemas/CoverageState" },
+          "findingCounts": {
+            "type": "object",
+            "properties": {
+              "confirmed": { "type": "integer", "minimum": 0 },
+              "ambiguous": { "type": "integer", "minimum": 0 },
+              "other": { "type": "integer", "minimum": 0 },
+              "total": { "type": "integer", "minimum": 0 },
+              "unresolvedLeads": { "type": "integer", "minimum": 0 }
+            },
+            "required": ["confirmed", "ambiguous", "other", "total", "unresolvedLeads"],
+            "additionalProperties": false
+          },
           "pinnedVersions": {
             "type": "object",
             "properties": {
@@ -1956,6 +2020,80 @@
           "nextCursor": { "type": "string", "nullable": true }
         },
         "required": ["items", "nextCursor"],
+        "additionalProperties": false
+      },
+      "ScreenRequest": {
+        "type": "object",
+        "properties": {
+          "fullName": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "aliases": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Alias" },
+            "maxItems": 50,
+            "default": []
+          },
+          "dateOfBirth": { "$ref": "#/components/schemas/PreciseDate" },
+          "countryContext": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 2, "maxLength": 2 },
+            "maxItems": 20,
+            "default": []
+          },
+          "purpose": { "$ref": "#/components/schemas/ScreeningPurpose" },
+          "jurisdictions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "pattern": "^[A-Za-z]{2}$"
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "default": ["US"]
+          },
+          "languages": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 35 },
+            "minItems": 1,
+            "maxItems": 30,
+            "default": ["en"]
+          },
+          "includeFormerDirectorships": { "type": "boolean", "default": false },
+          "externalCaseRef": { "type": "string", "maxLength": 200 },
+          "environment": { "type": "string", "enum": ["sandbox", "live"], "default": "sandbox" }
+        },
+        "required": ["fullName", "purpose"],
+        "additionalProperties": false
+      },
+      "ScreenResult": {
+        "type": "object",
+        "properties": {
+          "searchId": { "type": "string" },
+          "subjectId": { "type": "string" },
+          "subjectVersion": { "type": "integer", "exclusiveMinimum": true, "minimum": 0 },
+          "execution": { "$ref": "#/components/schemas/ExecutionState" },
+          "findingsState": { "$ref": "#/components/schemas/FindingsState" },
+          "coverage": { "$ref": "#/components/schemas/CoverageState" },
+          "findingCounts": {
+            "$ref": "#/components/schemas/SearchSummary/properties/findingCounts"
+          },
+          "mode": { "type": "string", "enum": ["MOCK", "LIVE"] },
+          "result": { "$ref": "#/components/schemas/FindingsPage" },
+          "elapsedMs": { "type": "integer", "minimum": 0 }
+        },
+        "required": [
+          "searchId",
+          "subjectId",
+          "subjectVersion",
+          "execution",
+          "findingsState",
+          "coverage",
+          "findingCounts",
+          "mode",
+          "result",
+          "elapsedMs"
+        ],
         "additionalProperties": false
       },
       "ResolutionStatus": {
@@ -2379,6 +2517,9 @@
           "execution": { "type": "string" },
           "findingsState": { "type": "string" },
           "coverage": { "type": "string" },
+          "findingCounts": {
+            "$ref": "#/components/schemas/SearchSummary/properties/findingCounts"
+          },
           "noMatchStatement": {
             "type": "object",
             "properties": {
@@ -2405,7 +2546,8 @@
                 "cascadeRung": { "type": "integer" },
                 "outcome": { "type": "string" },
                 "detail": { "type": "string", "nullable": true },
-                "truncation": { "type": "string", "nullable": true }
+                "truncation": { "type": "string", "nullable": true },
+                "failureClass": { "type": "string", "nullable": true }
               },
               "required": [
                 "sourceId",
@@ -2475,6 +2617,7 @@
           "execution",
           "findingsState",
           "coverage",
+          "findingCounts",
           "noMatchStatement",
           "findings",
           "rejectedLeads",

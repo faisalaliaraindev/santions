@@ -98,6 +98,18 @@ export interface ActiveSourceVersion {
   readonly queryParam: string | null;
   /** The publisher's stated minimum interval between polls, in milliseconds. Null when none. */
   readonly pollFloorMs: number | null;
+  /**
+   * The publisher's stated ceiling on how often we may ask, in requests per second.
+   *
+   * Distinct from `pollFloorMs`, which bounds how often the *same* bytes are re-read and applies
+   * to a `FIXED_FEED`. This bounds how fast *different* requests may leave, and it is what a
+   * `QUERY_FEED` needs: every query is a new URL, so no poll floor ever applies to it.
+   *
+   * Null when the version records none. Read by `RequestPacer` — before this field was wired
+   * through, `accessPolicy.requestCeilingPerSecond` was recorded on every source and enforced
+   * nowhere.
+   */
+  readonly requestCeilingPerSecond: number | null;
 }
 
 /**
@@ -161,6 +173,7 @@ export class SourceVersionService implements SourceVersionReader {
       endpointKind: readEndpointKind(content['accessPolicy']),
       queryParam: readQueryParam(content['accessPolicy']),
       pollFloorMs: readPollFloorMs(content['accessPolicy']),
+      requestCeilingPerSecond: readRequestCeiling(content['accessPolicy']),
     };
   }
 }
@@ -238,6 +251,21 @@ function readPollFloorMs(value: unknown): number | null {
   return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
     ? Math.round(seconds * 1000)
     : null;
+}
+
+/**
+ * The recorded requests-per-second ceiling, or null.
+ *
+ * A non-positive or non-finite figure reads as absent rather than as "no limit": a corrupt
+ * record should make this service ask less often, not more.
+ */
+function readRequestCeiling(value: unknown): number | null {
+  const policy = asRecord(value);
+  if (policy === null) {
+    return null;
+  }
+  const ceiling = policy['requestCeilingPerSecond'];
+  return typeof ceiling === 'number' && Number.isFinite(ceiling) && ceiling > 0 ? ceiling : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

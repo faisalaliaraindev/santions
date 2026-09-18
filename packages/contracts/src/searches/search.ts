@@ -102,12 +102,55 @@ export const executionStateSchema = z.enum([
   'CANCELLED',
 ]);
 
+/**
+ * What the run found.
+ *
+ * `CONFIRMED_MATCHES_FOUND` and `AMBIGUOUS_MATCHES_FOUND` are separate values because collapsing
+ * them is how a run holding a real `AMBIGUOUS` finding came to report `NO_MATCHES_FOUND` — the
+ * finding was in `/findings`, and the summary said there was nothing to look at.
+ *
+ * **`NO_MATCHES_FOUND` now means zero findings of any band and zero unresolved leads**, and
+ * nothing else may produce it.
+ *
+ * `POTENTIAL_MATCHES` is kept so a run completed before this change still parses. It is never
+ * newly produced. A client should treat it as "findings exist"; `findingCounts` says which kind.
+ */
 export const findingsStateSchema = z.enum([
-  'POTENTIAL_MATCHES',
+  'CONFIRMED_MATCHES_FOUND',
+  'AMBIGUOUS_MATCHES_FOUND',
   'NO_MATCHES_FOUND',
   'UNRESOLVED',
   'NOT_EVALUATED',
+  /** Legacy, readable only. See the note above. */
+  'POTENTIAL_MATCHES',
 ]);
+
+/**
+ * Findings by band, as counts.
+ *
+ * Published so a client never has to infer "is there anything to look at?" from a state name it
+ * may not recognise, and so a new state value added later cannot silently hide a finding from an
+ * older client: `total > 0` is true regardless of what the state is called.
+ *
+ * Not a score (I9). A tally of how many documents fell in each band is the same arithmetic a
+ * reviewer does by looking at the list, and it is never combined into a person-level figure.
+ */
+export const findingCountsSchema = z
+  .object({
+    /** `CORROBORATED` or `SUPPORTED`. */
+    confirmed: z.number().int().nonnegative(),
+    /** `AMBIGUOUS` or `COMPANY_CONTEXT` — real findings that do not clear FR-11's bar. */
+    ambiguous: z.number().int().nonnegative(),
+    /** `CONTRADICTED` or `LEAD_ONLY`. Returned from `/findings`, so counted here. */
+    other: z.number().int().nonnegative(),
+    /** Every band. The only figure that may be called a no-match when it is zero. */
+    total: z.number().int().nonnegative(),
+    /** Candidates rejected before becoming findings, each with its reason (FR-06). */
+    unresolvedLeads: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type FindingCounts = z.infer<typeof findingCountsSchema>;
 
 export const coverageStateSchema = z.enum(['WITHIN_DECLARED_SCOPE', 'INCOMPLETE', 'UNKNOWN']);
 
@@ -122,6 +165,13 @@ export const searchSummarySchema = z
     execution: executionStateSchema,
     findings: findingsStateSchema,
     coverage: coverageStateSchema,
+    /**
+     * The counts `findings` was derived from.
+     *
+     * Optional on the wire so a run stored before this field existed reads back without being
+     * retro-fitted with numbers nobody recorded. Present on every run this service completes.
+     */
+    findingCounts: findingCountsSchema.optional(),
 
     /**
      * Every version needed to explain this result later. A historical search must be able to

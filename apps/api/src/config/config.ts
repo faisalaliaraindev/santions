@@ -51,6 +51,31 @@ const rawSchema = z.object({
   CORS_ORIGINS: z.string().default(''),
 
   /**
+   * **TEMPORARY, TESTING ONLY.** Allow one principal to both propose and approve a SOURCE
+   * version.
+   *
+   * Four eyes (SEC-06) is enforced on `principal.subject`, not on role, so a deployment with
+   * only one `source_admin` credential cannot take a source through `APPROVE` at all. That is
+   * the correct behaviour and it is why this default is `false`: the rule exists so the record
+   * the fetch gate reads names somebody who actually looked, and a bypass is a promise not kept.
+   *
+   * It exists because the three-source live test needs `sec-press-releases` and `gdelt-doc-v2`
+   * ACTIVE, and this deployment has no second named person behind its approver credential.
+   *
+   * What it does **not** do: it does not remove the lifecycle, skip a permission check, skip the
+   * SEC-05 rights clearance, or suppress an audit entry. Every version approved under it carries
+   * an explicit bypass marker in its own history and an extra audit event, permanently, so a
+   * reader can never mistake it for a real second opinion.
+   *
+   * Refused outright in production — see the `isProduction` block below, where setting it is a
+   * startup failure rather than a warning.
+   */
+  DISABLE_SOURCE_FOUR_EYES_FOR_TESTING: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  /**
    * The jobs queue. Optional, because the API can serve reads without it — but a process that
    * accepts searches with no queue configured is publishing into a variable, so the absence is
    * warned about loudly at startup rather than defaulted away quietly.
@@ -151,6 +176,11 @@ export type AppConfig = Readonly<{
   isProduction: boolean;
   mode: 'mock' | 'live';
   port: number;
+  /**
+   * **TEMPORARY, TESTING ONLY.** True when one principal may both propose and approve a SOURCE
+   * version. Always false in production, where setting the flag fails startup.
+   */
+  disableSourceFourEyesForTesting: boolean;
   mongodbUri: string;
   oidc: { issuer: string; clientId: string; clientSecret: string; audience: string };
   session: { secret: string; secure: boolean };
@@ -245,6 +275,18 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   const problems: string[] = [];
 
   if (isProduction) {
+    // A four-eyes bypass in production is not a misconfiguration to warn about — it is the
+    // control that makes every source approval meaningful, switched off. The process refuses to
+    // start rather than run with it, because "production must not silently enable it" is only
+    // true if production cannot enable it at all.
+    if (raw.DISABLE_SOURCE_FOUR_EYES_FOR_TESTING) {
+      problems.push(
+        'DISABLE_SOURCE_FOUR_EYES_FOR_TESTING is set in production. It is a testing-only flag ' +
+          'that lets one principal both propose and approve a source version, and it must never ' +
+          'be set outside a local or test deployment. Unset it.',
+      );
+    }
+
     // T09 — each of these is a separate way a development fixture reaches production.
     const issuerMarker = looksLikeDevelopmentValue(raw.OIDC_ISSUER);
     if (issuerMarker !== null) {
@@ -379,6 +421,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     isProduction,
     mode: raw.ADVERSE_SEARCH_MODE,
     port: raw.PORT,
+    // Belt and braces: production already failed above, so this can only be true off production.
+    disableSourceFourEyesForTesting: !isProduction && raw.DISABLE_SOURCE_FOUR_EYES_FOR_TESTING,
     mongodbUri: raw.MONGODB_URI,
     oidc: {
       issuer: raw.OIDC_ISSUER,

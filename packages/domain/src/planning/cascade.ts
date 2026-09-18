@@ -53,6 +53,7 @@
  */
 
 import type { SourceCoverageOutcome } from '../coverage/result-state.js';
+import type { FailureClass } from '../reliability/failure-classification.js';
 
 /** A rung of the FR-05 ladder. Seven sources and a terminus. */
 export type CascadeRung = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -181,6 +182,15 @@ export interface RungAttempt {
   readonly detail: string | null;
   /** How many planned queries this attempt covered — what a gap here actually cost. */
   readonly queriesAffected: number;
+  /**
+   * The FR-06 class behind a `FAILED` or `REFUSED` attempt, when something classified it.
+   *
+   * Carried through to the run's `sourceOutcomes` so that "this publisher rate-limited us" is a
+   * value a client can branch on rather than a phrase it has to pattern-match out of English.
+   * Null for an attempt that is not a failure, and for one nothing classified — an adapter that
+   * threw, where naming a class would be a guess recorded as a fact.
+   */
+  readonly failureClass?: FailureClass | null | undefined;
 }
 
 /**
@@ -314,6 +324,100 @@ export function cascadeCoverageOutcomes(
           : `Rung ${String(attempt.rung)} did not answer.`),
       queriesAffected: attempt.queriesAffected,
       truncation: null,
+      failureClass: attempt.failureClass ?? null,
+    };
+  });
+}
+
+/**
+ * Collapse many attempts against one source into the one line a reader needs.
+ *
+ * A run plans dozens of queries, and the ladder is walked once per query, so one source produces
+ * one attempt per query. Reported verbatim, a source that answered forty queries and was
+ * rate-limited on the forty-first appears **twice** in `sourceOutcomes` — once `COMPLETED`, once
+ * `FAILED` — and every consumer then has to decide which of the two is the truth about it. The
+ * honest answer is neither: it is `PARTIAL`, and that is a word the coverage vocabulary already
+ * has.
+ *
+ * The mapping, per source and rung:
+ *
+ * | What happened across its attempts        | Outcome     |
+ * | :--------------------------------------- | :---------- |
+ * | every attempt answered                    | `COMPLETED` |
+ * | some answered, some did not               | `PARTIAL`   |
+ * | none answered, and at least one was asked | `FAILED`    |
+ * | none answered, and none was ever asked    | `SKIPPED`   |
+ *
+ * `PARTIAL` is deliberately both: `aggregateRun` counts it as a source that answered **and** as
+ * one that leaves coverage incomplete. That pair is the whole behaviour this function exists to
+ * produce — the run keeps what the source found and still admits what it missed.
+ *
+ * `queriesAffected` becomes the largest any single gap reported, not the sum: the figure answers
+ * "what did this gap cost?", and adding up overlapping windows would inflate it past the plan.
+ */
+export function mergeSourceCoverageOutcomes(
+  outcomes: readonly SourceCoverageOutcome[],
+): readonly SourceCoverageOutcome[] {
+  const order: string[] = [];
+  const grouped = new Map<string, SourceCoverageOutcome[]>();
+
+  for (const outcome of outcomes) {
+    const key = `${outcome.sourceId}::${String(outcome.cascadeRung)}`;
+    const existing = grouped.get(key);
+    if (existing === undefined) {
+      order.push(key);
+      grouped.set(key, [outcome]);
+    } else {
+      existing.push(outcome);
+    }
+  }
+
+  return order.map((key) => {
+    // Non-null by construction: every key in `order` was put in the map alongside it.
+    const group = grouped.get(key) ?? [];
+    const first = group[0] as SourceCoverageOutcome;
+    if (group.length === 1) {
+      return first;
+    }
+
+    const answered = group.filter((o) => o.outcome === 'COMPLETED' || o.outcome === 'PARTIAL');
+    const failed = group.filter((o) => o.outcome === 'FAILED' || o.outcome === 'SUSPENDED');
+    const skipped = group.filter((o) => o.outcome === 'SKIPPED');
+
+    const outcome: SourceCoverageOutcome['outcome'] =
+      failed.length === 0 && skipped.length === 0
+        ? 'COMPLETED'
+        : answered.length > 0
+          ? 'PARTIAL'
+          : failed.length > 0
+            ? 'FAILED'
+            : 'SKIPPED';
+
+    // The failure's own words, not the success's: a reader of a `PARTIAL` line wants to know
+    // what went wrong. The successes are already represented by the outcome not being `FAILED`.
+    const problems = [...failed, ...skipped];
+    const details = [...new Set(problems.map((o) => o.detail).filter((d): d is string => d !== null))];
+    const detail =
+      details.length > 0
+        ? answered.length > 0
+          ? `${first.sourceName} answered ${String(answered.length)} of ` +
+            `${String(group.length)} attempts. ${details.join(' ')}`
+          : details.join(' ')
+        : first.detail;
+
+    const failureClass =
+      problems.map((o) => o.failureClass ?? null).find((c) => c !== null) ?? null;
+    const truncation = group.map((o) => o.truncation).find((t) => t !== null) ?? null;
+
+    return {
+      sourceId: first.sourceId,
+      sourceName: first.sourceName,
+      cascadeRung: first.cascadeRung,
+      outcome,
+      detail,
+      queriesAffected: Math.max(...problems.map((o) => o.queriesAffected), 0),
+      truncation,
+      failureClass,
     };
   });
 }

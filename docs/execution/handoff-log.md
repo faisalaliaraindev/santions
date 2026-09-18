@@ -27,6 +27,404 @@ Say what you did about it.
 
 ---
 
+## 2026-09-18 (sixteenth) — A failed source no longer discards another source's findings; the no-match claim is now checked, not just worded
+
+**Did.**
+
+1. **`sourceOutcomes` became one entry per source.** Discovery walks the ladder once per planned
+   query, and the old de-duplication keyed on `rung:sourceId:outcome`, so a source that answered
+   forty queries and was rate-limited on the forty-first appeared **twice** — once `COMPLETED`,
+   once `FAILED`. Every consumer had to pick one, and neither was true.
+   `mergeSourceCoverageOutcomes` (`packages/domain/src/planning/cascade.ts`) collapses per
+   `(sourceId, cascadeRung)` and answers `PARTIAL`, which `aggregateRun` counts **both** as a
+   source that answered and as a coverage gap. `SearchPipeline.discover` now calls it.
+
+2. **The findings state stopped being computed from two bands out of six.**
+   `supportedFindingCount` counted only `CORROBORATED`/`SUPPORTED`, so a run whose only result
+   was an `AMBIGUOUS` finding reported `NO_MATCHES_FOUND` while serving that finding from
+   `/findings`. `FINDINGS_STATES` now distinguishes `CONFIRMED_MATCHES_FOUND`,
+   `AMBIGUOUS_MATCHES_FOUND` and `NO_MATCHES_FOUND`; `POTENTIAL_MATCHES` stays **readable only**,
+   for runs stored before the change, and is never newly produced.
+
+3. **`findingCounts` is published** (`confirmed`, `ambiguous`, `other`, `total`,
+   `unresolvedLeads`) on the search summary and the findings page, so a client never infers
+   "is there anything to look at?" from a state name. Written by the job handler, and
+   **recomputed from the stored findings on read** — the findings are the evidence.
+
+4. **`failureClass` rides on every coverage outcome.** Carried from the FR-06 table through
+   `RungAttempt` to the wire, so `gdelt-doc-v2 = SKIPPED` can also say `RATE_LIMITED`. Null for
+   every refusal we imposed on ourselves (kill switch, licence, inactive version, spent budget) —
+   see D-061 for why that null is load-bearing. `SourceAccessDecision` gained the same field and
+   fills it only for `BREAKER_OPEN`.
+
+5. **I10 now checks the claim, not only its wording.** It used to verify that a no-match
+   *statement* named its coverage and its failed sources, and never asked whether the run was
+   entitled to say "no matches" at all — so the contradicting run passed the gate.
+   `NoMatchRunSample` gained `findingCount` and `unresolvedLeadCount`; a non-zero either refuses.
+   `assertNoMatchIsHonest` is the single definition, and `SearchesService.findingsFor` runs it
+   before serving, correcting the pair in favour of the evidence and logging it as a defect.
+
+6. **`SearchPipeline.discover` no longer dies with the ladder.** A throw from `ladder.build()`
+   used to take the run down and discard the association-graph outcome already recorded. It is
+   now a `SKIPPED` outcome with the reason.
+
+7. **New suite: `apps/api/test/partial-results.test.ts`** — 13 tests over the **real**
+   `LadderBuilder`, `CascadeService`, merge and `aggregateRun`, with only the socket doubled.
+   Covers all five required regressions plus T47 and the fixed-feed subtlety below.
+
+8. **Postman:** the partial-result block was added to `4 - Results / Findings and coverage`,
+   `14.10` and `15.12`. It asserts `findingCounts` against `findings.length`, refuses
+   `NO_MATCHES_FOUND` over a non-empty list, and — when a run has both an answering and a failing
+   source — asserts `PARTIAL`/`INCOMPLETE`, that every answering source is still reported, that
+   the failure names its reason, that it did not put a `failureClass` on a healthy source, and
+   that findings from an answering source keep band, provenance, attribution and source.
+
+**Verified.**
+
+- `pnpm test:unit` — **994 passed, 56 files** (was 981/55).
+- `pnpm test:invariants` — **31 passed** (was 29; two are the new I10 refusals).
+- `pnpm test:evaluation` — 12 passed.
+- `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm openapi:generate` — all clean.
+- **The live Postman run has NOT been done by this session.** See below.
+
+**Left half-done.**
+
+**The live folder-15 run.** The stack running at the time (`pnpm dev:live`, started 20:32) was
+serving pre-change code from `apps/api/dist`, which was rebuilt at 21:26 but not reloaded. The
+run needs: restart `pnpm dev:live`, then
+
+```
+pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json \
+  -e postman/live.ready.postman_environment.json \
+  --folder "15 - Mixed Live E2E: SEC + GDELT" \
+  --timeout-request 180000 --timeout-script 900000 --timeout 1500000
+```
+
+`mixedLiveConfirm` is already `yes-contact-sec-and-gdelt` in `live.ready`. Note
+`mixedGdeltHourlyBudget` is **empty** in that environment, so 15.12's budget-ceiling assertion is
+skipped; set it to `24` to exercise it.
+
+**Found.**
+
+- **A fixed feed answers `noResults` for every FR-04 family but F1 without opening a socket.**
+  Those are real answers, so a totally unreachable SEC feed comes out `PARTIAL`, not `FAILED`, on
+  a full plan. That is correct — the source did tell the run something — and it cost a first
+  attempt at the T47 regression test, which had assumed `FAILED`. The suite now narrows that one
+  case to F1 queries and asserts the `PARTIAL` behaviour separately rather than leaving it as a
+  trap.
+- **A cancelled run that found nothing must stay `NOT_EVALUATED`.** Routing cancellation through
+  the new count-based mapping made it `NO_MATCHES_FOUND`, which claims a finished search. Caught
+  by the existing domain test; the cancelled branch now maps only when findings exist.
+- **`postman/erly-adverse-search.postman_collection.json` was reformatted and then restored to
+  HEAD** by this session. It is the demo subset the README marks "not kept up to date", but if it
+  held uncommitted work before 2026-09-18 21:32, that work is gone.
+
+**Next session should:** restart `pnpm dev:live` and run the newman command above, then paste
+15.12's `PARTIAL-RESULT SUMMARY` line into this log. If every source answers, the partial path is
+not exercised — the block says so in the console rather than passing vacuously.
+
+**Decisions touched:** **D-061** opened and closed (a source failure narrows what a run may claim;
+it never subtracts from what it found).
+
+---
+
+## 2026-09-18 (fifteenth) — Three sources ACTIVE; a recorded ceiling made real; GDELT reached, then refused
+
+**Did.**
+
+1. **Gathered the evidence, live, that the two new sources needed.** Two new hard-coded scripts,
+   siblings of `first-contact.mjs` rather than parameters on it:
+   `scripts/sec-press-first-contact.mjs` (`pnpm sec:press-contact`) and
+   `scripts/gdelt-first-contact.mjs` (`pnpm gdelt:first-contact`).
+
+   - `www.sec.gov/robots.txt` re-read (HTTP 200, 916B) and evaluated for `/news/pressreleases.rss`:
+     **ALLOWED**. The feed loaded: HTTP 200, `application/rss+xml`, 25 items. The 2026-09-16
+     evidence names the _litigation_ path, so it was re-read rather than re-interpreted. Recorded
+     in `docs/sources/sec-press-robots-evidence.json`.
+   - **First contact with GDELT**, the second publisher this project has ever called.
+     `api.gdeltproject.org/robots.txt` returned **HTTP 404**, recorded as _absent_ (RFC 9309 full
+     allowance) rather than as a file that was read. `gdeltproject.org/robots.txt` returned 200
+     with `Disallow: /data/` only. Terms read at `gdeltproject.org/about.html` (Last-Modified
+     2022-09-03, sha256 `384754b5…`). Endpoint verified: HTTP 200 `application/json`. Recorded in
+     `docs/sources/gdelt-evidence.json`.
+
+2. **All three sources are ACTIVE**, read back from `GET /v1/admin/sources`:
+
+   | Source                    | Version | Connector              | Endpoint kind | Rung | proposedBy / approvedBy                 |
+   | :------------------------ | :------ | :--------------------- | :------------ | :--- | :-------------------------------------- |
+   | `sec-litigation-releases` | **v5**  | `NEWS_DISCOVERY_RSS`   | `FIXED_FEED`  | 1    | `4f93491691d8c22e` / `b6966983c269badd` |
+   | `sec-press-releases`      | **v1**  | `NEWS_DISCOVERY_RSS`   | `FIXED_FEED`  | 1    | `4f93491691d8c22e` / `b49936006e34f1ae` |
+   | `gdelt-doc-v2`            | **v1**  | `NEWS_DISCOVERY_GDELT` | `QUERY_FEED`  | 3    | `4f93491691d8c22e` / `b49936006e34f1ae` |
+
+   Both new versions are stamped `mode: LIVE`, carry `robotsPosition: HONOURED`, a rights clearance
+   of `ALLOW`, and `queryParam: query` on GDELT. **Four eyes was satisfied genuinely** — proposer is
+   not the approver on either — and
+   `db.auditEvents.countDocuments({action: 'source:four_eyes_bypassed_for_testing'})` is **0**.
+
+3. **`DISABLE_SOURCE_FOUR_EYES_FOR_TESTING`**, added on request, and in the end **not needed**.
+   Default false; **setting it in production fails startup** (`config.ts`, beside the T09 checks).
+   It forgives an identity and nothing else: the permission checks, the reason requirement, the
+   FR-05 conformance check and the SEC-05 rights clearance are untouched, and it does not apply to
+   `TAXONOMY` or `POLICY`. Every approval taken under it is marked twice and permanently — in the
+   version's own history reason, and as its own audit action
+   `source:four_eyes_bypassed_for_testing`. Tests:
+   `tests/integration/four-eyes-testing-bypass.test.ts` (9) and
+   `apps/api/test/four-eyes-flag-config.test.ts` (6).
+
+4. **D18 — and a number collision that had to be resolved.** GDELT first contact is **D18**,
+   approved by Faisal Ali, Source admin, 2026-09-18. D17 covers `www.sec.gov` only and was not
+   copied into it. **D18 was already taken** by "adopt `fast-xml-parser` v5" (opened 2026-09-15 by
+   D-039); that item is **now D19**. The engineering question is the one that moved, because it is
+   referenced only in narrative, whereas the GDELT approval is recorded inside an activated source
+   version and an append-only audit log. `docs/open-decisions.md` carries a note so that handoff
+   entries dated on or before 2026-09-15 saying "D18" stay interpretable.
+
+5. **`requestCeilingPerSecond` was recorded on every source since FR-05 and enforced nowhere.** Not
+   a theory — `grep` found it only in registry records and contracts. It did not matter while every
+   live source was a `FIXED_FEED`; it matters immediately for a `QUERY_FEED` dispatched from a loop
+   with no gap in it. `apps/api/src/sources/request-pacer.ts` now enforces it, **inside
+   `HttpEvidenceFetchAdapter`, keyed on the host**, for every outbound request — the document
+   fetch, each redirect hop, and the robots.txt read before them. Driven from the approved version
+   through the new `FetchAuthorisation.requestCeilingPerSecond`, never from a constant.
+
+   **GDELT publishes the number in the body of its own 429** — "one every 5 seconds" — so the
+   template's `requestCeilingPerSecond: null` ("they publish no numeric ceiling") was false, and the
+   approved version records `0.2`.
+
+6. **Two robots defects, both found by the live run, both fixed.**
+
+   - **An unreadable robots.txt was cached for the full 24-hour TTL.** One transient 429 on
+     `api.gdeltproject.org/robots.txt` therefore refused that publisher for the rest of the run.
+     Only a **known** answer is cached now; a 404 is a known answer (the site restricted nothing)
+     and is cached like any other. The branch fifteen lines above already declined to cache a
+     budget refusal for exactly this reason.
+   - **The robots read and the document fetch paced on different keys**, so two requests left with
+     no gap between them — which is _how_ the 429 happened. One host key now.
+
+7. **`requestsIssued` was counting attempts, not requests.** The GDELT connector recorded the
+   attempt _before_ calling `fetch`, so a run in which every query was refused by a domain cooldown
+   reported **53 requests issued against a budget of 24** to a publisher that had seen none of them.
+   It now records after the fetch returns, with `issued: false` for a refusal before the socket —
+   which is what `servedWithoutRequest` has always been documented to mean.
+
+8. **Postman.** Folder 15 had two defects that stopped it before any live traffic: 15.9 sent
+   `registrationNumber: null` into a `.strict()` schema requiring a non-empty string (400), and 15.5
+   asserted a `tenantId` that `issuedApiKeySchema` does not carry. Both fixed; a new
+   `mixedCompanyNumber` variable was added to all four environments. Poll cap 90 → **400**, because
+   a paced GDELT run is minutes long. `adminKey` in `live.ready` was a `tenant_admin`/`analyst` key
+   — authenticated but **not permitted** to read the source registry — so 15.6 got a 403 and
+   reported "a required source is not ACTIVE", which is misleading; it is now a `source_admin` key.
+
+**Verified.** unit **981** (was 960), invariants 29, security 181, evaluation 12, integration 224,
+e2e-api 26, lint clean, format clean, collection and all four environments parse. New suites:
+`request-pacing.test.ts` (13), `four-eyes-flag-config.test.ts` (6),
+`four-eyes-testing-bypass.test.ts` (9), plus two robots regressions in
+`http-evidence-fetch.test.ts`.
+
+**Found — GDELT is refusing this egress address, and pacing did not fix it.** Folder 15 ran LIVE end
+to end (2m58s, 181 assertions, 5 failures, all five about GDELT counts). Both SEC feeds worked:
+`requestsIssued: 1` and `distinctEndpoints: 1` each, `www.sec.gov` reached. GDELT got **one**
+request away and was then 429'd, which engaged the kill switch and a 600-second domain cooldown, so
+the remaining 16 planned queries were recorded as `servedWithoutRequest`.
+
+A controlled probe from cold settles what pacing can and cannot do here: request #0 returned **HTTP
+200**; request #1, **25 seconds later**, returned **429**; #2 likewise. Their stated ceiling is one
+every five seconds and a twenty-five-second gap was refused, so this is a longer-lived per-IP
+penalty — most plausibly earned by the unpaced bursts earlier in the day, before defect 6 was fixed.
+Hourly spend reached 18/24 largely on 429s, which count.
+
+**Left half-done: the GDELT fan-out has never been observed live.** `requestsIssued > 1`,
+`distinctEndpoints === requestsIssued`, and F1/F3/F4 reaching the wire are still unproven **against
+the live publisher**. They are proven against an injected fetch port in `mixed-live-sources.test.ts`
+and `request-pacing.test.ts`, which is a different claim and should not be reported as the same one.
+
+**Next session should:** run folder 15 once, at the top of an hour, after a long GDELT-silent
+period, and read `liveDiscovery` before anything else. If GDELT still 429s a single request, then
+the approved `0.2` is not the operative limit for this address, and the honest next step is a **v2
+of `gdelt-doc-v2` through the lifecycle** with a lower ceiling — not a code change, and not a retry
+loop. Do not raise the 24/hour budget to compensate: a 429 spends budget, so a larger budget buys
+more refusals.
+
+**Decisions touched:** **D18 closed** (GDELT first contact). **D19** is the renumbered
+`fast-xml-parser` question. D17 unchanged and still about `www.sec.gov` only.
+
+---
+
+## 2026-09-18 (fourteenth) — Folder 11 made generic; proposal payloads prepared; nothing proposed
+
+**Did.** No governance action was taken. Nothing was written to Mongo, no source version was
+proposed, approved or activated, and folder 15 was not run. What changed is Postman and its docs.
+
+`postman/erly-adverse-search-full.postman_collection.json`, folder 11:
+
+- Renamed `11 - SEC go-live (four eyes)` → `11 - Source go-live (four eyes)`.
+- All four requests had `sec-litigation-releases` hard-coded in the path. They now use
+  `{{recordId}}`, `{{recordVersion}}` and `{{recordRevision}}` — the same three variables folder 5
+  already uses, so **no new variable was introduced for the path** and the environments' existing
+  defaults (`sec-litigation-releases` / `5` / `2`) keep the SEC behaviour byte-for-byte. The
+  now-unused `{{secVersion}}` / `{{secRevision}}` are gone from the collection; the env keys are
+  left in place, harmless.
+- The APPROVE reason no longer hard-codes the SEC's robots evidence. Sending
+  "robots.txt read live on 2026-09-16 … docs/sources/sec-robots-evidence.json" while approving
+  GDELT would have been a fabricated attestation. It is now
+  `Approved by {{approverName}}, {{approverRole}}, for source {{recordId}} v{{recordVersion}}.
+{{approvalEvidenceNote}}`, and the pre-request script refuses a blank or `CHANGE ME`
+  `approvalEvidenceNote` the same way it already refuses a placeholder approver name.
+- **No source-specific request was added.** Propose / edit-draft / submit stay in folder 5, whose
+  bodies are data the operator pastes.
+
+`approvalEvidenceNote` added (value `CHANGE ME …`) to all four
+`postman/*.postman_environment.json`. `postman/README.md`, `postman/SEC-GO-LIVE.md` and
+`postman/ADVERSE-SEARCH-WALKTHROUGH.md` updated to the new folder name and variables.
+
+Ready-to-use propose payloads written to the session scratchpad (not committed), with every
+missing human decision left as an obvious `<HUMAN_…>` placeholder rather than a plausible value:
+`propose-sec-press-releases.json` (two placeholders) and `propose-gdelt-doc-v2.json` (nine).
+
+**Verified.** Collection and all four environment files re-parse as JSON; folder count still 16;
+zero remaining `secVersion` references; the 18 remaining `sec-litigation-releases` strings are all
+in folders 5, 8, 14 and 15, where they belong. Both payload files parse. No test suite was run —
+nothing outside `postman/` and `docs/` was touched, and no test reads those files (`grep` for
+`postman_collection` under `tests/`, `apps/api/test/` and `scripts/` returns nothing).
+
+**Left half-done: nothing.** The two proposals are still unproposed, deliberately.
+
+**Found — the activation rule, read from the code rather than assumed.** `VersionedRecordService`
+never calls `canApprove` on the activation path: `activate()` authorises only
+`this.authorise(kind, principal, definition.approve)`, and `ruleFor` marks both `BEGIN_ACTIVATION`
+and `COMPLETE_ACTIVATION` `requiresFourEyes: false`. So **activation may be performed by the
+approver, by the proposer, or by any third principal — the only requirement is `source:approve`,
+the `admin:write` scope and a tenant context for the audit entry.** Four eyes binds `APPROVE` and
+`REQUEST_CHANGES` only, and it binds on `principal.subject`, not on role. Folder 11 sends activate
+on `{{approverKey}}`; that is a convention, not an enforced rule.
+
+**Found — `licenceTermsVersion: 'UNVERIFIED'` is not refused by anything.** The fetch gate checks
+`licenceTermsVersion === null` (`LICENCE_TERMS_NOT_RECORDED`) and `licenceExpiresAt` in the past
+(`LICENCE_EXPIRED`). The literal string `UNVERIFIED` is neither, and no gate greps for it. GDELT is
+stopped by `NO_FIRST_CONTACT_APPROVAL` and `ROBOTS_POSITION_NOT_ESTABLISHED`, not by its unread
+terms. If somebody ever records a first-contact approval and a robots position while leaving
+`UNVERIFIED` in place, the source would fetch. Not fixed here — it is a one-line refusal in
+`fetch-gate.service.ts` but it is a new gate, and this session was scoped to not change gates.
+
+**Found — the SEC press-releases endpoint has never been loaded either.**
+`docs/sources/first-live-contact.md` records exactly two SEC URLs ever requested:
+`https://www.sec.gov/robots.txt` and the litigation feed. `https://www.sec.gov/news/pressreleases.rss`
+is not among them. `mixed-live-go-live.md` lists endpoint verification as a GDELT act only. It is
+the same act for this feed; nothing in code enforces it, so it is a checklist gap rather than a
+blocker.
+
+**Next session should:** not propose anything until the two SEC placeholders are filled by a
+person. The first concrete action is unchanged from the thirteenth entry — someone reads the
+recorded body in `docs/sources/sec-robots-evidence.json` against `/news/pressreleases.rss` and
+states the position — and the second is adding endpoint verification of
+`https://www.sec.gov/news/pressreleases.rss` to `mixed-live-go-live.md` section A.
+
+**Decisions touched:** none closed. D17 remains about `www.sec.gov` only; GDELT still needs its own
+first-contact decision, its own approver and its own date.
+
+---
+
+## 2026-09-18 (thirteenth) — Folder 15 not run: both new sources still have no registry version
+
+**Did.** No code changed. This session was a verification pass over the twelfth session's claim,
+plus a full regression re-run, plus a reading of the registry through the live admin API rather
+than from the handoff log.
+
+HEAD is `7a82a9a`, working tree clean, nothing material changed since the previous report.
+
+**Verified — the registry, read over HTTP, not from Mongo and not from the log.**
+`GET /v1/admin/sources?limit=200` with `proposerKey` against the running API:
+
+```
+sec-litigation-releases  v1-v4 AWAITING_APPROVAL, v5 ACTIVE
+                         NEWS_DISCOVERY_RSS | FIXED_FEED | rung 1 | tier 1 | queryParam null
+                         robots HONOURED | licence sec-fair-access-2026-09-15 | 120/hour
+                         firstContactApproval Faisal Ali / Source admin / 2026-09-15 / D17
+                         proposedBy api-key:4f93491691d8c22e
+                         approvedBy  api-key:b6966983c269badd   (four eyes, distinct)
+sec-press-releases       NO VERSION OF ANY STATUS EXISTS
+gdelt-doc-v2             NO VERSION OF ANY STATUS EXISTS
+```
+
+Neither new source is even `PROPOSED`. Folder 15 halts at 15.6, as designed.
+
+Health, read with `pnpm source:health` and from `domainHealth`:
+
+```
+sec-litigation-releases  breaker CLOSED, 0 consecutive failures, last success 2026-09-17,
+                         hourly 3, daily 7, kill switch not engaged
+sec-press-releases       no health record - never called
+gdelt-doc-v2             no health record - never called
+domainHealth sec.gov                 CLOSED, lastFailureAt null, last success 2026-09-17
+domainHealth api.gdeltproject.org    NO RECORD - never contacted
+```
+
+Both breakers therefore permit execution. Nothing was reset and nothing was bypassed.
+
+**Verified — regression, all of it re-run on 2026-09-18.**
+
+```
+lint clean | typecheck clean | format:check clean
+unit            960 passed (53 files)      invariants  29 passed
+evaluation       12 passed                 security   181 passed
+e2e (API)        26 passed                 integration 215 passed (see the flake below)
+focused: mixed-live-sources 19, live-source-proposals 24,
+         discovery-rungs + fixed-feed-amplification + sec-source-config 31
+postman collection  16 folders, 93 requests, 68 scripts, 0 parse errors, schema v2.1.0
+newman folder 13    12 requests, 28 assertions, 0 failed
+newman folder 14    halted at 14.0, 1 request, no SEC contact
+newman folder 15    halted at 15.0, 1 request, no SEC and no GDELT contact
+folder 14 is byte-identical between HEAD~1 and HEAD (compared as parsed JSON)
+```
+
+**Found — 1: a pre-existing order-dependent flake in the outbox integration tests.** Five runs of
+`pnpm test:integration`: three at 215/215, two with one failure each, and **a different test each
+time** — `transactions.test.ts > leaves a failed publication in the outbox and backs it off`, then
+`persistence.test.ts > counts committed-but-unpublished events (FI-04)`. Both pass in isolation.
+
+The cause is that both reach past their own tenant. `outbox.countUnpublished(now)` is a global
+count, and FI-04 samples it, appends one event and asserts `after === before + 1`. `OutboxPublisher`
+likewise drains every pending event, not the calling tenant's, so `queue.failNextPublish` — which
+fails only the _next_ publish — can be spent on another file's event, leaving the event under test
+published and `attempt` at 0. Vitest runs the integration files concurrently against one Mongo, so
+whichever file is mid-flight decides it.
+
+**This is not a regression from the SEC/GDELT work.** Neither file was touched by `7a82a9a`; they
+were last changed at `139e956` and `646ba90`. Left unfixed deliberately — the fix is tenant-scoping
+those two assertions, which is test-isolation work outside this task's scope.
+
+**Found — 2: `mixed-live-go-live.md` is missing a prerequisite, and it is the one that would fail
+at the last step.** The runbook lists four human acts for GDELT (robots, terms, endpoint,
+first-contact approval) and none for the rights artifacts. But `VersionedRecordService.clear()`
+returns `verdict: DENY, policyId: 'none'` when `rightsPolicy` or `dataProfile` is null, and
+`activate` sends the version back to `APPROVED` on a DENY. So a GDELT version proposed with content
+alone would pass propose and approve and then be **refused at activation**, after both people had
+signed.
+
+`sec-litigation-releases` v5 carries both (`policyId: sec-fair-access-2026-09-15`, classification
+`PUBLIC_RECORD`, collectionMethod `PUBLISHED_FEED`, region `eu-west-2`, 30-day retention, no raw
+personal data). `sec-press-releases` can reuse them verbatim — same publisher, same policy page,
+same licence version the record already reuses. **GDELT has no rights policy anywhere in the
+repository**, and one cannot be derived from the SEC's: a different publisher, different terms, and
+`PUBLISHED_API` rather than `PUBLISHED_FEED`. It has to be written and approved.
+
+**Left half-done: nothing was started that is not finished.** No version was proposed for either
+source, because proposing either one means writing a human's claim into the field that the fetch
+gate reads. The exact fields are listed in the report below and in the runbook.
+
+**Next session should:** do nothing on folder 15 until `GET /v1/admin/sources` shows
+`sec-press-releases` and `gdelt-doc-v2` each with an ACTIVE version. The first concrete action is
+the SEC one, because it needs one fact rather than six: read the recorded body in
+`docs/sources/sec-robots-evidence.json` against `/news/pressreleases.rss` and record the position.
+(For what it is worth to whoever does: that body has a single `user-agent: *` group with 71 rules,
+none of which mentions `news` or `press`, and no rule prefix-matches either feed path. Reading it
+is not the same as deciding it.)
+
+**Decisions touched:** none closed. GDELT still needs a first-contact decision of its own —
+**D17 is about `www.sec.gov` and must not be copied**. D-060 unchanged.
+
+---
+
 ## 2026-09-18 (twelfth) — Two source shapes on one ladder: SEC FIXED_FEED + GDELT QUERY_FEED, and the counts that prove it
 
 **Did.**

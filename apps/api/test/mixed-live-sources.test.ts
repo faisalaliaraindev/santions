@@ -182,6 +182,7 @@ const VERSIONS: Readonly<Record<string, ActiveSourceVersion>> = {
     endpointKind: 'QUERY_FEED',
     queryParam: 'query',
     pollFloorMs: null,
+    requestCeilingPerSecond: null,
   },
 };
 
@@ -210,6 +211,7 @@ function secVersion(sourceId: string, sourceName: string, url: string): ActiveSo
     endpointKind: 'FIXED_FEED',
     queryParam: null,
     pollFloorMs: 15 * 60_000,
+    requestCeilingPerSecond: null,
   };
 }
 

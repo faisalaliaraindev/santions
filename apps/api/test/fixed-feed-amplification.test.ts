@@ -112,6 +112,7 @@ const SEC_VERSION: ActiveSourceVersion = {
   endpointKind: 'FIXED_FEED',
   queryParam: null,
   pollFloorMs: 15 * 60_000,
+  requestCeilingPerSecond: null,
 };
 
 const FEED = `<?xml version="1.0" encoding="UTF-8"?>

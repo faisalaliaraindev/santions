@@ -79,6 +79,8 @@ import { DomainHealthService } from './sources/domain-health.service.js';
 import { SourceHealthService } from './sources/source-health.service.js';
 import { TransactionRunner } from './persistence/transaction.runner.js';
 import { IdempotencyService } from './searches/idempotency.service.js';
+import { ScreenController } from './searches/screen.controller.js';
+import { ScreenService } from './searches/screen.service.js';
 import { SearchesController } from './searches/searches.controller.js';
 import { SearchesService } from './searches/searches.service.js';
 import { NameFrequencyService } from './subjects/name-frequency.service.js';
@@ -133,6 +135,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
     LoginController,
     AccountController,
     SubjectsController,
+    ScreenController,
     SearchesController,
     // ReservedController must be registered BEFORE AdminController. Nest matches routes in
     // registration order, and AdminController's `/v1/admin/:collection` would otherwise shadow
@@ -298,7 +301,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
     {
       provide: VersionedRecordService,
       useFactory: (db: Db, t: TransactionRunner, a: AuditService, config: AppConfig) =>
-        new VersionedRecordService(db, t, a, config.mode),
+        new VersionedRecordService(db, t, a, config.mode, config.disableSourceFourEyesForTesting),
       inject: [MONGO_DB, TransactionRunner, AuditService, APP_CONFIG],
     },
     {
@@ -755,6 +758,15 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         SourceHealthService,
         APP_CONFIG,
       ],
+    },
+    {
+      provide: ScreenService,
+      useFactory: (
+        searches: SearchesService,
+        searchHandler: SearchJobHandler,
+        stages: StageExecutionService,
+      ) => new ScreenService(searches, searchHandler, stages),
+      inject: [SearchesService, SearchJobHandler, StageExecutionService],
     },
 
     {

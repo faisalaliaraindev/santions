@@ -69,6 +69,7 @@ const NEWS_SOURCE: ActiveSourceVersion = {
   endpointKind: 'FIXED_FEED',
   queryParam: null,
   pollFloorMs: 15 * 60_000,
+  requestCeilingPerSecond: null,
 };
 
 const FIXTURE_SOURCE: ActiveSourceVersion = {

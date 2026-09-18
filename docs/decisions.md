@@ -2185,3 +2185,182 @@ measured would describe a cheap search that never happened.
 is written by the two live connectors, read once, and dropped. Bounded at 2,000 attempts per job
 and 64 jobs, oldest evicted first, so a run that dies between the attempt and the read cannot leak
 — the bound is the backstop, and `forget` is the normal path.
+
+---
+
+## D18 — First live contact with GDELT, and the ceiling their 429 publishes
+
+**Status:** Accepted · **Decided at:** 2026-09-18, Faisal Ali, Source admin · **Closes:** D18 ·
+**Does not extend:** D17
+
+Until 2026-09-18 this service had contacted exactly one publisher: `www.sec.gov`, under **D17**.
+D18 is the equivalent decision for `api.gdeltproject.org`, and it is a separate decision on
+purpose. D17 is about the SEC. An approval that travelled between publishers would be no approval
+at all, so the GDELT source version carries `firstContactApproval.decision: 'D18'` and D17 was
+never copied into it.
+
+**What was read before anything was decided**, all of it recorded in
+[`docs/sources/gdelt-evidence.json`](./sources/gdelt-evidence.json):
+
+| Act                                               | Result                                                                                                                                           |
+| :------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET api.gdeltproject.org/robots.txt`             | **HTTP 404** — no rules published. RFC 9309 treats an absent file as full allowance, and it is recorded as _absent_, not as a file that was read |
+| `GET gdeltproject.org/robots.txt`                 | HTTP 200, 33 bytes, `Disallow: /data/` only — `/about.html` permitted                                                                            |
+| `GET gdeltproject.org/about.html`                 | HTTP 200, `Last-Modified` 2022-09-03, sha256 `384754b5…`                                                                                         |
+| `GET api.gdeltproject.org/api/v2/doc/doc?query=…` | HTTP 200 `application/json` — the endpoint is verified, not assumed                                                                              |
+
+**The terms, quoted rather than summarised:** _"You may redistribute, rehost, republish, and
+mirror any of the GDELT datasets in any form. However, any use or redistribution of the data must
+include a citation to the GDELT Project and a link to this website."_ `licenceTermsVersion` is
+therefore `gdelt-terms-of-use-2022-09-03` — the page's own last-modified date, so that a change to
+the page changes the recorded version rather than silently ageing under it.
+
+### The finding that changed the record: GDELT publishes a number after all
+
+`GDELT_TEMPLATE` recorded `requestCeilingPerSecond: null` with the note that "GDELT asks for
+reasonable use rather than publishing a numeric ceiling". **That was wrong, and the live contact
+is what falsified it.** GDELT states the figure in the body of its own 429:
+
+> Please limit requests to one every 5 seconds…
+
+So the approved version records `requestCeilingPerSecond: 0.2`. It is not a guess and not a
+courtesy margin; it is their number.
+
+### The cost: a ceiling nobody was enforcing
+
+Recording it exposed something worse than a missing number. **`requestCeilingPerSecond` had been
+recorded on every source version since FR-05 and read by nothing.** No pacer, no limiter, no delay
+anywhere in the pipeline — and the per-query fan-out loop in `search-pipeline.service.ts` has no
+gap in it. A recorded ceiling that nothing enforces is worse than no ceiling: to anyone auditing
+the record it reads as a commitment the service is keeping.
+
+It did not matter while every live source was a `FIXED_FEED`, because a fixed feed makes one
+request per poll floor and `FixedFeedPollCache` already bounds that. A `QUERY_FEED` makes one
+request **per planned query**, and a live plan for one subject is ~53 of them.
+
+`RequestPacer` (`apps/api/src/sources/request-pacer.ts`) enforces it, and two things about where
+it lives are load-bearing:
+
+- **At the choke point, not in the connector.** Every outbound request passes through
+  `HttpEvidenceFetchAdapter` — the document fetch, each redirect hop, and the robots.txt read that
+  precedes them. The first attempt paced only the connector, which left the robots read unpaced
+  and on a different key; the live run of 2026-09-18T15:07Z sent two requests to GDELT with no gap
+  between them and was rate-limited for it. **Keyed on the host**, so everything this deployment
+  sends a publisher queues behind everything else it sends them.
+- **Driven from the record, never from a constant.** The interval comes from the approved
+  version through `FetchAuthorisation.requestCeilingPerSecond`. A number hard-coded in a connector
+  is a rate limit no approval covers. A source recording no ceiling is not paced, because
+  inventing an interval for a publisher who published none is the same class of mistake as
+  inventing their robots position.
+
+**It delays; it never drops and never merges.** `requestsIssued`, `distinctEndpoints` and
+`servedWithoutRequest` are unchanged by pacing — those three are how a query feed is told from a
+fixed one, and a "fix" that quietly reduced any of them would have broken the thing it protected.
+
+### The budget stays below one plan, deliberately
+
+`freeTierHourlyBudget: 24` against a ~53-query plan. A single run exhausts it and records the rest
+as `HOURLY_BUDGET_EXHAUSTED` refusals, finishing `PARTIAL`/`INCOMPLETE` **accurately**. Fan-out
+truncation is the property that separates a query feed from a fixed feed operationally, and a
+budget nobody reaches is a budget nobody has tested. Raising it is one approved version, not a
+code change.
+
+### Rights policy
+
+`gdelt-terms-2022-09-03`, and **not** derived from the SEC's: a different publisher, different
+terms, and `PUBLISHED_API` rather than `PUBLISHED_FEED`. Classification is `PUBLISHED_CONTENT`
+rather than `PUBLIC_RECORD` — GDELT indexes journalism, and calling a news index a public record
+would overstate the authority of everything drawn from it. `eu-west-2`, 30 days, no raw personal
+data retained.
+
+---
+
+## D-061 — A source failure narrows what a run may claim; it never subtracts from what the run found
+
+**Date:** 2026-09-18 · **Owner:** Faisal Ali · **Status:** closed
+
+Two defects met and produced the worst answer a screening product can give: a run that had found
+something and reported that it had not.
+
+### 1. `sourceOutcomes` was one entry per *kind of thing that happened*, not per source
+
+Discovery walks the ladder once per planned query, so one source produces one attempt per query.
+The old de-duplication keyed on `rung:sourceId:outcome`, which kept a source that answered forty
+queries and was rate-limited on the forty-first as **two** entries — one `COMPLETED`, one
+`FAILED`. Every consumer then had to choose which described the source, and the two available
+readings were "it worked" and "it failed". Neither was true.
+
+`mergeSourceCoverageOutcomes` (`packages/domain/src/planning/cascade.ts`) collapses per
+`(sourceId, cascadeRung)` and gives the third answer:
+
+| What happened across its attempts        | Outcome     |
+| :--------------------------------------- | :---------- |
+| every attempt answered                    | `COMPLETED` |
+| some answered, some did not               | `PARTIAL`   |
+| none answered, and at least one was asked | `FAILED`    |
+| none answered, and none was ever asked    | `SKIPPED`   |
+
+`PARTIAL` is deliberately counted **both** ways by `aggregateRun` — as a source that answered and
+as a coverage gap. That pair is the whole behaviour: the run keeps what the source found and
+still admits what it missed.
+
+### 2. The findings state was computed from two bands out of six
+
+`supportedFindingCount` counted `CORROBORATED` and `SUPPORTED` and nothing else. A run whose only
+result was an `AMBIGUOUS` finding therefore reported `NO_MATCHES_FOUND` — while serving that
+finding from `/findings` the whole time. A band says how well evidence supports a connection; it
+never says whether a finding exists, and using one as a proxy for the other is how the summary
+came to contradict the evidence.
+
+The findings vocabulary now names the three answers separately:
+
+- `CONFIRMED_MATCHES_FOUND` — at least one `CORROBORATED` or `SUPPORTED` finding.
+- `AMBIGUOUS_MATCHES_FOUND` — findings exist and none clears FR-11's bar.
+- `NO_MATCHES_FOUND` — **zero findings of any band and zero unresolved leads.** Nothing else may
+  produce it.
+
+`POTENTIAL_MATCHES` stays in the enum **for reading stored runs only** and is never newly
+produced. Removing it would make every run completed before this change fail to parse, destroying
+an accurate record of what was reported at the time.
+
+`findingCounts` (`confirmed`, `ambiguous`, `other`, `total`, `unresolvedLeads`) is published on
+the search summary and on the findings page, so a client never has to infer "is there anything to
+look at?" from a state name it may not recognise — and so a state value added later cannot hide a
+finding from an older client. It is **not** a score (I9): a tally per band is the same arithmetic
+a reviewer does by looking at the list, and it is never combined into a person-level figure.
+
+### Where the rule is enforced, not merely intended
+
+- `assertNoMatchIsHonest` is the single definition of when a no-match may be claimed.
+- **I10 now checks the claim, not only its wording.** The invariant read "a run cannot report
+  `NO_MATCHES_FOUND` without also reporting its coverage state and every failed source", and
+  everything it checked was about the statement. It never asked whether the run was entitled to
+  say "no matches" at all, so the contradicting run passed the gate. `NoMatchRunSample` now
+  carries `findingCount` and `unresolvedLeadCount`, and a non-zero either refuses.
+- **`SearchesService.findingsFor` corrects the pair on read** rather than serving it, and logs it
+  as the defect it is. This is the one inconsistency worth overriding on a read path instead of
+  reporting faithfully: a reviewer told "no matches" does not go and look. It also covers a run
+  stored by an older build.
+
+### `failureClass` on a coverage outcome
+
+`detail` is a sentence for a person. `failureClass` is the same fact for a program, carried from
+the FR-06 table through the attempt to the wire, so `gdelt-doc-v2 = SKIPPED` can also say
+`RATE_LIMITED` — the difference between "try again in an hour" and "this is not coming back".
+
+**Null for every refusal we imposed on ourselves** — a kill switch, an expired licence, an
+inactive version, a spent budget. Dressing one of those as a publisher's failure class is the
+mistake `countsAgainstSourceHealth` exists to prevent: it puts a working publisher's name next to
+a failure it never produced.
+
+### What did not change
+
+T47 stands. A run where **every** source failed is `FAILED` / `NOT_EVALUATED`, never a clean
+result. A **cancelled** run that found nothing is still `NOT_EVALUATED` and never
+`NO_MATCHES_FOUND` — it was stopped, it did not finish looking.
+
+One subtlety a future session will meet: a fixed feed answers `noResults` for every FR-04 family
+but F1 without opening a socket. Those are real answers, so a totally unreachable SEC feed comes
+out `PARTIAL` rather than `FAILED` on a full plan. That is correct — the source did tell the run
+something — and `apps/api/test/partial-results.test.ts` asserts it in its own right rather than
+leaving it as a surprise.

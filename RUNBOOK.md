@@ -81,12 +81,12 @@ policies. Every write is an upsert, so re-running is safe and changes nothing th
 pnpm dev                 # both processes, mock mode — what you usually want
 ```
 
-| Command           | Runs                   | Use it when                                                    |
-| :---------------- | :--------------------- | :------------------------------------------------------------- |
-| `pnpm dev`        | API + worker, **mock** | Normal development, and everything in Postman except folder 14 |
-| `pnpm dev:live`   | API + worker, **live** | Only for a real SEC-backed search. Read the banner it prints   |
-| `pnpm dev:api`    | API only               | Debugging the HTTP layer                                       |
-| `pnpm dev:worker` | Worker only            | Debugging job handling                                         |
+| Command           | Runs                   | Use it when                                                            |
+| :---------------- | :--------------------- | :--------------------------------------------------------------------- |
+| `pnpm dev`        | API + worker, **mock** | Normal development, and everything in Postman except folders 14 and 15 |
+| `pnpm dev:live`   | API + worker, **live** | **Required for folders 14 and 15.** Read the banner it prints          |
+| `pnpm dev:api`    | API only               | Debugging the HTTP layer                                               |
+| `pnpm dev:worker` | Worker only            | Debugging job handling                                                 |
 
 **Both processes are required for a search to finish**, and this is the single most common
 confusion in this project:
@@ -126,6 +126,11 @@ Import **one collection** and **one environment**:
 
 Do **not** import `erly-adverse-search.postman_collection.json` — it is a short demo subset with
 no signup flow, no admin and no live folder.
+
+**Re-import after pulling.** The collection and the environments are separate imports and Postman
+does not refresh either one on its own, so a stale environment is the commonest cause of a folder
+that used to work failing on a variable. Both changed on 2026-09-18 (folder 15, `registryKey`,
+`mixedCompanyNumber`).
 
 Then run **folder 13 — Tenant E2E** with **Run folder**. It is the best single proof that
 everything above is working: signup → verify → sign in → both keys → subject → search → findings,
@@ -168,8 +173,91 @@ Then, with `pnpm dev:live` running, either Postman folder **14** (set `liveConfi
 SEC_LIVE_E2E=yes-contact-the-sec pnpm test:live
 ```
 
-**A live search costs three or four requests**: one poll of the feed, one `robots.txt` on a cold
-process, one document fetch per candidate.
+**A live SEC search costs three or four requests**: one poll of the feed, one `robots.txt` on a
+cold process, one document fetch per candidate.
+
+### Folder 15 — the mixed live test, across two publishers
+
+Since 2026-09-18 there are **three** live sources across **two** publishers. Folder 15 exercises
+all three at once and is the only thing that contacts GDELT.
+
+| Source                    | Ver | Endpoint kind | Rung | Publisher              |
+| :------------------------ | :-- | :------------ | :--- | :--------------------- |
+| `sec-litigation-releases` | v5  | `FIXED_FEED`  | 1    | `www.sec.gov`          |
+| `sec-press-releases`      | v1  | `FIXED_FEED`  | 1    | `www.sec.gov`          |
+| `gdelt-doc-v2`            | v1  | `QUERY_FEED`  | 3    | `api.gdeltproject.org` |
+
+Arm it in the **live** environment — note these are **not** folder 14's variables, deliberately:
+
+```
+mixedLiveConfirm   = yes-contact-sec-and-gdelt
+mixedSubjectName   = <a benign subject>
+mixedCompanyName   = <a company for F2 to anchor on>
+mixedCompanyNumber = <its registration number>      # required; the schema rejects null
+registryKey        = <a source_admin key>           # 15.6/15.7 read the source registry
+operatorKey        = <a platform_operator key>      # 15.8 reads source health
+```
+
+**`registryKey` must be `source_admin`.** A `tenant_admin`/`analyst` key is authenticated but not
+permitted to read source versions; it answers `403` and the folder reports "a required source is
+not ACTIVE", which sends you to the registry instead of to the credential.
+
+Check the three sources **and both domains** first. These are two different records and a
+clean source reading does not imply a clean domain one:
+
+```bash
+pnpm source:health sec-litigation-releases
+pnpm source:health sec-press-releases
+pnpm source:health gdelt-doc-v2
+pnpm source:health sec.gov --domain
+pnpm source:health gdeltproject.org --domain
+```
+
+`sourceHealth` is keyed on the source id and carries that feed's budgets and kill switch.
+`domainHealth` is keyed on the registrable domain and is what two feeds on one host share. A
+source can read **entirely healthy and still be refused before a socket opens**, because the
+domain breaker is checked separately — which is exactly what happened to `gdeltproject.org` on
+2026-09-18.
+
+> **Defect, open:** `decideDomainAccess` refuses while `breaker === 'OPEN'` and nothing in the
+> read path moves an open breaker to `HALF_OPEN`. Once opened it stays open: no request is
+> permitted, so none can succeed, so nothing closes it — and the refusal still says "requests are
+> held until the cooldown elapses" after the cooldown has elapsed. Until a half-open probe is
+> added on the read path, the way source health already does it, the only way back is:
+>
+> ```bash
+> pnpm source:health <domain> --domain --reset --reason "why"
+> ```
+>
+> It refuses a domain a person deliberately suspended — that one is released through the admin
+> API by a named operator — and it changes nothing at the publisher.
+
+```bash
+pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json \
+  -e postman/live.ready.postman_environment.json \
+  --folder "15 - Mixed Live E2E: SEC + GDELT" \
+  --timeout-request 180000 --timeout-script 900000 --timeout 1800000
+```
+
+**It is slow on purpose.** GDELT publishes a ceiling of one request every five seconds and the
+service honours it (`RequestPacer`, driven from `accessPolicy.requestCeilingPerSecond` on the
+approved version). A run that reaches GDELT's 24-request hourly budget spends about two minutes in
+discovery alone, which is why folder 15 polls up to 400 times and why `JOB_LEASE_MS` /
+`JOB_MAX_EXECUTION_MS` are raised in `.env`. **A run that finishes in seconds did not reach
+GDELT** — read `liveDiscovery` in the findings response before believing it did.
+
+**`PARTIAL` / `INCOMPLETE` is a pass.** Every assertion in 15.12 reads request counts and
+provenance; none reads a finding. `NO_MATCHES_FOUND` is a perfectly good outcome.
+
+**If GDELT returns 429** it halts the source, not just the request: the kill switch engages and a
+600-second **domain** cooldown starts. Releasing needs a named person who has first established
+_why_ the publisher refused; the domain cooldown is separate and is waited out, not cleared.
+`docs/sources/mixed-live-go-live.md` section F has the commands.
+
+> **Known, as of 2026-09-18:** `api.gdeltproject.org` is rate-limiting this egress address more
+> strictly than the ceiling it publishes — measured from cold, one request succeeded and the next,
+> 25 seconds later, was refused. Expect GDELT to contribute one request and then halt. Both SEC
+> feeds work normally.
 
 ---
 

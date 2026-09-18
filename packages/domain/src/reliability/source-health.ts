@@ -345,6 +345,20 @@ export interface SourceAccessDecision {
   readonly detail: string;
   /** The health document as the decision leaves it — cooldown applied, windows rolled. */
   readonly health: SourceHealth;
+  /**
+   * The FR-06 class that caused this refusal, when a publisher's behaviour caused it.
+   *
+   * Set only for `BREAKER_OPEN`, and taken from the failure that opened the breaker — so a
+   * source held back after a run of 429s reports `RATE_LIMITED` rather than the bare word
+   * "refused". A reviewer reading `gdelt-doc-v2: SKIPPED` learns nothing about whether to try
+   * again in an hour; `SKIPPED` plus `RATE_LIMITED` answers it.
+   *
+   * **Null for every refusal we imposed on ourselves** — a kill switch, an expired licence, an
+   * inactive version, a spent budget. Those are our decisions, and dressing one as a publisher's
+   * failure class is the same mistake `countsAgainstSourceHealth` exists to prevent: it would
+   * put a working publisher's name next to a failure it never produced.
+   */
+  readonly failureClass: FailureClass | null;
 }
 
 /**
@@ -377,6 +391,8 @@ export function decideSourceAccess(input: {
     refusal,
     detail,
     health,
+    // Only the breaker was opened by something the publisher did; see the field's note.
+    failureClass: refusal === 'BREAKER_OPEN' ? health.lastFailureClass : null,
   });
 
   if (health.killSwitch !== null) {
@@ -441,7 +457,7 @@ export function decideSourceAccess(input: {
     );
   }
 
-  return { allowed: true, refusal: null, detail: 'Permitted.', health };
+  return { allowed: true, refusal: null, detail: 'Permitted.', health, failureClass: null };
 }
 
 /**
@@ -549,6 +565,7 @@ export function accessCoverageOutcome(input: {
     detail,
     queriesAffected: input.queriesAffected,
     truncation: outcome === 'PARTIAL' ? 'TRUNCATED_BY_QUOTA' : null,
+    failureClass: input.decision.failureClass,
   };
 }
 

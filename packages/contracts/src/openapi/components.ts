@@ -69,6 +69,7 @@ import {
   searchAcceptedSchema,
   searchSummarySchema,
 } from '../searches/search.js';
+import { screenRequestSchema, screenResultSchema } from '../searches/screen.js';
 import {
   associationCoverageSchema,
   associationEdgeSchema,
@@ -135,6 +136,8 @@ export const COMPONENT_SCHEMAS = {
   SearchAccepted: searchAcceptedSchema,
   SearchSummary: searchSummarySchema,
   SearchPage: pageSchema(searchSummarySchema),
+  ScreenRequest: screenRequestSchema,
+  ScreenResult: screenResultSchema,
 
   ResolutionStatus: resolutionStatusSchema,
   CurrencyState: currencyStateSchema,

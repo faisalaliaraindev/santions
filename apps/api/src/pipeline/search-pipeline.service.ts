@@ -79,6 +79,8 @@ import {
   type TenureLabel,
   assessRelevance,
   cascadeCoverageOutcomes,
+  mergeSourceCoverageOutcomes,
+  type EvidenceBand,
   type RungAttempt,
   type TaxonomyVersion,
 } from '@erly/adverse-domain';
@@ -412,7 +414,37 @@ export class SearchPipeline {
     rungReached: number | null;
     discoveryOutcomes: readonly SourceCoverageOutcome[];
   }> {
-    const ladder = await this.ladder.build();
+    // A ladder that cannot be built is a configuration or registry fault, and it must not take
+    // the run's other stages down with it: `execute` has already recorded the association graph's
+    // outcome by this point, and a throw here would discard it along with everything the run
+    // could still say. Recorded as a skip with the reason, which is what every other
+    // "we could not look" is recorded as.
+    let ladder: Awaited<ReturnType<LadderBuilder['build']>>;
+    try {
+      ladder = await this.ladder.build();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.error(`The discovery ladder could not be built: ${detail}`);
+      return {
+        leads: [],
+        rungReached: null,
+        discoveryOutcomes: [
+          {
+            sourceId: 'discovery',
+            sourceName: 'Discovery cascade',
+            cascadeRung: 0,
+            outcome: 'SKIPPED',
+            detail:
+              `The FR-05 discovery ladder could not be assembled, so no source was asked: ` +
+              `${detail} This is a fault in this service, not an answer from any publisher, and ` +
+              `it is not evidence that nothing exists.`,
+            queriesAffected: queries.length,
+            truncation: null,
+            failureClass: null,
+          },
+        ],
+      };
+    }
 
     if (ladder.length === 0) {
       // Nothing is approved at any rung. Reported once, plainly, rather than as eight identical
@@ -480,17 +512,18 @@ export class SearchPipeline {
       }
     }
 
-    // One outcome per distinct gap rather than one per query: a rung with no source is one fact
-    // about the run, and repeating it per query would bury the coverage statement in duplicates.
-    const seen = new Set<string>();
-    const discoveryOutcomes = cascadeCoverageOutcomes(attempts).filter((outcome) => {
-      const key = `${String(outcome.cascadeRung)}:${outcome.sourceId}:${outcome.outcome}`;
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
+    // **One outcome per source**, not one per query and not one per distinct kind of thing that
+    // happened to it.
+    //
+    // This used to de-duplicate on `rung:sourceId:outcome`, which kept a source that answered
+    // forty queries and was rate-limited on the forty-first as **two** entries — one `COMPLETED`,
+    // one `FAILED`. Every consumer then had to decide which of the two described the source, and
+    // the two available readings were "it worked" and "it failed", neither of which is true.
+    // `mergeSourceCoverageOutcomes` gives the third: `PARTIAL`, carrying the failure's own words
+    // and its FR-06 class, counted by `aggregateRun` as a source that answered *and* as a gap.
+    //
+    // That is what keeps this run's SEC finding and still reports the GDELT rate-limit.
+    const discoveryOutcomes = mergeSourceCoverageOutcomes(cascadeCoverageOutcomes(attempts));
 
     return { leads: [...byUrl.values()], rungReached, discoveryOutcomes };
   }
@@ -1190,9 +1223,14 @@ export class SearchPipeline {
   }): ReturnType<typeof aggregateRun> {
     return aggregateRun({
       cancelled: input.cancelled,
-      supportedFindingCount: input.result.findings.filter(
-        (finding) => finding.band === 'CORROBORATED' || finding.band === 'SUPPORTED',
-      ).length,
+      // Counted by band, and **every band is counted**. Passing only the top two is what let a
+      // run holding an `AMBIGUOUS` finding report `NO_MATCHES_FOUND`: the finding was written,
+      // stored and served from `/findings` the whole time, and the summary said there was
+      // nothing. A band says how well the evidence supports a connection; it never says whether
+      // a finding exists.
+      supportedFindingCount: countBands(input.result.findings, ['CORROBORATED', 'SUPPORTED']),
+      ambiguousFindingCount: countBands(input.result.findings, ['AMBIGUOUS', 'COMPANY_CONTEXT']),
+      otherFindingCount: countBands(input.result.findings, ['CONTRADICTED', 'LEAD_ONLY']),
       unresolvedLeadCount: input.result.rejectedLeads.length,
       sourceOutcomes: input.result.sourceOutcomes,
       anyWorkDispatched: input.result.sourceOutcomes.length > 0,
@@ -1206,4 +1244,20 @@ export class SearchPipeline {
   get operatingMode(): 'MOCK' | 'LIVE' {
     return this.mode === 'live' ? 'LIVE' : 'MOCK';
   }
+}
+
+/**
+ * Count the findings whose band is one of these.
+ *
+ * A named helper rather than three inline filters, so that adding a band to `EVIDENCE_BANDS`
+ * and forgetting to count it anywhere is a visible omission at one call site instead of an
+ * invisible one spread across three. Every band must appear in exactly one of the three groups
+ * `aggregate` passes: a finding that is returned and counted nowhere is a finding the summary
+ * does not know about, which is the defect this whole path was rebuilt to remove.
+ */
+function countBands(
+  findings: readonly FindingRecord[],
+  bands: readonly EvidenceBand[],
+): number {
+  return findings.filter((finding) => bands.includes(finding.band)).length;
 }

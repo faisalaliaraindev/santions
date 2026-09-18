@@ -29,6 +29,7 @@ import { ReservedController } from '../src/common/reserved.controller.js';
 import { SignupController } from '../src/tenancy/signup.controller.js';
 import { TenantApiKeysController } from '../src/tenancy/tenant-api-keys.controller.js';
 import { HealthController } from '../src/health/health.controller.js';
+import { ScreenController } from '../src/searches/screen.controller.js';
 import { SearchesController } from '../src/searches/searches.controller.js';
 import { SubjectsController } from '../src/subjects/subjects.controller.js';
 
@@ -42,6 +43,7 @@ const CONTROLLERS = [
   LoginController,
   AccountController,
   SubjectsController,
+  ScreenController,
   SearchesController,
   ReservedController,
   AdminController,

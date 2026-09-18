@@ -490,6 +490,7 @@ export class FetchGateService {
         robotsPosition: robots,
         // Always null while D6 is open: the only path that would set it is refused above.
         robotsExceptionApprovedBy: null,
+        requestCeilingPerSecond: version.requestCeilingPerSecond,
         jurisdictionEnabled: true,
         languageEnabled: true,
         urlPolicyPassed: true,

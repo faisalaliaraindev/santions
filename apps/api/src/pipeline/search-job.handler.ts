@@ -152,6 +152,10 @@ export class SearchJobHandler implements JobHandler {
             $set: {
               execution: aggregate.execution,
               findings: aggregate.findings,
+              // Stored beside the state, so a read never has to decide which of a state and a
+              // finding list to believe. The read recomputes them from the findings anyway;
+              // this is what a list of runs shows without loading every finding.
+              findingCounts: aggregate.findingCounts,
               coverage: aggregate.coverage,
               sourceOutcomes: result.sourceOutcomes,
               // What the live connectors put on the wire (D-060). Stored on the run because it
@@ -176,8 +180,13 @@ export class SearchJobHandler implements JobHandler {
 
     this.logger.log(
       `Search ${run.searchId} completed: ${aggregate.execution} / ${aggregate.findings} / ` +
-        `${aggregate.coverage} — ${String(result.findings.length)} finding(s), ` +
-        `${String(result.rejectedLeads.length)} rejected lead(s).`,
+        `${aggregate.coverage} — ${String(aggregate.findingCounts.confirmed)} confirmed, ` +
+        `${String(aggregate.findingCounts.ambiguous)} ambiguous, ` +
+        `${String(aggregate.findingCounts.other)} other finding(s), ` +
+        `${String(result.rejectedLeads.length)} rejected lead(s). ` +
+        `Sources: ${result.sourceOutcomes
+          .map((o) => `${o.sourceId}=${o.outcome}${o.failureClass == null ? '' : `/${o.failureClass}`}`)
+          .join(', ')}`,
     );
   }
 }

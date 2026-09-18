@@ -162,7 +162,7 @@ describe('the OpenAPI document', () => {
     // The zod schemas are `.strict()`. If that failed to survive conversion, the document
     // would be advertising a tolerance the service does not have.
     const schemas = components['schemas'] ?? {};
-    for (const name of ['CreateSubjectRequest', 'CreateSearchRequest']) {
+    for (const name of ['CreateSubjectRequest', 'CreateSearchRequest', 'ScreenRequest']) {
       expect(schemas[name]?.['additionalProperties'], `${name} is strict`).toBe(false);
     }
   });

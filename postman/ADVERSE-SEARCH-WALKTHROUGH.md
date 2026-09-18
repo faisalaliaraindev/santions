@@ -280,4 +280,4 @@ The service runs in **mock mode**. Every source is a fixture, every record is st
 content is invented test data about invented people.
 
 Searching real sources is a separate, deliberate process with named human approval at two points.
-That is folder **`11 — SEC go-live (four eyes)`**, and it is not part of this walkthrough.
+That is folder **`11 — Source go-live (four eyes)`**, and it is not part of this walkthrough.

@@ -188,6 +188,10 @@ export class CascadeService {
         candidates: 0,
         detail: access.decision.detail,
         queriesAffected: input.queriesAffected,
+        // Why health refused: an open breaker carries the class that opened it, a spent budget
+        // carries none. Recorded so `gdelt-doc-v2 = SKIPPED` can also say *rate-limited*, which
+        // is the difference between "try again later" and "this is not coming back".
+        failureClass: access.decision.failureClass ?? null,
       };
     }
 
@@ -208,6 +212,9 @@ export class CascadeService {
         candidates: 0,
         detail,
         queriesAffected: input.queriesAffected,
+        // Deliberately unclassified. Nothing looked at this failure through the FR-06 table, and
+        // naming a class here would be a guess recorded as a fact.
+        failureClass: null,
       };
     }
 
@@ -248,6 +255,9 @@ export class CascadeService {
         candidates: 0,
         detail: result.detail,
         queriesAffected: input.queriesAffected,
+        // The adapter already classified this through the one FR-06 table. Carried rather than
+        // re-derived, so `RATE_LIMITED` reaches the coverage line as a value.
+        failureClass: result.policy.failureClass,
       };
     }
 

@@ -506,6 +506,22 @@ export interface NoMatchRunSample {
   readonly coverage: string;
   readonly statementLines: readonly string[];
   readonly failedSourceNames: readonly string[];
+  /**
+   * How many findings the run is **also** returning, across every band.
+   *
+   * The half of I10 that had no teeth. The invariant reads "a run cannot report
+   * `NO_MATCHES_FOUND` without also reporting its coverage state and every failed source", and
+   * everything it checked was about the *statement*. It never asked the prior question — whether
+   * the run was entitled to say "no matches" at all — so a run holding an `AMBIGUOUS` finding
+   * passed the gate while contradicting its own findings list.
+   *
+   * Optional so an existing sample compiles. Absent means "not stated", and a sample that does
+   * not state it is not checked against it — the honest reading of a caller that has not supplied
+   * the figure, rather than a claim that the figure is zero.
+   */
+  readonly findingCount?: number | undefined;
+  /** Leads rejected with a reason. Also incompatible with a bare no-match. */
+  readonly unresolvedLeadCount?: number | undefined;
 }
 
 export function checkI10(samples: readonly NoMatchRunSample[]): InvariantResult {
@@ -515,6 +531,28 @@ export function checkI10(samples: readonly NoMatchRunSample[]): InvariantResult 
     if (sample.findings !== 'NO_MATCHES_FOUND') {
       continue;
     }
+    // The prior question: may this run say "no matches" at all? A findings list that is not empty
+    // answers no, and the findings are the evidence — they were fetched, extracted and banded.
+    // Checked before the statement's wording, because a correctly worded statement of a false
+    // claim is worse than a badly worded one.
+    if (sample.findingCount !== undefined && sample.findingCount > 0) {
+      violations.push({
+        caseId: sample.label,
+        detail:
+          `NO_MATCHES_FOUND reported by a run that is returning ` +
+          `${String(sample.findingCount)} finding(s). A band says how well evidence supports a ` +
+          `connection; it never decides whether a finding exists.`,
+      });
+    }
+    if (sample.unresolvedLeadCount !== undefined && sample.unresolvedLeadCount > 0) {
+      violations.push({
+        caseId: sample.label,
+        detail:
+          `NO_MATCHES_FOUND reported by a run holding ${String(sample.unresolvedLeadCount)} ` +
+          `unresolved lead(s). A candidate that was looked at and rejected is not nothing found.`,
+      });
+    }
+
     const joined = sample.statementLines.join('\n');
 
     if (!joined.includes(sample.coverage)) {

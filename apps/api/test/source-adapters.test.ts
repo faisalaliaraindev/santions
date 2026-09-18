@@ -667,6 +667,7 @@ describe('evidence fetch', () => {
     licenceTermsVersion: 'terms-1',
     robotsPosition: 'HONOURED' as const,
     robotsExceptionApprovedBy: null,
+    requestCeilingPerSecond: null,
     jurisdictionEnabled: true,
     languageEnabled: true,
     urlPolicyPassed: true,
@@ -721,6 +722,7 @@ describe('evidence fetch', () => {
           ...authorisation,
           robotsPosition: 'EXCEPTION_APPROVED',
           robotsExceptionApprovedBy: null,
+          requestCeilingPerSecond: null,
         },
       }),
     ).rejects.toThrow(/approved by nobody/);

@@ -176,10 +176,14 @@ proposal, submit, approve and activate requests, with the body already filled in
 `apps/api/src/sources/registry/sec-litigation-releases.ts`. That is the first two steps of taking
 a source live, ready to send.
 
-Folder **11 — SEC go-live (four eyes)** is the live-source approval path after `pnpm first-contact`
-has recorded an allowed robots result. Read [`SEC-GO-LIVE.md`](./SEC-GO-LIVE.md) before running it:
-it uses a separate `approverKey`, refuses placeholder approver names, and bails if the source is
-already active.
+Folder **11 — Source go-live (four eyes)** is the approve → activate path for **any one** source
+version, once the robots/access position for that source's own path has been established and
+recorded on it. It is driven by `{{recordId}}`, `{{recordVersion}}` and `{{recordRevision}}` — the
+same three variables folder 5 uses — so it serves `sec-press-releases` and `gdelt-doc-v2` as well
+as the SEC litigation feed, which is what it still defaults to. Read
+[`SEC-GO-LIVE.md`](./SEC-GO-LIVE.md) before running it: it uses a separate `approverKey`, refuses
+placeholder approver names, refuses a placeholder `approvalEvidenceNote`, and bails if the source
+is already active.
 
 Folder **13 — Tenant E2E: signup to adverse search** is the whole customer join against the
 fixture server: signup → verification token → verify → sign in → **sandbox and live keys** →
@@ -393,6 +397,74 @@ is checkable rather than asserted.
 **What is still unbounded is per tenant.** Nothing limits how many searches one self-signed-up
 tenant runs in an hour (D-052 deferred the per-tenant live budget). That is the remaining
 production item, and no change to the fetch path addresses it.
+
+## Folder 15 — Mixed Live E2E: SEC + GDELT
+
+The folder that proves the architectural claim a list of source ids cannot: that a `FIXED_FEED`
+costs one request per poll floor however large the query plan is, and a `QUERY_FEED` costs one
+request per planned query bounded by its budget. It needs **three** live sources at once.
+
+### What it verifies before it contacts anybody
+
+| Request | Checks                                                                                                                                      |
+| :------ | :------------------------------------------------------------------------------------------------------------------------------------------ |
+| 15.0    | `mixedLiveConfirm` is armed, required variables set, service ready                                                                          |
+| 15.6    | both SEC sources ACTIVE, `NEWS_DISCOVERY_RSS`, `FIXED_FEED`, rung 1, named first-contact approval, robots established                       |
+| 15.7    | `gdelt-doc-v2` ACTIVE, `NEWS_DISCOVERY_GDELT`, `QUERY_FEED`, rung 3, **`queryParam === 'query'`**, approval, robots, hourly budget recorded |
+| 15.8    | breakers CLOSED and no kill switch on either domain; "no health record" is read as never-called, not as a refusal                           |
+| 15.12   | mode LIVE, no fixture source id anywhere, per-source request counts, distinct endpoints, budget, families, hosts                            |
+
+**Nothing in the folder activates a source.** 15.6 and 15.7 halt the run if one is not ACTIVE. A
+test that activated a source to make itself pass would be the thing meant to be checking the
+lifecycle bypassing it.
+
+### Arming it
+
+```
+mixedLiveConfirm   = yes-contact-sec-and-gdelt
+mixedSubjectName   = <a benign subject>
+mixedCompanyName   = <a company for F2 to anchor on>
+mixedCompanyNumber = <its registration number>
+registryKey        = <a source_admin key>   # 15.6/15.7 read the source registry
+operatorKey        = <a platform_operator key>
+```
+
+`mixedLiveConfirm` is a **different variable from folder 14's `liveConfirm`**, deliberately:
+arming a folder that contacts a publisher we have a relationship with must not arm one that
+contacts a publisher we do not. Clear it again afterwards.
+
+**`registryKey` must be a `source_admin` credential.** 15.6 and 15.7 read the source registry, which
+a `tenant_admin`/`analyst` key is authenticated for and not permitted to do — it answers `403` and the folder halts with "a required source is not ACTIVE", which is misleading. This caught us on
+2026-09-18.
+
+**`mixedCompanyNumber` is required, not optional.** `companyIdentifierSchema` is `.strict()` and
+`registrationNumber` is a non-empty string; the folder used to send `null` and got a `400`.
+
+### It is slow, on purpose
+
+GDELT publishes a ceiling of one request every five seconds and the service now honours it, so a
+run that reaches GDELT's 24-request hourly budget spends about two minutes in discovery alone.
+Folder 15 polls up to **400** times, and `JOB_LEASE_MS` / `JOB_MAX_EXECUTION_MS` in `.env` were
+raised to match. A run that finishes in seconds did **not** reach GDELT — read `liveDiscovery` and
+the source outcomes before believing it did.
+
+### `PARTIAL` / `INCOMPLETE` is a pass
+
+Every assertion in 15.12 reads request counts and provenance. **None of them reads a finding.**
+`NO_MATCHES_FOUND` is a perfectly good outcome, and so is a source that failed, provided the
+coverage state says so truthfully. Do not point this folder at a private individual in order to
+manufacture adverse findings.
+
+### If GDELT halts
+
+A 429 from GDELT engages the kill switch (`haltOnRateLimit` with `requiresFreshApprovalOnHalt`)
+and starts a 600-second **domain** cooldown. Releasing needs a named person who has first
+established why the publisher refused; the domain cooldown is separate and is waited out, not
+cleared. `docs/sources/mixed-live-go-live.md` section F has the commands.
+
+```bash
+pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json   -e postman/live.ready.postman_environment.json   --folder "15 - Mixed Live E2E: SEC + GDELT"   --timeout-request 180000 --timeout-script 900000 --timeout 1500000
+```
 
 ## Keeping the collection honest
 

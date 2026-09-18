@@ -8,16 +8,19 @@ Folder 15 proves an architectural claim that cannot be checked from a list of so
 costs one request per planned query bounded by its budget. To prove it live, three sources have to
 be **ACTIVE** at once:
 
-| Source id                 | Shape        | Rung | Publisher            | State today                    |
-| :------------------------ | :----------- | :--- | :------------------- | :----------------------------- |
-| `sec-litigation-releases` | `FIXED_FEED` | 1    | www.sec.gov          | **ACTIVE** since 2026-09-16    |
-| `sec-press-releases`      | `FIXED_FEED` | 1    | www.sec.gov          | **proposed in code, not live** |
-| `gdelt-doc-v2`            | `QUERY_FEED` | 3    | api.gdeltproject.org | **proposed in code, not live** |
+| Source id                 | Active version | Shape        | Rung | Connector              | Publisher            | State                       |
+| :------------------------ | :------------- | :----------- | :--- | :--------------------- | :------------------- | :-------------------------- |
+| `sec-litigation-releases` | **v5**         | `FIXED_FEED` | 1    | `NEWS_DISCOVERY_RSS`   | www.sec.gov          | **ACTIVE** since 2026-09-16 |
+| `sec-press-releases`      | **v1**         | `FIXED_FEED` | 1    | `NEWS_DISCOVERY_RSS`   | www.sec.gov          | **ACTIVE** since 2026-09-18 |
+| `gdelt-doc-v2`            | **v1**         | `QUERY_FEED` | 3    | `NEWS_DISCOVERY_GDELT` | api.gdeltproject.org | **ACTIVE** since 2026-09-18 |
 
-"Proposed in code" means the record content exists in
-`apps/api/src/sources/registry/` and parses against the FR-05 schema. It does **not** mean a
-version exists in the registry, and it does not mean the fetch gate would permit a request. Both
-records are deliberately inert.
+**All three are ACTIVE.** Sections A and B below are kept as the record of what was done to get
+them there, and are written in the past tense where the act has been performed. Read them before
+proposing a _fourth_ source: the shape of the work is the same every time.
+
+Verify with `GET /v1/admin/sources?limit=200` using a `source_admin` credential — a
+`tenant_admin`/`analyst` key is authenticated but not permitted to read source versions, and
+answers 403.
 
 ---
 
@@ -44,7 +47,10 @@ proposed record is not borrowed, and it is already filled in. The licence terms,
 ceiling, the stop conditions and the `sec.gov` domain are the same facts as on the litigation feed,
 and the record reuses them.
 
-**What is not.** `robotsPosition` is `NOT_ESTABLISHED`. `docs/sources/sec-robots-evidence.json`
+**Done on 2026-09-18.** `robotsPosition` is `HONOURED`, established by a live re-read; the record
+is `sec-press-releases` v1 ACTIVE. What follows is what was done.
+
+**What was not true before that.** `robotsPosition` was `NOT_ESTABLISHED`. `docs/sources/sec-robots-evidence.json`
 records a real read of `https://www.sec.gov/robots.txt` on 2026-09-16 whose body does not disallow
 `/news/pressreleases.rss` — but the evidence file's own `feedPathChecked` names the _litigation_
 path. Somebody has to read the recorded body against this path and say so.
@@ -69,8 +75,14 @@ day, separate from the litigation feed's.
 
 ## B. GDELT DOC 2.0
 
-The larger of the two, because **this project has never contacted GDELT**. Four separate human acts,
-and each one is a refusal the fetch gate is currently making on your behalf.
+**Done on 2026-09-18 under decision D18.** `gdelt-doc-v2` v1 is ACTIVE, `robotsPosition` is
+`HONOURED`, `licenceTermsVersion` is `gdelt-terms-of-use-2022-09-03`, and
+`firstContactApproval` names Faisal Ali, Source admin, 2026-09-18, D18. Evidence:
+[`gdelt-evidence.json`](./gdelt-evidence.json).
+
+What follows is the four acts that were performed, kept because they are the template for the next
+new publisher. Before 2026-09-18 this project had never contacted GDELT, and each of these was a
+refusal the fetch gate was making on your behalf.
 
 1. **Read `https://api.gdeltproject.org/robots.txt`** and record the position. This is a first
    contact with a new publisher and should be treated the way D17 treated the SEC's: one request,
@@ -152,3 +164,66 @@ Read from `GET /v1/searches/{id}/findings` → `liveDiscovery`:
 `liveDiscovery` carries no query text and no URLs. Endpoint identity is counted through a one-way
 digest, because a planned query is the subject's name plus a conduct term and an audit field is the
 wrong place for it.
+
+---
+
+## E. The rate ceiling, and why it is not optional here
+
+GDELT publishes its ceiling in the body of its own 429 — **one request every 5 seconds** — and the
+approved version records it as `requestCeilingPerSecond: 0.2`.
+
+Before 2026-09-18 **nothing in this service read that field.** It was recorded on every source
+version since FR-05 and enforced nowhere. It did not matter while every live source was a
+`FIXED_FEED`; it matters immediately for a `QUERY_FEED`, which makes one request per planned query
+out of a loop with no gap in it.
+
+`RequestPacer` now enforces it inside `HttpEvidenceFetchAdapter`, **keyed on the host**, for every
+outbound request — the document fetch, each redirect hop, and the robots.txt read that precedes
+them. Two things follow that are worth knowing before you run folder 15:
+
+- **A live GDELT run is slow on purpose.** Twenty-four requests at five seconds each is two
+  minutes in discovery alone. `JOB_LEASE_MS` and `JOB_MAX_EXECUTION_MS` in `.env` were raised for
+  this, and folder 15's poll allows 400 tries.
+- **If the ceiling is ever violated, GDELT halts the source, not just the request.**
+  `haltOnRateLimit: true` with `requiresFreshApprovalOnHalt: true` means a 429 engages the kill
+  switch and starts a 600-second domain cooldown. Releasing it needs a named person who has first
+  established _why_ the publisher refused. That happened once, on 2026-09-18T15:07Z, and the
+  answer was our own defect: the robots read and the document fetch were paced on different keys,
+  so two requests left with no gap between them.
+
+## F. Releasing a halted source
+
+```bash
+# 1. Establish the cause first. The release reason is read by whoever audits this later.
+node scripts/source-health.mjs gdelt-doc-v2
+
+# 2. Release the kill switch (source:approve, and a reason naming the established cause).
+curl -X POST -H "Authorization: ApiKey $APPROVER_KEY" -H 'Content-Type: application/json'   -d '{"reason":"..."}'   http://127.0.0.1:3000/v1/admin/sources/gdelt-doc-v2/kill-switch/release
+
+# 3. Close the breaker.
+node scripts/source-health.mjs gdelt-doc-v2 --reset --reason "..."
+```
+
+The **domain** breaker in `domainHealth` is a separate record and is cleared by neither of the
+above. Read it with:
+
+```bash
+pnpm source:health gdeltproject.org --domain
+```
+
+Its `degradedUntil` is the publisher's own requested cooldown and should be waited out rather
+than deleted. **Its `breaker` is a different matter.** `decideDomainAccess` refuses while the
+breaker is `OPEN`, and nothing in the read path moves an open breaker to `HALF_OPEN` — so once
+opened it stays open even after the cooldown elapses: no request is permitted, none can succeed,
+and nothing closes it. The refusal text ("requests are held until the cooldown elapses") is
+misleading in exactly this state.
+
+That is an open defect. The fix is a half-open probe on the read path, the way source health
+already does it. Until then:
+
+```bash
+pnpm source:health gdeltproject.org --domain --reset --reason "why"
+```
+
+It refuses to touch a domain a person deliberately suspended — that is released through the admin
+API by a named operator — and it changes nothing at the publisher.

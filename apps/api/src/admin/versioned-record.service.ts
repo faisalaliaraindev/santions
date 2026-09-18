@@ -33,7 +33,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ClientSession, Collection, Db, Document, Filter, UpdateFilter } from 'mongodb';
 
 import {
@@ -215,11 +215,27 @@ export class VersionedRecordService {
    * the admin API in a mock stack is as much a fixture as a seeded one — leaving it unlabelled
    * would be the one gap through which an unlabelled record enters these collections.
    */
+  private readonly logger = new Logger('VersionedRecordService');
+
   constructor(
     private readonly db: Db,
     private readonly transactions: TransactionRunner,
     private readonly audit: AuditService,
     private readonly mode: 'mock' | 'live' = 'mock',
+    /**
+     * **TEMPORARY, TESTING ONLY.** When true, a SOURCE version may be approved by the same
+     * principal that proposed it.
+     *
+     * Sourced from `DISABLE_SOURCE_FOUR_EYES_FOR_TESTING`, which cannot be set in production —
+     * `loadConfig` refuses to start the process. It narrows exactly one check and nothing else:
+     * the permission checks, the reason requirement, the FR-05 conformance check, the SEC-05
+     * rights clearance at activation and every audit entry are unchanged.
+     *
+     * It applies to `SOURCE` only. A taxonomy or a policy still needs two people, because the
+     * reason this flag exists — a live source test with one credential — is not a reason to
+     * weaken the other two lifecycles.
+     */
+    private readonly disableSourceFourEyesForTesting: boolean = false,
   ) {}
 
   /**
@@ -510,6 +526,10 @@ export class VersionedRecordService {
             assertContentConforms(input.kind, current.content);
           }
 
+          // Set when the testing bypass carried this transition, so the marker can be written
+          // onto the record's own history and into a second audit entry below.
+          let bypassedFourEyes = false;
+
           if (rule.requiresFourEyes) {
             const decision = canApprove({
               approver: input.principal,
@@ -517,12 +537,33 @@ export class VersionedRecordService {
               permission: definition.approve as Extract<Permission, `${string}:approve`>,
             });
             if (!decision.allowed) {
-              denial.refusal = { reason: decision.detail, version: current.version };
-              throw new ApiException('FORBIDDEN', decision.detail, {
-                internalDetail:
-                  `four-eyes refused: proposer=${current.proposedBy ?? 'unknown'} ` +
-                  `approver=${input.principal.subject}`,
-              });
+              // The one narrowing the testing flag performs, and the conditions are deliberately
+              // narrow: SOURCE only, and only when the refusal is the identity rule itself. A
+              // caller without `source:approve` is still refused here, because `canApprove` is
+              // asked for the permission as well as the identity and a missing permission is not
+              // something this flag was given permission to forgive.
+              const identityOnly =
+                this.disableSourceFourEyesForTesting &&
+                input.kind === 'SOURCE' &&
+                permissionsForRoles(input.principal.roles).has(definition.approve);
+
+              if (!identityOnly) {
+                denial.refusal = { reason: decision.detail, version: current.version };
+                throw new ApiException('FORBIDDEN', decision.detail, {
+                  internalDetail:
+                    `four-eyes refused: proposer=${current.proposedBy ?? 'unknown'} ` +
+                    `approver=${input.principal.subject}`,
+                });
+              }
+
+              bypassedFourEyes = true;
+              this.logger.warn(
+                `FOUR-EYES BYPASSED FOR TESTING on ${input.kind} ${input.recordId} ` +
+                  `v${String(current.version)}: ${input.action} by ${input.principal.subject}, ` +
+                  `who also proposed it. Permitted only because ` +
+                  `DISABLE_SOURCE_FOUR_EYES_FOR_TESTING is set. This approval is NOT an ` +
+                  `independent second opinion and must not be read as one.`,
+              );
             }
           }
 
@@ -531,11 +572,22 @@ export class VersionedRecordService {
           // restored past. `RESTORE` therefore lands in ACTIVATING.
           const to: LifecycleState = input.action === 'RESTORE' ? 'ACTIVATING' : move.to;
 
+          // The marker goes onto the version's **own** history, not only into the audit log.
+          // An audit entry can be read separately from the record; this cannot. Anybody who ever
+          // asks "who approved this source?" sees, in the same sentence as the answer, that the
+          // answer is the proposer and why that was allowed.
+          const recordedReason = bypassedFourEyes
+            ? `${input.reason ?? ''} [FOUR-EYES BYPASSED FOR TESTING: ` +
+              `DISABLE_SOURCE_FOUR_EYES_FOR_TESTING was set; approver ` +
+              `${input.principal.subject} is the same principal that proposed this version. ` +
+              `This is NOT an independent second opinion.]`.trim()
+            : (input.reason ?? null);
+
           const updated = await this.applyStatus(collection, identity, current, {
             to,
             action: input.action,
             actor: input.principal.subject,
-            reason: input.reason ?? null,
+            reason: recordedReason,
             now: input.now,
             kind: input.kind,
             ...(input.action === 'APPROVE' ? { approvedBy: input.principal.subject } : {}),
@@ -549,11 +601,33 @@ export class VersionedRecordService {
             targetType: definition.targetType,
             targetId: input.recordId,
             version: current.version,
-            reason: input.reason ?? null,
+            reason: recordedReason,
             correlationId: input.correlationId,
             result: 'ALLOWED',
             now: input.now,
           });
+
+          // A second, separately greppable audit event. The first one records what happened; this
+          // one records that a control was off while it happened, under its own action name, so
+          // an auditor can find every such approval without reading the reason text of all of
+          // them.
+          if (bypassedFourEyes) {
+            await this.appendAudit(session, {
+              tenantId: auditTenant,
+              principal: input.principal,
+              action: `${input.kind.toLowerCase()}:four_eyes_bypassed_for_testing`,
+              targetType: definition.targetType,
+              targetId: input.recordId,
+              version: current.version,
+              reason:
+                `${input.action} performed by ${input.principal.subject}, which is also the ` +
+                `proposer. Permitted only by DISABLE_SOURCE_FOUR_EYES_FOR_TESTING, a ` +
+                `testing-only flag that cannot be set in production. Not an independent review.`,
+              correlationId: input.correlationId,
+              result: 'ALLOWED',
+              now: input.now,
+            });
+          }
 
           return updated;
         },

@@ -37,6 +37,7 @@ import type { FixedFeedPollCache } from '../sources/feed-poll-cache.js';
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import type { NewsDiscoveryPort } from '../sources/news-discovery.port.js';
 import { GdeltDiscoveryAdapter } from '../sources/gdelt-discovery.adapter.js';
+import type { RequestPacer } from '../sources/request-pacer.js';
 import { RssNewsDiscoveryAdapter } from '../sources/rss-news-discovery.adapter.js';
 import type { Clock, OperatingMode, SourceOutcome } from '../sources/source-adapter.js';
 import type { SourceVersionReader } from '../sources/source-version.service.js';
@@ -121,6 +122,16 @@ export interface LiveDiscoveryDeps {
    * reporting zero.
    */
   readonly requestLog?: DiscoveryRequestLog;
+  /**
+   * The process's request pacer, which enforces each source's recorded
+   * `requestCeilingPerSecond`.
+   *
+   * One per process, for the same reason the poll cache is: a publisher's stated ceiling is a
+   * promise about what this deployment does to them in total, so two searches running at once
+   * must queue behind one another rather than pace themselves separately and arrive together.
+   * A process without one falls back to the module-level `requestPacer`.
+   */
+  readonly pacer?: RequestPacer;
 }
 
 export class LadderBuilder {
@@ -297,6 +308,7 @@ export class LadderBuilder {
       ...(this.live.pollCache === undefined ? {} : { pollCache: this.live.pollCache }),
       ...(this.live.clock === undefined ? {} : { clock: this.live.clock }),
       ...(this.live.requestLog === undefined ? {} : { requestLog: this.live.requestLog }),
+      ...(this.live.pacer === undefined ? {} : { pacer: this.live.pacer }),
     };
     const adapter =
       kind === 'GDELT' ? new GdeltDiscoveryAdapter(shared) : new RssNewsDiscoveryAdapter(shared);

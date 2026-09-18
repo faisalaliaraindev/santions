@@ -109,9 +109,13 @@ Recorded because they are the kind that stay hidden until they cause a wrong res
 - **The compose stack has not been brought up and verified.** `pnpm local:up` exists but the
   G1 exit condition ("clean checkout starts without undocumented manual database edits") is
   not yet demonstrated.
-- **One live source has been contacted:** the SEC litigation-releases feed, first on
-  2026-09-16, recorded in `docs/sources/first-live-contact.md`. Every other source contract in
-  the plan is unverified
+- **Three live sources are ACTIVE, across two publishers:** `sec-litigation-releases` v5 and
+  `sec-press-releases` v1 on `www.sec.gov` (**D17**), and `gdelt-doc-v2` v1 on
+  `api.gdeltproject.org` (**D18**, 2026-09-18). Recorded in
+  `docs/sources/first-live-contact.md` with the evidence beside it. **Both SEC feeds have been
+  read successfully; GDELT has returned exactly one 200 and has since rate-limited this egress
+  address**, so its fan-out behaviour is unverified against the live publisher — see the
+  2026-09-18 (fifteenth) handoff entry. Every other source contract in the plan is unverified
   against a real endpoint. The G10 measurements do not exist and `docs/coverage-matrix.md`
   is a template with no measured figures.
 - **No language is enabled.** Per FR-03 a language is enabled only with a measured recall

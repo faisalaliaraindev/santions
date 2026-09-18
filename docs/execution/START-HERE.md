@@ -77,6 +77,57 @@ of previous sessions. It is deliberately short.
 >   leaves the shared SEC budget unprotected, which is why the fixed-feed fix below is now a
 >   prerequisite for handing out live keys rather than an optimisation.
 
+### THREE LIVE SOURCES ACTIVE — reached 2026-09-18
+
+Two publishers, three sources, all `ACTIVE` in the registry and all reachable:
+
+| Source id                 | Active version | Connector              | Endpoint kind | Rung | Domain                 |
+| :------------------------ | :------------- | :--------------------- | :------------ | :--- | :--------------------- |
+| `sec-litigation-releases` | v5             | `NEWS_DISCOVERY_RSS`   | `FIXED_FEED`  | 1    | `www.sec.gov`          |
+| `sec-press-releases`      | v1             | `NEWS_DISCOVERY_RSS`   | `FIXED_FEED`  | 1    | `www.sec.gov`          |
+| `gdelt-doc-v2`            | v1             | `NEWS_DISCOVERY_GDELT` | `QUERY_FEED`  | 3    | `api.gdeltproject.org` |
+
+`gdelt-doc-v2` carries `queryParam: query` and `requestCeilingPerSecond: 0.2`. **D18** (2026-09-18,
+Faisal Ali, Source admin) authorised first contact with GDELT; D17 covers `www.sec.gov` only and
+was not copied into it. Evidence: [`../sources/gdelt-evidence.json`](../sources/gdelt-evidence.json)
+and [`../sources/sec-press-robots-evidence.json`](../sources/sec-press-robots-evidence.json).
+
+Verify with `GET /v1/admin/sources?limit=200` on a **`source_admin`** credential — a
+`tenant_admin`/`analyst` key is authenticated but not permitted, and answers 403.
+
+Run the mixed live test with Postman folder **15 — Mixed Live E2E: SEC + GDELT**, armed by
+`mixedLiveConfirm = yes-contact-sec-and-gdelt`. The runbook is
+[`../sources/mixed-live-go-live.md`](../sources/mixed-live-go-live.md).
+
+### A recorded ceiling is now enforced — 2026-09-18
+
+`accessPolicy.requestCeilingPerSecond` had been recorded on every source version since FR-05 and
+**read by nothing**. `RequestPacer` (`apps/api/src/sources/request-pacer.ts`) enforces it inside
+`HttpEvidenceFetchAdapter`, keyed on the host, for every outbound request — the document fetch,
+each redirect hop, and the robots.txt read before them. Driven from the approved version, never
+from a constant.
+
+Two consequences a session will meet:
+
+- **A live GDELT run is slow on purpose** — 24 requests at 5 seconds each. `JOB_LEASE_MS` and
+  `JOB_MAX_EXECUTION_MS` in `.env` were raised for it and folder 15 polls up to 400 times.
+- **An unreadable robots.txt is no longer cached.** It used to be cached for the full 24-hour TTL,
+  so one transient 429 refused a publisher for a day. Only a _known_ answer is cached now; a 404
+  is a known answer (the site restricted nothing) and is cached like any other.
+
+### TEMPORARY: `DISABLE_SOURCE_FOUR_EYES_FOR_TESTING`
+
+A testing-only flag exists that lets one principal both propose and approve a **SOURCE** version.
+Default `false`; setting it in production is a **startup failure**. It forgives an identity, never
+a permission, never the rights clearance, never an audit entry, and never applies to a taxonomy or
+a policy. Every approval taken under it is marked permanently in the version's own history and as
+its own audit action `source:four_eyes_bypassed_for_testing`.
+
+**It was not needed for the three sources above** — all three were approved by a credential
+distinct from the proposer, and `db.auditEvents.countDocuments({action:
+'source:four_eyes_bypassed_for_testing'})` is `0`. Remove the flag from `.env` when the live
+testing is finished.
+
 ### The previous phase, for context
 
 Phase F is **partly done** and is not the active phase. The live path works end to end: a real

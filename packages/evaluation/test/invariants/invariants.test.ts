@@ -89,6 +89,10 @@ function noMatchSamples(): readonly NoMatchRunSample[] {
       coverage: aggregate.coverage,
       statementLines: statement.lines,
       failedSourceNames: aggregate.failedSources.map((s) => s.sourceName),
+      // Stated, so the gate checks the claim and not only its wording. These runs found nothing
+      // and say so; the sample below is the one that does not.
+      findingCount: aggregate.findingCounts.total,
+      unresolvedLeadCount: aggregate.findingCounts.unresolvedLeads,
     };
   };
 
@@ -140,6 +144,29 @@ describe('I1-I10 release-gating invariants', () => {
 
   it('I10 — NO_MATCHES_FOUND always carries coverage state and failed sources', () => {
     expectPassed(checkI10(noMatchSamples()));
+  });
+
+  it('I10 — NO_MATCHES_FOUND is refused outright by a run that is returning a finding', () => {
+    // The shape that reached production: a perfectly worded no-match statement, naming its
+    // coverage and every failed source, on a run serving an AMBIGUOUS finding from `/findings`.
+    // Every wording check the invariant used to make passes here. The claim is still false.
+    const [honest] = noMatchSamples();
+    expect(honest).toBeDefined();
+
+    const contradicting = checkI10([
+      { ...(honest as NoMatchRunSample), label: 'holds-an-ambiguous-finding', findingCount: 1 },
+    ]);
+
+    expect(contradicting.passed).toBe(false);
+    expect(contradicting.violations.map((v) => v.detail).join('\n')).toContain('finding(s)');
+  });
+
+  it('I10 — NO_MATCHES_FOUND is refused by a run holding an unresolved lead', () => {
+    const [honest] = noMatchSamples();
+    const result = checkI10([
+      { ...(honest as NoMatchRunSample), label: 'holds-a-lead', unresolvedLeadCount: 3 },
+    ]);
+    expect(result.passed).toBe(false);
   });
 
   it('the full harness passes and reports all ten invariants', () => {

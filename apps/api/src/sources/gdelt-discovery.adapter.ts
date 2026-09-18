@@ -58,6 +58,7 @@ import {
   type Clock,
   type SourceOutcome,
 } from './source-adapter.js';
+import { requestPacer, type RequestPacer } from './request-pacer.js';
 import type { ActiveSourceVersion, SourceVersionReader } from './source-version.service.js';
 
 /** Bumped whenever the parse changes (FR-05 volatility control). */
@@ -99,6 +100,15 @@ export interface GdeltDiscoveryOptions {
    * counts, and a result that reports only source ids cannot support it.
    */
   readonly requestLog?: DiscoveryRequestLog;
+  /**
+   * Enforces the version's recorded `requestCeilingPerSecond` between outbound requests.
+   *
+   * Defaults to the process-wide `requestPacer`, because a ceiling is a promise about what this
+   * deployment does to this publisher: two searches running at once must queue behind each other,
+   * not pace themselves independently and arrive together. Injectable so a test can assert the
+   * wait without spending it.
+   */
+  readonly pacer?: RequestPacer;
 }
 
 export type GdeltParseResult =
@@ -109,10 +119,12 @@ export type GdeltParseResult =
 export class GdeltDiscoveryAdapter implements NewsDiscoveryPort {
   private readonly logger = new Logger('GdeltDiscovery');
   private readonly clock: Clock;
+  private readonly pacer: RequestPacer;
   readonly descriptor: AdapterDescriptor;
 
   constructor(private readonly options: GdeltDiscoveryOptions) {
     this.clock = options.clock ?? ((): Date => new Date());
+    this.pacer = options.pacer ?? requestPacer;
     this.descriptor = {
       adapterId: 'gdelt-discovery',
       portKind: 'NEWS_DISCOVERY',
@@ -181,21 +193,14 @@ export class GdeltDiscoveryAdapter implements NewsDiscoveryPort {
       );
     }
 
-    // Recorded immediately before the socket opens, and only here. Every earlier return in this
-    // method is a refusal that cost the publisher nothing, and counting those as requests would
-    // make a gate refusal look like traffic.
-    this.options.requestLog?.record({
-      jobId: query.run.jobId,
-      sourceId: this.options.sourceId,
-      sourceName: version.sourceName,
-      endpointKind: version.endpointKind,
-      family: query.family,
-      queryId: query.queryId,
-      host: hostOf(endpoint.url),
-      endpointDigest: endpointDigest(endpoint.url),
-      issued: true,
-    });
-
+    // The recorded ceiling is honoured inside `HttpEvidenceFetchAdapter`, not here.
+    //
+    // That is the choke point every outbound request passes through — the document fetch, each
+    // redirect hop, and the robots.txt read that precedes them. Pacing here as well would reserve
+    // a second slot for a request that is already paced, doubling every gap, and would still miss
+    // the robots read. `requestsIssued` and `distinctEndpoints` are unaffected either way: pacing
+    // delays a request, it never drops or merges one, and those two counts are how a query feed
+    // is told from a fixed one.
     const result = await this.options.fetch.fetch({
       url: endpoint.url,
       attribution: {
@@ -211,6 +216,36 @@ export class GdeltDiscoveryAdapter implements NewsDiscoveryPort {
       conditional: { etag: null, lastModified: null },
       fetchKey: `${this.options.sourceId}:${query.queryId}:${now.toISOString().slice(0, 10)}`,
       allowRender: false,
+    });
+
+    // Recorded **after** the fetch returns, and only now, because only now is it known whether
+    // anything reached the publisher.
+    //
+    // It used to be recorded immediately before calling `fetch`, on the reasoning that every
+    // earlier return in this method is a refusal that cost the publisher nothing. That was half
+    // right: the refusals inside `fetch` cost the publisher nothing either. An open domain
+    // breaker, a spent budget, a robots disallow and a cooldown are all decided in there, after
+    // this connector has handed the request over and before any socket is opened — so a run in
+    // which every single query was refused by a cooldown reported 53 requests issued against a
+    // budget of 24, and the publisher had seen none of them. `servedWithoutRequest` has always
+    // been documented as "served from the poll cache, **or refused before the socket**"; this is
+    // the second half of that sentence finally being true for a query feed.
+    //
+    // A network failure or a 429 counts as issued: the socket opened, the publisher saw it.
+    const refusedBeforeSocket =
+      result.status === 'FAILED' &&
+      (result.signal.policyRefusal === true || result.signal.robotsDisallow === true);
+
+    this.options.requestLog?.record({
+      jobId: query.run.jobId,
+      sourceId: this.options.sourceId,
+      sourceName: version.sourceName,
+      endpointKind: version.endpointKind,
+      family: query.family,
+      queryId: query.queryId,
+      host: hostOf(endpoint.url),
+      endpointDigest: endpointDigest(endpoint.url),
+      issued: !refusedBeforeSocket,
     });
 
     if (result.status === 'FAILED') {

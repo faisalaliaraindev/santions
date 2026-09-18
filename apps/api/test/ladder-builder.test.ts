@@ -225,6 +225,7 @@ describe('the gate still stands in front of the connector', () => {
       endpointKind: 'FIXED_FEED',
       queryParam: null,
       pollFloorMs: 900_000,
+      requestCeilingPerSecond: null,
     };
 
     const fetch = recordingFetch();

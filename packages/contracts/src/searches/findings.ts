@@ -26,6 +26,7 @@
 
 import { z } from 'zod';
 
+import { findingCountsSchema } from './search.js';
 import { preciseDateSchema } from '../subjects/subject.js';
 
 export const evidenceBandSchema = z.enum([
@@ -267,6 +268,12 @@ export const findingsPageSchema = z
     findingsState: z.string(),
     coverage: z.string(),
     /**
+     * The counts behind `findingsState`, so a client can act on this page without interpreting
+     * a state name — and so a source that failed can never make a finding that succeeded
+     * invisible. `findingCounts.total` and `findings.length` describe the same set.
+     */
+    findingCounts: findingCountsSchema,
+    /**
      * The FR-13 statement shown when nothing was found. Never "no results": it names what was
      * searched, what was not, and what that does and does not mean.
      */
@@ -290,6 +297,15 @@ export const findingsPageSchema = z
           outcome: z.string(),
           detail: z.string().nullable(),
           truncation: z.string().nullable(),
+          /**
+           * The FR-06 class behind a failure — `RATE_LIMITED`, `HARD_BLOCK`, and so on.
+           *
+           * `detail` is the sentence a reviewer reads; this is the same fact for a program, so a
+           * client deciding whether re-running the search could help does not have to
+           * pattern-match English. Null when the outcome is not a failure, or when nothing
+           * classified it.
+           */
+          failureClass: z.string().nullable().optional(),
         })
         .strict(),
     ),

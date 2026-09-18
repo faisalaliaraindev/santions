@@ -37,7 +37,12 @@
  * ```
  * pnpm sec:live-smoke                        # says what it would do, sends nothing
  * pnpm sec:live-smoke --yes-contact-the-sec  # sends exactly one poll
+ * pnpm sec:live-smoke --yes-contact-the-sec --all-titles   # …and lists every release in it
  * ```
+ *
+ * `--all-titles` costs no extra request and answers the one question a stored record cannot:
+ * **which subject names are searchable right now.** The feed is a rolling window, so a name that
+ * matched last week may simply not be in it today.
  */
 
 import { readFileSync } from 'node:fs';
@@ -102,6 +107,13 @@ async function main() {
   }
 
   const confirmed = process.argv.includes('--yes-contact-the-sec');
+  // Print every lead the one poll returned, not the first three.
+  //
+  // The feed is a **rolling window** — it holds the most recent releases and nothing older — so
+  // "which names are searchable right now?" cannot be answered from any stored record, only from
+  // the feed as it stands. Three titles is enough to prove the parse works and is not enough to
+  // pick a subject. This costs no extra request: the leads are already in hand.
+  const allTitles = process.argv.includes('--all-titles');
 
   console.log('');
   line();
@@ -236,16 +248,23 @@ async function main() {
     }
     const leads = 'data' in outcome ? outcome.data : [];
     console.log(`  Leads normalised      ${String(leads.length)}`);
-    for (const lead of leads.slice(0, 3)) {
-      console.log(`      ${lead.title.slice(0, 68)}`);
+    const shown = allTitles ? leads : leads.slice(0, 3);
+    for (const lead of shown) {
+      console.log(`      ${allTitles ? lead.title : lead.title.slice(0, 68)}`);
       console.log(`          ${lead.url}`);
       console.log(
         `          rung ${String(lead.rung)}  source ${lead.provenance.sourceId}  ` +
           `mode ${lead.provenance.mode}  published ${lead.publishedAt.value ?? '(none)'}`,
       );
     }
-    if (leads.length > 3) {
-      console.log(`      … and ${String(leads.length - 3)} more`);
+    if (!allTitles && leads.length > 3) {
+      console.log(`      … and ${String(leads.length - 3)} more — re-run with --all-titles`);
+    }
+    if (allTitles) {
+      console.log('');
+      console.log('  These are the only releases in the feed right now. A subject whose name is');
+      console.log('  not in one of these titles has nothing to match against at rung 1: the feed');
+      console.log('  is a rolling window, so an older release is not "missed", it is not there.');
     }
     console.log('');
     console.log(`  Elapsed               ${String(elapsedMs)}ms`);

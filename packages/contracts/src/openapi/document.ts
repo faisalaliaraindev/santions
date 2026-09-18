@@ -445,6 +445,55 @@ function buildPaths(): Record<string, SchemaObject> {
       },
     },
 
+    '/v1/screen': {
+      post: {
+        operationId: 'screenSynchronously',
+        tags: ['searches'],
+        summary: 'Run one screening synchronously',
+        description: [
+          'Creates a real subject version and search run, then executes that run through the',
+          "worker's own handler under the same stage lease the asynchronous worker would take.",
+          '',
+          'The request remains open until the run finishes or fails. Use `POST /v1/searches`',
+          'for volume, retries and polling; use this route when a caller needs one completed',
+          'answer and has nowhere to put a callback.',
+          '',
+          'The response repeats the three result dimensions and includes the same findings page',
+          '`GET /v1/searches/{searchId}/findings` would return for the created run.',
+        ].join('\n'),
+        parameters: [{ $ref: '#/components/parameters/CsrfToken' }],
+        requestBody: {
+          required: true,
+          content: json(ref('ScreenRequest'), {
+            fullName: 'Rodrigo Alberto Vargas Mendez',
+            aliases: [],
+            dateOfBirth: { value: '1978-09-20', precision: 'DAY' },
+            countryContext: ['CR'],
+            purpose: 'CUSTOMER_ONBOARDING',
+            jurisdictions: ['US'],
+            languages: ['en'],
+            includeFormerDirectorships: false,
+            externalCaseRef: 'CASE-2026-00471',
+            environment: 'sandbox',
+          }),
+        },
+        responses: {
+          '200': {
+            description: 'The completed run and its findings page.',
+            content: json(ref('ScreenResult')),
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+          '409': errorRef(409),
+          '413': errorRef(413),
+          '422': errorRef(422),
+          '429': errorRef(429),
+          '500': errorRef(500),
+        },
+      },
+    },
+
     '/v1/searches/{searchId}': {
       get: {
         operationId: 'getSearch',

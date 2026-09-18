@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import { classifyFailure, type FailureSignal } from '@erly/adverse-domain';
 
+import { RequestPacer } from '../src/sources/request-pacer.js';
 import {
   HttpEvidenceFetchAdapter,
   detectChallenge,
@@ -96,6 +97,7 @@ function request(overrides: Partial<FetchRequest> = {}): FetchRequest {
       licenceTermsVersion: 'terms-2026-01',
       robotsPosition: 'HONOURED',
       robotsExceptionApprovedBy: null,
+      requestCeilingPerSecond: null,
       jurisdictionEnabled: true,
       languageEnabled: true,
       urlPolicyPassed: true,
@@ -131,10 +133,19 @@ const ROBOTS_ALLOW_ALL = 'User-agent: *\nDisallow:\n';
 
 /** A transport that serves a permissive robots.txt and then whatever the caller scripted. */
 function withRobots(
-  robots: TransportResult,
+  // A function rather than a value where the answer changes between reads — a publisher with a
+  // rate limiter refuses the first robots.txt and serves the second, and a fixed value cannot
+  // express that.
+  robots: TransportResult | (() => TransportResult),
   document: (request: TransportRequest) => TransportResult,
 ): ScriptedTransport {
-  return new ScriptedTransport((r) => (r.url.endsWith('/robots.txt') ? robots : document(r)));
+  return new ScriptedTransport((r) =>
+    r.url.endsWith('/robots.txt')
+      ? typeof robots === 'function'
+        ? robots()
+        : robots
+      : document(r),
+  );
 }
 
 function adapter(transport: HttpTransport, access: SourceAccessPort): HttpEvidenceFetchAdapter {
@@ -179,6 +190,7 @@ describe('the gate, before any socket', () => {
             ...request().authorisation,
             robotsPosition: 'EXCEPTION_APPROVED',
             robotsExceptionApprovedBy: null,
+            requestCeilingPerSecond: null,
           },
         }),
       ),
@@ -300,6 +312,77 @@ describe('robots.txt', () => {
     );
     expect(html.known).toBe(false);
     expect(interpretRobotsResponse(response(404, {})).known).toBe(true);
+  });
+
+  it('does not cache an unreadable robots.txt, so one 429 does not refuse a host all day', async () => {
+    // The regression this guards is not hypothetical: on 2026-09-18 a live folder-15 run was
+    // refused for its whole duration because the FIRST robots.txt read of api.gdeltproject.org
+    // came back 429. That answer — "we could not establish a position just now" — was cached for
+    // the full 24-hour TTL, so every later query in the run was refused on the strength of one
+    // transient rate-limit response from a publisher who had restricted nothing.
+    let attempt = 0;
+    const transport = withRobots(
+      () => {
+        attempt += 1;
+        // Rate-limited once, then the real file: exactly what a publisher with a rate limiter does.
+        return attempt === 1
+          ? response(429, { 'content-type': 'text/plain' }, 'slow down')
+          : response(200, { 'content-type': 'text/plain' }, ROBOTS_ALLOW_ALL);
+      },
+      () => response(200, { 'content-type': 'text/html' }, '<html>served</html>'),
+    );
+    const subject = adapter(transport, new RecordingAccess());
+
+    const first = await subject.fetch(request());
+    expect(first.status).toBe('FAILED');
+
+    // The second attempt must re-read rather than serve the refusal from cache.
+    const second = await subject.fetch(request({ url: 'https://www.example-news.cr/sucesos/dos' }));
+    expect(second.status).toBe('OK');
+    expect(transport.calls.filter((c) => c.url.endsWith('/robots.txt'))).toHaveLength(2);
+  });
+
+  it('paces the robots.txt read by the approved ceiling, because it is a request too', async () => {
+    // robots.txt leaves this process, appears in the publisher's log and is refused by their rate
+    // limiter like anything else. Pacing the document fetch while hammering robots.txt would
+    // honour the ceiling everywhere except the request that decides whether we may make the rest.
+    const waits: number[] = [];
+    const pacer = new RequestPacer({
+      now: () => 0,
+      sleep: (ms: number) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    });
+    const transport = withRobots(
+      response(200, { 'content-type': 'text/plain' }, ROBOTS_ALLOW_ALL),
+      () => response(200, { 'content-type': 'text/html' }, '<html>x</html>'),
+    );
+    const subject = new HttpEvidenceFetchAdapter({
+      access: new RecordingAccess(),
+      contactUrl: CONTACT,
+      transport,
+      pacer,
+      // No cache, so each fetch re-reads robots and the pacer is asked twice.
+      robotsTtlMs: 0,
+    });
+
+    await subject.fetch(
+      request({ authorisation: { ...request().authorisation, requestCeilingPerSecond: 0.2 } }),
+    );
+    await subject.fetch(
+      request({
+        url: 'https://www.example-news.cr/sucesos/dos',
+        authorisation: { ...request().authorisation, requestCeilingPerSecond: 0.2 },
+      }),
+    );
+
+    // Four outbound requests reached this publisher — robots, document, robots, document — and
+    // every one after the first waited out GDELT's published five seconds. The robots read and
+    // the document fetch share ONE key, which is the whole point: keying them separately is how
+    // the 2026-09-18 live run sent two requests with no gap and was rate-limited for it.
+    expect(transport.calls).toHaveLength(4);
+    expect(waits).toEqual([5000, 5000, 5000]);
   });
 
   it('fetches robots.txt once per host and serves the rest from cache', async () => {

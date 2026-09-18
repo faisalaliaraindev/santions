@@ -12,8 +12,18 @@ it was read from.
 
 ## What has been contacted
 
-**One source: the SEC litigation-releases RSS feed** (`sec-litigation-releases`), under decision
-**D17**, approved by Faisal Ali (Source admin) on 2026-09-15.
+**Two publishers, three sources.** The list below is the whole of it.
+
+| Publisher              | Source                    | Decision | Approved by                          | First contacted |
+| :--------------------- | :------------------------ | :------- | :----------------------------------- | :-------------- |
+| `www.sec.gov`          | `sec-litigation-releases` | **D17**  | Faisal Ali, Source admin, 2026-09-15 | 2026-09-16      |
+| `www.sec.gov`          | `sec-press-releases`      | **D17**  | Faisal Ali, Source admin, 2026-09-15 | 2026-09-18      |
+| `api.gdeltproject.org` | `gdelt-doc-v2`            | **D18**  | Faisal Ali, Source admin, 2026-09-18 | 2026-09-18      |
+
+D17 names both SEC feeds in its own text ("the SEC litigation-releases RSS feed … with the
+press-releases feed as a second, later"), so the press feed's approval is not borrowed. **D18 is a
+separate decision for a separate publisher, and D17 was never copied into it** — an approval that
+travelled between publishers would be no approval at all.
 
 No other publisher has ever received a request from this service.
 
@@ -101,3 +111,51 @@ fact. They now point here instead. The rule that survives is the stronger one it
 > **Never claim a source was verified live beyond what was actually run.**
 
 If you contact a second publisher, add it here with its evidence, the same way.
+
+---
+
+## 4. Second SEC feed — 2026-09-18T14:38Z
+
+`pnpm sec:press-contact --yes-contact-the-sec`, authorised by **D17**, which names this feed.
+
+Two requests, both to a publisher this project already had a relationship with:
+
+- `GET https://www.sec.gov/robots.txt` — **HTTP 200**, 916 bytes. Re-read rather than
+  re-interpreted: the 2026-09-16 evidence file records `feedPathChecked:
+/enforcement-litigation/litigation-releases/rss`, which cannot be read as covering a different
+  path. Evaluated for `/news/pressreleases.rss`: **ALLOWED**.
+- `GET https://www.sec.gov/news/pressreleases.rss` — **HTTP 200**, 5,548 bytes,
+  `application/rss+xml`, channel "Press Releases", **25 items**. Endpoint verified rather than
+  assumed.
+
+**Evidence:** [`sec-press-robots-evidence.json`](./sec-press-robots-evidence.json). The source
+version was then proposed, approved and activated: `sec-press-releases` **v1 ACTIVE**.
+
+---
+
+## 5. First contact with a second publisher — 2026-09-18T14:39Z
+
+**This is the moment "one publisher" stopped being true.** `pnpm gdelt:first-contact
+--yes-contact-gdelt`, authorised by **D18**.
+
+Four reads, in the order a polite client makes them — rules first, terms second, endpoint last:
+
+| Request                                           | Result                                                                               |
+| :------------------------------------------------ | :----------------------------------------------------------------------------------- |
+| `GET api.gdeltproject.org/robots.txt`             | **HTTP 404** — no rules published. Recorded as _absent_, not as a file that was read |
+| `GET gdeltproject.org/robots.txt`                 | HTTP 200, 33 bytes, `Disallow: /data/` only → `/about.html` ALLOWED                  |
+| `GET gdeltproject.org/about.html`                 | HTTP 200, `Last-Modified` 2022-09-03, sha256 `384754b5…`                             |
+| `GET api.gdeltproject.org/api/v2/doc/doc?query=…` | **HTTP 200** `application/json` — endpoint verified                                  |
+
+A 404 robots.txt is full allowance under RFC 9309, and the distinction between "absent" and
+"unreadable" is recorded because the two are not the same fact: an outage at a publisher is not
+consent, and this was not an outage.
+
+**Evidence:** [`gdelt-evidence.json`](./gdelt-evidence.json). `gdelt-doc-v2` **v1 ACTIVE**.
+
+### What the first contact taught us, which desk research had not
+
+GDELT publishes a numeric rate ceiling — **one request every 5 seconds** — in the body of its own
+429, and `GDELT_TEMPLATE` had recorded `requestCeilingPerSecond: null` on the belief that they
+published none. The approved version records `0.2`. See **D18** in
+[`../decisions.md`](../decisions.md) for the ceiling that nothing was enforcing, and what now does.

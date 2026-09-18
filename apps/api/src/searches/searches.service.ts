@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
 import type {
@@ -28,6 +28,10 @@ import {
   unreviewedLexiconNote,
   type AssociationScope,
   type Principal,
+  assertNoMatchIsHonest,
+  describeFindings,
+  type EvidenceBand,
+  type FindingCounts,
   type SourceCoverageOutcome,
 } from '@erly/adverse-domain';
 
@@ -72,6 +76,15 @@ interface SearchRecord {
    */
   readonly sourceOutcomes?: readonly SourceCoverageOutcome[];
   /**
+   * The band counts behind `findings` (the state).
+   *
+   * Optional because a run completed before this existed has none stored. Nothing invents them
+   * on write; `findingCountsFor` below recomputes them from the stored findings on read, which
+   * is the one place that is safe to do — the findings are right there, and a count derived from
+   * the evidence cannot contradict it.
+   */
+  readonly findingCounts?: FindingCounts;
+  /**
    * What the live discovery connectors put on the wire (D-060).
    *
    * Optional and nullable, and the two mean different things. Absent is a run completed before
@@ -86,6 +99,7 @@ interface SearchRecord {
 
 @Injectable()
 export class SearchesService {
+  private readonly logger = new Logger('Searches');
   private readonly searches: Collection<SearchRecord>;
 
   constructor(
@@ -657,8 +671,17 @@ export class SearchesService {
       asOf: new Date(),
     });
 
+    // Counted from the findings this response is about to return, not read from the run.
+    //
+    // The two can only disagree if something wrote a state the evidence does not support, and
+    // when they disagree the findings are the evidence. This is the last place before the wire
+    // where that can be caught, so it is caught here: `findingsStateFor` refuses to serve
+    // `NO_MATCHES_FOUND` over a findings list that is not empty.
+    const findingCounts = findingCountsFor(findings, rejectedLeads.length);
+    const findingsState = this.findingsStateFor(run, findingCounts);
+
     const noMatchStatement =
-      findings.length > 0
+      findingCounts.total > 0
         ? null
         : renderNoMatchStatement({
             sourceCount: sourceOutcomes.length,
@@ -690,7 +713,8 @@ export class SearchesService {
     return {
       searchId: run.searchId,
       execution: run.execution,
-      findingsState: run.findings,
+      findingsState,
+      findingCounts,
       coverage: run.coverage,
       noMatchStatement:
         noMatchStatement === null
@@ -718,6 +742,7 @@ export class SearchesService {
         outcome: outcome.outcome,
         detail: outcome.detail,
         truncation: outcome.truncation,
+        failureClass: outcome.failureClass ?? null,
       })),
       unmeasuredLanguages: [...unmeasured],
       sinceSuspendedSources: Object.entries(suspensionNotes).map(([sourceId, note]) => ({
@@ -727,6 +752,39 @@ export class SearchesService {
       mode: this.mode === 'live' ? 'LIVE' : 'MOCK',
       liveDiscovery: run.liveDiscovery ?? null,
     };
+  }
+
+  /**
+   * The findings state this response may honestly carry.
+   *
+   * Normally the run's own stored state, because that is what the run concluded with everything
+   * in front of it. The exception is the one that does damage: a stored state of
+   * `NO_MATCHES_FOUND` over a findings list that is **not** empty. That pair cannot both be
+   * true, and of the two the findings are the evidence — they were fetched, extracted, banded
+   * and stored — while the state is a summary of them.
+   *
+   * So a contradiction is corrected in favour of the evidence and logged as the defect it is,
+   * rather than served. A reviewer who is told "no matches" does not go and look, which is
+   * precisely why this is the one inconsistency worth overriding on a read path instead of
+   * reporting faithfully and waiting for someone to notice.
+   *
+   * It also covers a run stored by an older build, whose state was computed by a version of
+   * `aggregateRun` that only ever counted `CORROBORATED` and `SUPPORTED`.
+   */
+  private findingsStateFor(
+    run: { readonly searchId: string; readonly findings: SearchSummary['findings'] },
+    counts: FindingCounts,
+  ): SearchSummary['findings'] {
+    const violation = assertNoMatchIsHonest({ findings: run.findings, counts });
+    if (violation === null) {
+      return run.findings;
+    }
+    const corrected = describeFindings(counts);
+    this.logger.error(
+      `Search ${run.searchId} is stored as ${run.findings} and is being served as ` +
+        `${corrected}. ${violation}`,
+    );
+    return corrected;
   }
 
   /** Tenant scoping is in the query, never a check afterwards (SEC-01). */
@@ -792,6 +850,32 @@ function decodeCursor(cursor: string): { createdAt: Date; searchId: string } {
   return { createdAt, searchId };
 }
 
+/**
+ * Count the stored findings by band, and the leads that never became one.
+ *
+ * Derived from the findings rather than trusted from the run, because this is the response that
+ * carries both: a count that disagreed with the list beside it would be worse than no count.
+ *
+ * Every value of `EvidenceBand` falls into exactly one group. A band added to the domain and not
+ * added here would be counted in `total` and in nothing else, which is visible — `confirmed +
+ * ambiguous + other !== total` — rather than silently dropped.
+ */
+function findingCountsFor(
+  findings: readonly FindingRecord[],
+  unresolvedLeads: number,
+): FindingCounts {
+  const inBands = (bands: readonly EvidenceBand[]): number =>
+    findings.filter((finding) => bands.includes(finding.band)).length;
+
+  return {
+    confirmed: inBands(['CORROBORATED', 'SUPPORTED']),
+    ambiguous: inBands(['AMBIGUOUS', 'COMPANY_CONTEXT']),
+    other: inBands(['CONTRADICTED', 'LEAD_ONLY']),
+    total: findings.length,
+    unresolvedLeads,
+  };
+}
+
 function toWire(record: SearchRecord): SearchSummary {
   return {
     searchId: record.searchId,
@@ -802,6 +886,7 @@ function toWire(record: SearchRecord): SearchSummary {
     execution: record.execution,
     findings: record.findings,
     coverage: record.coverage,
+    ...(record.findingCounts === undefined ? {} : { findingCounts: record.findingCounts }),
     pinnedVersions: record.pinnedVersions,
     createdAt: record.createdAt.toISOString(),
     completedAt: record.completedAt?.toISOString() ?? null,
