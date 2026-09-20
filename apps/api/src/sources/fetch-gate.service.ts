@@ -210,6 +210,12 @@ export interface EndpointGateInput {
   readonly now: Date;
 }
 
+export interface ScheduledArtifactGateInput {
+  readonly sourceId: string;
+  readonly url: string;
+  readonly now: Date;
+}
+
 @Injectable()
 export class FetchGateService {
   private readonly logger = new Logger('FetchGate');
@@ -306,6 +312,111 @@ export class FetchGateService {
     );
   }
 
+  /**
+   * Authorise a scheduler-owned publisher artifact fetch.
+   *
+   * This deliberately has no tenant taxonomy or subject. Refreshing an approved shared dataset
+   * is a platform operation; inventing a tenant scope merely to pass the document gate would put
+   * false provenance on every refresh. The source-level controls remain identical.
+   */
+  async authoriseScheduledArtifact(
+    input: ScheduledArtifactGateInput,
+  ): Promise<FetchGateDecision> {
+    const screening = screenUrl(input.url);
+    if (!screening.allowed) {
+      return this.refuse(
+        'URL_POLICY_REJECTED',
+        `The scheduled artifact URL was refused by the SEC-02 address policy ` +
+          `(${screening.rejection ?? 'REJECTED'}): ${screening.detail ?? input.url}`,
+        null,
+      );
+    }
+    const version = await this.sourceVersions.loadActive(input.sourceId);
+    if (version === null) {
+      return this.refuse(
+        'NO_ACTIVE_SOURCE_VERSION',
+        `Source ${input.sourceId} has no active approved version.`,
+        null,
+      );
+    }
+    if (!version.connectorType.startsWith('INDEXED_')) {
+      return this.refuse(
+        'NO_ENDPOINT_RECORDED',
+        `${version.sourceName} is not an indexed scheduled connector.`,
+        version,
+      );
+    }
+    if (version.endpointUrl === null || version.endpointUrl !== input.url) {
+      return this.refuse(
+        'NO_ENDPOINT_RECORDED',
+        `${version.sourceName} does not record this exact scheduled artifact URL.`,
+        version,
+      );
+    }
+    if (version.licenceTermsVersion === null) {
+      return this.refuse(
+        'LICENCE_TERMS_NOT_RECORDED',
+        `${version.sourceName} records no licence terms version.`,
+        version,
+      );
+    }
+    if (
+      version.licenceExpiresAt !== null &&
+      Date.parse(version.licenceExpiresAt) <= input.now.getTime()
+    ) {
+      return this.refuse(
+        'LICENCE_EXPIRED',
+        `The recorded licence terms for ${version.sourceName} expired at ${version.licenceExpiresAt}.`,
+        version,
+      );
+    }
+    if (version.firstContactApproval === null) {
+      return this.refuse(
+        'NO_FIRST_CONTACT_APPROVAL',
+        `${version.sourceName} has no named first-contact approval for scheduled ingestion.`,
+        version,
+      );
+    }
+    const robots = this.robotsPositionFor(version, false);
+    if (robots === null) {
+      return this.refuse(
+        version.robotsPosition === 'EXCEPTION_APPROVED'
+          ? 'ROBOTS_EXCEPTION_NOT_APPROVABLE'
+          : 'ROBOTS_POSITION_NOT_ESTABLISHED',
+        `${version.sourceName} has no usable recorded robots decision for this artifact.`,
+        version,
+      );
+    }
+    if (this.egressIdentity === null) {
+      return this.refuse(
+        'NO_EGRESS_IDENTITY',
+        'This process has no attributable outbound egress identity.',
+        version,
+      );
+    }
+
+    return {
+      authorised: true,
+      sourceVersion: version,
+      egressIdentity: this.egressIdentity,
+      authorisation: {
+        sourceVersionId: version.versionId,
+        licenceTermsVersion: version.licenceTermsVersion,
+        robotsPosition: robots,
+        robotsExceptionApprovedBy: null,
+        requestCeilingPerSecond: version.requestCeilingPerSecond,
+        jurisdictionEnabled: true,
+        languageEnabled: true,
+        urlPolicyPassed: true,
+        ssrfValidated: true,
+        relevanceScore: null,
+        relevanceMethod: 'SCHEDULED_PUBLISHER_ARTIFACT',
+        issuedBy: FETCH_GATE_ISSUER,
+        issuedAt: input.now.toISOString(),
+      },
+    };
+  }
+
   private async authoriseUrl(
     input: FetchGateInput,
     relevance: () => { readonly score: number | null; readonly method: string },
@@ -397,7 +508,10 @@ export class FetchGateService {
         version,
       );
     }
-    if (!version.countries.includes(input.jurisdiction)) {
+    if (
+      version.jurisdictionScope !== 'GLOBAL' &&
+      !version.countries.includes(input.jurisdiction)
+    ) {
       return this.refuse(
         'SOURCE_DOES_NOT_COVER_JURISDICTION',
         `${version.sourceName} is approved for ${version.countries.join(', ') || 'no country'} ` +

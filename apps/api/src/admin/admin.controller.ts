@@ -55,6 +55,7 @@ import { validate } from '../common/zod-validation.pipe.js';
 import { parseIfMatch } from '../searches/searches.controller.js';
 import { CapabilityCoverageService } from './capability-coverage.service.js';
 import { SourceHealthService } from '../sources/source-health.service.js';
+import { IndexedSourceRefreshService } from '../sources/indexed/indexed-source-refresh.service.js';
 import {
   ADMIN_RECORD_KINDS,
   VersionedRecordService,
@@ -83,6 +84,8 @@ export class AdminController {
     @Inject(VersionedRecordService) private readonly records: VersionedRecordService,
     @Inject(CapabilityCoverageService) private readonly coverage: CapabilityCoverageService,
     @Inject(SourceHealthService) private readonly health: SourceHealthService,
+    @Inject(IndexedSourceRefreshService)
+    private readonly indexedRefreshes: IndexedSourceRefreshService,
   ) {}
 
   // Declared before the `:collection` routes on purpose: Nest matches in declaration order, and
@@ -102,6 +105,52 @@ export class AdminController {
   async sourceHealth(): Promise<{ sources: SourceHealthWire[] }> {
     const records = await this.health.list(new Date());
     return { sources: records };
+  }
+
+  /** Operator view of local snapshot usability and publisher refresh health. */
+  @Get('indexed-sources')
+  @RequirePermission('platform:read_health')
+  @RequireScope('admin:read')
+  async indexedSourceStates(): Promise<{ sources: unknown[] }> {
+    const sources = await this.indexedRefreshes.listStatuses();
+    return {
+      sources: sources.map((state) => ({
+        ...state,
+        lastAttemptAt: state.lastAttemptAt?.toISOString() ?? null,
+        lastSuccessfulRefreshAt: state.lastSuccessfulRefreshAt?.toISOString() ?? null,
+        nextRefreshDueAt: state.nextRefreshDueAt?.toISOString() ?? null,
+        refreshLease:
+          state.refreshLease === null
+            ? null
+            : {
+                refreshId: state.refreshLease.refreshId,
+                expiresAt: state.refreshLease.expiresAt.toISOString(),
+              },
+      })),
+    };
+  }
+
+  /** Controlled publisher contact with an explicit safety header. */
+  @Post('indexed-sources/:sourceId/refresh')
+  @RequirePermission('source:approve')
+  @RequireScope('admin:write')
+  async refreshIndexedSource(
+    @Param('sourceId') sourceId: string,
+    @Headers('x-allow-publisher-contact') allowPublisherContact: string | undefined,
+    @Body() body: unknown,
+  ): Promise<unknown> {
+    if (allowPublisherContact !== 'true') {
+      throw new ApiException(
+        'VALIDATION_FAILED',
+        'Publisher contact requires X-Allow-Publisher-Contact: true.',
+      );
+    }
+    const force =
+      typeof body === 'object' &&
+      body !== null &&
+      !Array.isArray(body) &&
+      (body as Record<string, unknown>)['force'] === true;
+    return this.indexedRefreshes.refresh(sourceId, force);
   }
 
   /**

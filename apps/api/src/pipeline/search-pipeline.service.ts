@@ -108,6 +108,7 @@ import {
 import type { Lead } from '../sources/lead.js';
 import { hasData } from '../sources/source-adapter.js';
 import { SourceHealthService } from '../sources/source-health.service.js';
+import { IndexedSourceSearchService } from '../sources/indexed/indexed-source-search.service.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
 import {
   type DiscoveryRequestLog,
@@ -183,6 +184,8 @@ export class SearchPipeline {
      * let a reader conclude the sources were cheap.
      */
     private readonly requestLog: DiscoveryRequestLog | null = null,
+    /** Shared publisher snapshots queried locally once per subject, never once per plan query. */
+    private readonly indexedSources: IndexedSourceSearchService | null = null,
   ) {}
 
   async execute(input: {
@@ -208,6 +211,17 @@ export class SearchPipeline {
     });
     const taxonomy = await this.taxonomies.loadPinned(input.tenantId, input.taxonomyVersion);
     const policy = await this.policies.loadPinned(input.tenantId, input.policyVersion);
+
+    const indexed =
+      this.indexedSources === null
+        ? { findings: [] as readonly FindingRecord[], sourceOutcomes: [] as readonly SourceCoverageOutcome[] }
+        : await this.indexedSources.search({
+            tenantId: input.tenantId,
+            searchId: input.searchId,
+            subject,
+            now: input.now,
+          });
+    sourceOutcomes.push(...indexed.sourceOutcomes);
 
     // FR-03 / T80. A language without a measured recall figure is not enabled, and a search
     // that ran in it must say so. We do not refuse to run — refusing would mean the service
@@ -319,7 +333,7 @@ export class SearchPipeline {
 
     // ---- 4-6. Fetch, extract, band ---------------------------------------------------------
     const {
-      findings,
+      findings: assessedFindings,
       rejected,
       accessOutcomes,
       warnings: assessWarnings,
@@ -341,7 +355,7 @@ export class SearchPipeline {
     warnings.push(...assessWarnings);
 
     return {
-      findings,
+      findings: [...indexed.findings, ...assessedFindings],
       rejectedLeads: rejected,
       sourceOutcomes,
       plannedQueries: bounded.kept.length,

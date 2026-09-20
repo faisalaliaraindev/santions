@@ -69,6 +69,11 @@ export const findingDocumentSchema = z
     cascadeRung: z.number().int().min(0).max(7),
     /** `MOCK` means fixture data. It is never servable as a live result (T55). */
     mode: z.enum(['MOCK', 'LIVE']),
+    /** Present for records produced from a locally indexed publisher snapshot. */
+    sourceRecordId: z.string().optional(),
+    sourceSnapshotVersion: z.string().optional(),
+    parserVersion: z.string().optional(),
+    rawEvidenceHash: z.string().optional(),
     /**
      * Set when the source this document came from has been suspended **since** the run produced
      * it (T36, decision D-031).

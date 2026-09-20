@@ -27,6 +27,7 @@ import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module.js';
 import { WorkerRuntime } from './jobs/worker-runtime.service.js';
+import { IndexedSourceScheduler } from './sources/indexed/indexed-source-scheduler.service.js';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('WorkerBootstrap');
@@ -39,9 +40,11 @@ async function bootstrap(): Promise<void> {
   // the outbox is already at-least-once, and a second poller doubles the read rate while
   // halving each one's useful batch.
   const runtime = app.get(WorkerRuntime);
+  const indexedSources = app.get(IndexedSourceScheduler);
 
   try {
     runtime.start();
+    indexedSources.start();
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     await app.close();

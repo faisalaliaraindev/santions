@@ -601,6 +601,20 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
       accept: 'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8',
       'accept-encoding': 'gzip, deflate, br',
     };
+    if (first) {
+      for (const [name, value] of Object.entries(request.requestHeaders ?? {})) {
+        const normalized = name.toLowerCase();
+        if (
+          normalized === 'host' ||
+          normalized === 'user-agent' ||
+          normalized === 'if-none-match' ||
+          normalized === 'if-modified-since'
+        ) {
+          throw new Error(`Custom fetch header ${name} is managed by the evidence fetcher.`);
+        }
+        headers[normalized] = value;
+      }
+    }
     // Conditional headers go on the first hop only. Replaying an `If-None-Match` to whatever a
     // redirect points at asks a different document about a different document's ETag, and a
     // server that answered 304 to it would be answering about nothing we hold.

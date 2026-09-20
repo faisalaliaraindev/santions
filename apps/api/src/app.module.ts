@@ -14,6 +14,51 @@ import { FixedFeedPollCache } from './sources/feed-poll-cache.js';
 import { SearchPipeline } from './pipeline/search-pipeline.service.js';
 import { FetchGateService } from './sources/fetch-gate.service.js';
 import { SourceVersionService } from './sources/source-version.service.js';
+import { IndexedSourceRepository } from './sources/indexed/indexed-source.repository.js';
+import {
+  INDEXED_SOURCE_SCHEDULES,
+  IndexedSourceRefreshService,
+  type IndexedSourceSchedule,
+} from './sources/indexed/indexed-source-refresh.service.js';
+import {
+  SCHEDULED_ARTIFACT_TRANSPORT,
+  type ScheduledArtifactTransport,
+} from './sources/indexed/indexed-source.types.js';
+import { ScheduledArtifactTransportAdapter } from './sources/indexed/scheduled-artifact-transport.adapter.js';
+import { IndexedSourceScheduler } from './sources/indexed/indexed-source-scheduler.service.js';
+import { IndexedSourceSearchService } from './sources/indexed/indexed-source-search.service.js';
+import { OfacXmlParser } from './sources/indexed/parsers/ofac-xml.parser.js';
+import { UkslXmlParser } from './sources/indexed/parsers/uksl-xml.parser.js';
+import { UnscXmlParser } from './sources/indexed/parsers/unsc-xml.parser.js';
+import { EuSanctionsXmlParser } from './sources/indexed/parsers/eu-sanctions-xml.parser.js';
+import { OfficialFeedParser } from './sources/indexed/parsers/official-feed.parser.js';
+import { WorldBankDebarmentParser } from './sources/indexed/parsers/world-bank-debarment.parser.js';
+import {
+  EU_SANCTIONS_SOURCE_ID,
+  EU_SANCTIONS_XML_URL,
+  OFAC_NON_SDN_SOURCE_ID,
+  OFAC_NON_SDN_XML_URL,
+  OFAC_SDN_SOURCE_ID,
+  OFAC_SDN_XML_URL,
+  UKSL_SOURCE_ID,
+  UKSL_XML_URL,
+  UNSC_SOURCE_ID,
+  UNSC_XML_URL,
+} from './sources/registry/global-indexed-sources.js';
+import {
+  CFTC_ENFORCEMENT_RSS_URL,
+  CFTC_ENFORCEMENT_SOURCE_ID,
+  DOJ_FRAUD_RSS_URL,
+  DOJ_FRAUD_SOURCE_ID,
+  FCA_WARNINGS_RSS_URL,
+  FCA_WARNINGS_SOURCE_ID,
+  FTC_CONSUMER_RSS_URL,
+  FTC_CONSUMER_SOURCE_ID,
+} from './sources/registry/regulator-indexed-sources.js';
+import {
+  WORLD_BANK_DEBARRED_API_URL,
+  WORLD_BANK_DEBARRED_SOURCE_ID,
+} from './sources/registry/world-bank-indexed-source.js';
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
 import { VersionedRecordService } from './admin/versioned-record.service.js';
 import { AccountController } from './auth/account.controller.js';
@@ -96,6 +141,30 @@ import { PolicyService } from './tenancy/policy.service.js';
 
 // Re-exported for convenience; defined in ./tokens.js to avoid a circular import.
 export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
+
+function indexedSchedule(
+  sourceId: string,
+  artifactUrl: string,
+  parser: IndexedSourceSchedule['parser'],
+  intervalSeconds: number,
+  staleAfterSeconds: number,
+  minimumExpectedRows: number,
+  acceptedContentTypes: readonly string[] = [
+    'application/xml',
+    'text/xml',
+    'application/octet-stream',
+  ],
+): IndexedSourceSchedule {
+  return {
+    sourceId,
+    artifactUrl,
+    parser,
+    refreshIntervalMs: intervalSeconds * 1000,
+    staleAfterMs: staleAfterSeconds * 1000,
+    minimumExpectedRows,
+    acceptedContentTypes,
+  };
+}
 
 /**
  * Controllers that exist only on a non-production stack.
@@ -503,6 +572,220 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
       inject: [MONGO_DB],
     },
     {
+      provide: IndexedSourceRepository,
+      useFactory: (db: Db, transactions: TransactionRunner) =>
+        new IndexedSourceRepository(db, transactions),
+      inject: [MONGO_DB, TransactionRunner],
+    },
+    {
+      provide: INDEXED_SOURCE_SCHEDULES,
+      useFactory: (): ReadonlyMap<string, IndexedSourceSchedule> => {
+        const ofac = new OfacXmlParser();
+        return new Map<string, IndexedSourceSchedule>([
+          [
+            OFAC_SDN_SOURCE_ID,
+            indexedSchedule(
+              OFAC_SDN_SOURCE_ID,
+              OFAC_SDN_XML_URL,
+              ofac,
+              21_600,
+              86_400,
+              10_000,
+            ),
+          ],
+          [
+            OFAC_NON_SDN_SOURCE_ID,
+            indexedSchedule(
+              OFAC_NON_SDN_SOURCE_ID,
+              OFAC_NON_SDN_XML_URL,
+              ofac,
+              21_600,
+              86_400,
+              1_000,
+            ),
+          ],
+          [
+            UKSL_SOURCE_ID,
+            indexedSchedule(
+              UKSL_SOURCE_ID,
+              UKSL_XML_URL,
+              new UkslXmlParser(),
+              21_600,
+              86_400,
+              1_000,
+            ),
+          ],
+          [
+            UNSC_SOURCE_ID,
+            indexedSchedule(
+              UNSC_SOURCE_ID,
+              UNSC_XML_URL,
+              new UnscXmlParser(),
+              86_400,
+              259_200,
+              900,
+            ),
+          ],
+          [
+            EU_SANCTIONS_SOURCE_ID,
+            indexedSchedule(
+              EU_SANCTIONS_SOURCE_ID,
+              EU_SANCTIONS_XML_URL,
+              new EuSanctionsXmlParser(),
+              86_400,
+              259_200,
+              2_000,
+            ),
+          ],
+          [
+            DOJ_FRAUD_SOURCE_ID,
+            indexedSchedule(
+              DOJ_FRAUD_SOURCE_ID,
+              DOJ_FRAUD_RSS_URL,
+              new OfficialFeedParser({
+                parserId: 'official-feed',
+                parserVersion: 'official-feed-doj-fraud-1',
+                publisherUrl: 'https://www.justice.gov/fraud/fraud-enforcement-news',
+                category: 'FRAUD_FINANCIAL_CRIME',
+                defaultStage: 'ALLEGATION',
+                includeItem: (item) => item.link?.includes('/pr/') ?? false,
+              }),
+              3_600,
+              86_400,
+              1,
+              ['application/rss+xml', 'application/xml', 'text/xml'],
+            ),
+          ],
+          [
+            CFTC_ENFORCEMENT_SOURCE_ID,
+            indexedSchedule(
+              CFTC_ENFORCEMENT_SOURCE_ID,
+              CFTC_ENFORCEMENT_RSS_URL,
+              new OfficialFeedParser({
+                parserId: 'official-feed',
+                parserVersion: 'official-feed-cftc-enforcement-1',
+                publisherUrl: 'https://www.cftc.gov/RSS/index.htm',
+                category: 'MARKET_ABUSE',
+                defaultStage: 'REGULATORY_ACTION_FINE',
+              }),
+              3_600,
+              86_400,
+              1,
+              ['application/rss+xml', 'application/xml', 'text/xml'],
+            ),
+          ],
+          [
+            FTC_CONSUMER_SOURCE_ID,
+            indexedSchedule(
+              FTC_CONSUMER_SOURCE_ID,
+              FTC_CONSUMER_RSS_URL,
+              new OfficialFeedParser({
+                parserId: 'official-feed',
+                parserVersion: 'official-feed-ftc-consumer-1',
+                publisherUrl: 'https://www.ftc.gov/stay-connected/rss',
+                category: 'CONSUMER_HARM_MISSELLING',
+                defaultStage: 'REGULATORY_ACTION_FINE',
+              }),
+              3_600,
+              86_400,
+              1,
+              ['application/rss+xml', 'application/xml', 'text/xml'],
+            ),
+          ],
+          [
+            FCA_WARNINGS_SOURCE_ID,
+            indexedSchedule(
+              FCA_WARNINGS_SOURCE_ID,
+              FCA_WARNINGS_RSS_URL,
+              new OfficialFeedParser({
+                parserId: 'official-feed',
+                parserVersion: 'official-feed-fca-warnings-1',
+                publisherUrl:
+                  'https://www.fca.org.uk/consumers/warning-list-unauthorised-firms',
+                category: 'CONSUMER_HARM_MISSELLING',
+                defaultStage: 'ALLEGATION',
+              }),
+              3_600,
+              86_400,
+              1,
+              ['application/rss+xml', 'application/xml', 'text/xml'],
+            ),
+          ],
+          [
+            WORLD_BANK_DEBARRED_SOURCE_ID,
+            indexedSchedule(
+              WORLD_BANK_DEBARRED_SOURCE_ID,
+              WORLD_BANK_DEBARRED_API_URL,
+              new WorldBankDebarmentParser(),
+              10_800,
+              43_200,
+              1_000,
+              ['application/json', 'text/json'],
+            ),
+          ],
+        ]);
+      },
+    },
+    {
+      provide: SCHEDULED_ARTIFACT_TRANSPORT,
+      useFactory: (
+        gate: FetchGateService,
+        adapters: SourceAdapterSet,
+        config: AppConfig,
+      ): ScheduledArtifactTransport => {
+        if (adapters.evidenceFetch === null) {
+          return {
+            fetch: (): Promise<never> =>
+              Promise.reject(
+                new Error('No live evidence-fetch adapter is configured for source refresh.'),
+              ),
+          };
+        }
+        return new ScheduledArtifactTransportAdapter(
+          gate,
+          adapters.evidenceFetch,
+          (): Date => new Date(),
+          (sourceId): Readonly<Record<string, string>> => {
+            if (sourceId !== WORLD_BANK_DEBARRED_SOURCE_ID) {
+              return {};
+            }
+            if (config.sources.worldBankSanctionsApiKey === null) {
+              throw new Error(
+                'WORLD_BANK_SANCTIONS_API_KEY is not configured; publisher contact was not attempted.',
+              );
+            }
+            return { apikey: config.sources.worldBankSanctionsApiKey };
+          },
+        );
+      },
+      inject: [FetchGateService, SOURCE_ADAPTERS, APP_CONFIG],
+    },
+    {
+      provide: IndexedSourceRefreshService,
+      useFactory: (
+        repository: IndexedSourceRepository,
+        versions: SourceVersionService,
+        transport: ScheduledArtifactTransport,
+        schedules: ReadonlyMap<string, IndexedSourceSchedule>,
+      ) => new IndexedSourceRefreshService(repository, versions, transport, schedules),
+      inject: [
+        IndexedSourceRepository,
+        SourceVersionService,
+        SCHEDULED_ARTIFACT_TRANSPORT,
+        INDEXED_SOURCE_SCHEDULES,
+      ],
+    },
+    IndexedSourceScheduler,
+    {
+      provide: IndexedSourceSearchService,
+      useFactory: (
+        repository: IndexedSourceRepository,
+        versions: SourceVersionService,
+        schedules: ReadonlyMap<string, IndexedSourceSchedule>,
+      ) => new IndexedSourceSearchService(repository, versions, [...schedules.keys()]),
+      inject: [IndexedSourceRepository, SourceVersionService, INDEXED_SOURCE_SCHEDULES],
+    },
+    {
       // The FR-06 fetch gate (Phase E step 2): the only issuer of a `FetchAuthorisation`, and
       // the holder of this process's one egress identity. In live mode with no contact URL it
       // has no identity and refuses every fetch, which is the same rule `buildSourceAdapters`
@@ -534,6 +817,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         ladder: LadderBuilder,
         cascade: CascadeService,
         requestLog: DiscoveryRequestLog,
+        indexedSources: IndexedSourceSearchService,
       ) =>
         new SearchPipeline(
           subjects,
@@ -549,6 +833,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
           ladder,
           cascade,
           requestLog,
+          indexedSources,
         ),
       inject: [
         SubjectsService,
@@ -564,6 +849,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         LadderBuilder,
         CascadeService,
         DiscoveryRequestLog,
+        IndexedSourceSearchService,
       ],
     },
     // What the live discovery connectors put on the wire (D-060). A singleton for the same
@@ -793,6 +1079,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         capabilities: CapabilityCoverageService,
         sourceHealth: SourceHealthService,
         domainHealth: DomainHealthService,
+        indexedSources: IndexedSourceRepository,
         config: AppConfig,
       ) =>
         new StartupService(
@@ -817,6 +1104,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
           capabilities,
           sourceHealth,
           domainHealth,
+          indexedSources,
           config,
         ),
       inject: [
@@ -841,6 +1129,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         CapabilityCoverageService,
         SourceHealthService,
         DomainHealthService,
+        IndexedSourceRepository,
         APP_CONFIG,
       ],
     },

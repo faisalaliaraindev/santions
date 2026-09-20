@@ -198,6 +198,30 @@ halts it again if the source's breaker is open. Read
 run `pnpm sec:live-smoke --yes-contact-the-sec` before it — one request, counted, with everything
 about it printed.
 
+Folder **16 — Admin: indexed sources (local snapshots)** covers the **second way a source can be
+read**. Folders 14 and 15 search publishers at query time, one request per planned query. An
+*indexed* source is downloaded whole on a schedule, parsed into a local snapshot and searched in
+our own database, so a search costs it no publisher request at all. Ten are proposed in code —
+OFAC SDN and non-SDN, the UK Sanctions List, the UNSC and EU consolidated lists, the World Bank
+debarred-firms list, and the DOJ, CFTC, FTC and FCA feeds — and **none of them is in the
+registry**: every one ships with no first-contact approval and no established robots position, so
+nothing in the folder can reach a publisher until somebody walks that source through folder 11.
+
+16.1–16.3 are safe to run any time and contact nobody: the state listing, and the two refusals
+(no `X-Allow-Publisher-Contact: true` header → 400; a tenant key without `source:approve` → 403).
+16.4 halts the folder unless `indexedRefreshConfirm` is exactly `yes-contact-the-publisher`,
+because 16.5 downloads a publisher's entire dataset — tens of megabytes for OFAC SDN. Running 16.5
+against a source with no ACTIVE version is still safe: the gate refuses it before a socket opens,
+and that refusal is the assertion.
+
+```bash
+pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json   -e postman/local.ready.postman_environment.json   --folder "16 - Admin: indexed sources (local snapshots)"
+```
+
+Read `snapshotUsable` in 16.1 before anything else. `false` means that source has never produced a
+snapshot, so a search reports it as a **coverage gap**, not as a source that looked and found
+nothing.
+
 ### No single key runs the whole collection, by design
 
 The folders need **different roles**, and that separation is a security property rather than an

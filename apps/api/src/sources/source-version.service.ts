@@ -58,8 +58,12 @@ export interface ActiveSourceVersion {
   readonly versionId: string;
   readonly version: number;
   readonly sourceName: string;
+  /** Optional only for legacy stored/test records; loader always supplies it. */
+  readonly publisher?: string;
   readonly connectorType: string;
   readonly canonicalDomains: readonly string[];
+  /** Optional only for pre-existing stored/test records; absence means NAMED_COUNTRIES. */
+  readonly jurisdictionScope?: 'NAMED_COUNTRIES' | 'GLOBAL';
   readonly countries: readonly string[];
   readonly languages: readonly string[];
   readonly robotsPosition: RegisteredRobotsPosition;
@@ -156,8 +160,10 @@ export class SourceVersionService implements SourceVersionReader {
       versionId: stringOrNull(document['versionId']) ?? `${sourceId}:v${String(version)}`,
       version,
       sourceName: stringOrNull(content['sourceName']) ?? sourceId,
+      publisher: stringOrNull(content['publisher']) ?? sourceId,
       connectorType: stringOrNull(content['connectorType']) ?? 'UNKNOWN',
       canonicalDomains: stringArray(content['canonicalDomains']),
+      jurisdictionScope: content['jurisdictionScope'] === 'GLOBAL' ? 'GLOBAL' : 'NAMED_COUNTRIES',
       countries: stringArray(content['countries']),
       languages: stringArray(content['languages']),
       // An unrecognised or absent value reads as `NOT_ESTABLISHED`, which the gate refuses. A

@@ -27,6 +27,146 @@ Say what you did about it.
 
 ---
 
+## 2026-09-20 (seventeenth) — A source can be read on a schedule into a local snapshot; ten of them exist and none can call anyone
+
+**Context this entry has to give first: the previous session ran out of budget mid-stream and
+wrote no handoff.** Everything described below was found in the working tree, uncommitted, with
+the last file written at 2026-09-18 23:27 and the last commit (`812b0d6`) at 22:04. This session
+verified it, finished it and committed it. If something here reads as under-explained, that is
+why — the intent was reconstructed from the code, the tests and the source contract, not from a
+brief.
+
+**Did.**
+
+1. **A second source shape: the indexed source.** `apps/api/src/sources/indexed/` (13 files).
+   A publisher's dataset is downloaded **whole** on its own reviewed cadence, parsed into
+   `NormalizedSourceRecord`s, stored as a snapshot and searched in our own database. A search
+   costs such a source **no publisher request at all**, so it answers at **cascade rung 0**,
+   ahead of every query-time rung. `IndexedSourceScheduler` (a five-minute due check owning no
+   cadence of its own), `IndexedSourceRefreshService` (the lifecycle, with a ten-minute database
+   lease and an in-process promise map so two callers make one attempt),
+   `ScheduledArtifactTransportAdapter`, `IndexedSourceRepository`, `IndexedSourceSearchService`.
+
+2. **Ten sources proposed, in code, inert.** OFAC SDN and consolidated non-SDN, the UK Sanctions
+   List, the UNSC consolidated list and the EU consolidated financial sanctions list
+   (`INDEXED_BULK_XML`); the World Bank debarred-firms list (`INDEXED_BULK_JSON`); the DOJ, CFTC,
+   FTC and FCA warning feeds (`INDEXED_RSS`). Every one carries `firstContactApproval: null` and
+   `robotsPosition: NOT_ESTABLISHED`, and `indexed-source-config.test.ts` fails if that stops
+   being true. **No bootstrap seeds any of them**, so none appears in `GET /v1/admin/sources`
+   until a person proposes it through folder 11.
+
+3. **Seven parsers**, all producing the one projection: OFAC XML (both lists share a parser
+   version), UK Sanctions List XML, UNSC XML, EU XML, World Bank JSON, and a generic official-feed
+   RSS parser instantiated four times with a per-regulator category and default stage. Every
+   normalised field is nullable **because normalising must never turn an absence into an invented
+   fact**, and the publisher's own fields survive untouched in `rawEvidence`.
+
+4. **A refresh may fail; it may never make things worse (D-063).** Fetch and parse happen
+   entirely before the transaction. Four checks stand between an artifact and `commitSnapshot`:
+   2xx with a body, an accepted content type, a row count at or above the reviewed
+   `minimumExpectedRows`, and present, unique `sourceRecordId`s. Any failure records refresh
+   health and **keeps the last-known-good snapshot answering**, reported as `PARTIAL` with the
+   reason attached. A `304` when we hold no snapshot is an error, not a no-op. An identical
+   artifact hash is treated exactly like a `304`.
+
+5. **A search never mistakes an empty shelf for an empty answer.** `IndexedSourceSearchService`
+   emits a rung-0 outcome per source whether or not the ladder ran: `FAILED` with no usable
+   snapshot, `PARTIAL` when stale or when the last refresh failed, `COMPLETED` otherwise — and
+   the detail line always names the snapshot version and the row count it actually read.
+
+6. **Provenance on the finding.** `sourceRecordId`, `sourceSnapshotVersion`, `parserVersion` and
+   `rawEvidenceHash` are now optional fields on the finding document, present for snapshot
+   records and absent for fetched pages, so a reviewer can name the row of the published list a
+   match came from.
+
+7. **A separate fetch-gate entrance for scheduled artifacts (D-065).** A refresh has no tenant,
+   subject or taxonomy, and inventing them to pass the document gate would put false provenance on
+   every refresh. `authoriseScheduledArtifact` relaxes **nothing** source-level: address policy,
+   ACTIVE version, the exact recorded endpoint URL, unexpired licence terms, a named first-contact
+   approval, an established robots position, an attributable egress identity.
+
+8. **`jurisdictionScope` (D-064).** The gate refused any source whose `countries` did not include
+   the subject's jurisdiction, which no global list can satisfy honestly. Source content now
+   carries `NAMED_COUNTRIES` (the default, and the behaviour that existed) or `GLOBAL`, and the
+   contract makes them mutually exclusive: `NAMED_COUNTRIES` with no countries is rejected, and so
+   is `GLOBAL` that also names some. `jurisdictionScope` and `refreshPolicy` joined
+   `LOAD_BEARING_SOURCE_FIELDS`, so changing either needs a fresh four-eyes approval.
+
+9. **A publisher secret is supplied at fetch time, never stored on the version.**
+   `requestHeaders` rides the first hop only, and `HttpEvidenceFetchAdapter` throws on any
+   caller-supplied header it manages itself (`host`, `user-agent`, `if-none-match`,
+   `if-modified-since`). `WORLD_BANK_SANCTIONS_API_KEY` is the one new environment variable; blank
+   leaves that source configured and mechanically unable to call the API.
+
+10. **Two admin routes.** `GET /v1/admin/indexed-sources` (`platform:read_health`, `admin:read`)
+    reports usability, freshness, row counts and the last failure per source.
+    `POST /v1/admin/indexed-sources/{sourceId}/refresh` (`source:approve`, `admin:write`) runs one
+    refresh now and **additionally requires the header `X-Allow-Publisher-Contact: true`** — not
+    authentication, which the key already carries, but a deliberate act, so a publisher's whole
+    dataset is never downloaded by a request someone sent to see what it returned.
+
+11. **This session's own work, on top of the above:** fixed the 15 lint errors the previous
+    session left (all in the two new test files plus one async factory in `app.module.ts`);
+    **Postman folder 16 — Admin: indexed sources (local snapshots)**, six requests; three new
+    environment variables in all four environment files; and the documentation below.
+
+**Verified.**
+
+- `pnpm typecheck` — clean. `pnpm lint` — **clean** (was 15 errors).
+- `pnpm test:unit` — **1013 passed, 62 files** (was 994/56 at the sixteenth entry).
+- `pnpm test:invariants` — 31 passed. `pnpm test:evaluation` — 12 passed.
+- `pnpm openapi:generate` — regenerates `openapi/openapi.json` byte-identically to what was in the
+  tree, so the committed document matches the contracts.
+- **Postman folder 16 has NOT been run against a live stack by this session.** No stack was
+  started and no publisher was contacted. See below.
+
+**Left half-done.**
+
+- **Folder 16 is unrun.** It needs `pnpm local:up && pnpm dev`, then:
+
+  ```
+  pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json \
+    -e postman/local.ready.postman_environment.json \
+    --folder "16 - Admin: indexed sources (local snapshots)"
+  ```
+
+  Unarmed, 16.4 halts the folder before 16.5, so 16.1–16.4 are the run. Expect 16.1 to list ten
+  sources with `snapshotUsable: false` — no source has ever refreshed. Arming
+  `indexedRefreshConfirm` and running 16.5 against a source with no ACTIVE version is still safe:
+  the gate refuses before a socket opens, and that refusal is the assertion.
+
+- **The live folder-15 run from the sixteenth entry is still owed**, and is unaffected by any of
+  this.
+
+- **No snapshot has ever been built**, so the search path over real records has only been
+  exercised against test doubles (`indexed-source-search.test.ts`). The parsers have been
+  exercised against fixtures, not against a publisher's actual file, and a real OFAC SDN download
+  is the first thing that will tell us whether `minimumExpectedRows` and the accepted content
+  types were set sensibly.
+
+**Found.**
+
+- **The previous session left the work uncommitted and unhandoffed, and the state was recoverable
+  only because the tests it wrote were complete.** `typecheck` and all three pure suites passed on
+  the tree as found; only lint failed. That is the argument for the handoff rule, not against it:
+  the code survived, the *reasoning* did not, and this entry had to be reconstructed.
+- **`edit11.py` is a leftover from the fifteenth/sixteenth session** — a throwaway script that
+  rewrote Postman folder 11 from "SEC go-live" to a generic "Source go-live". Its edit is already
+  in the committed collection. Deleted.
+- **Nothing seeds the ten proposals into the registry.** Whether that stays true is a real
+  decision, not an oversight to be tidied away: a seeded proposal is one approval away from being
+  live, and the current design keeps the code and the decision to call a publisher separate
+  events. If a future session adds seeding, it must not also add an approval.
+
+**Next session should:** start the local stack and run Postman folder 16 unarmed
+(16.1–16.4), and paste 16.1's table into this log — that is the first check that the ten schedules
+register and report state at all. Then pick **one** source for a real first contact, most sensibly
+`ofac-sdn`, and walk it through the go-live runbook.
+
+**Decisions touched:** **D-062**, **D-063**, **D-064** and **D-065** opened and closed.
+
+---
+
 ## 2026-09-18 (sixteenth) — A failed source no longer discards another source's findings; the no-match claim is now checked, not just worded
 
 **Did.**

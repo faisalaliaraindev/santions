@@ -2364,3 +2364,138 @@ but F1 without opening a socket. Those are real answers, so a totally unreachabl
 out `PARTIAL` rather than `FAILED` on a full plan. That is correct — the source did tell the run
 something — and `apps/api/test/partial-results.test.ts` asserts it in its own right rather than
 leaving it as a surprise.
+
+---
+
+## D-062 — A publisher can be read on a schedule into a local snapshot, and that is a source shape, not a cache
+
+**Date:** 2026-09-20 · **Owner:** Faisal Ali · **Status:** closed
+
+Every source this service had until now was read **at query time**: the plan is built, and each
+planned query costs a request at the publisher. That is the only shape that works for a news
+index, and it is the wrong shape for a sanctions list. A designation list is small, complete,
+published as one file, changes a few times a day, and is the same for every tenant. Asking OFAC
+forty-one questions about one subject, once per search, per tenant, is both slower and ruder than
+downloading the list.
+
+An **indexed source** is downloaded whole on its own reviewed cadence, parsed into
+`NormalizedSourceRecord`s, and searched in our own database. A search costs it **no publisher
+request at all**, so it sits at **cascade rung 0**, ahead of every query-time rung.
+
+Ten are proposed in code: OFAC SDN, OFAC consolidated non-SDN, the UK Sanctions List, the UNSC
+consolidated list, the EU consolidated financial sanctions list, the World Bank debarred-firms
+list, and the DOJ, CFTC, FTC and FCA enforcement feeds.
+
+This is **not a cache**, and the difference is load-bearing in three places:
+
+- A cache is transparent; a snapshot is **evidence**. Findings from one carry `sourceRecordId`,
+  `sourceSnapshotVersion`, `parserVersion` and `rawEvidenceHash`, so a reviewer can name the row
+  of the published list a match came from, and the parse that produced it.
+- A cache miss falls through to the origin; a snapshot never does. If there is no usable snapshot,
+  the source is a **coverage gap** (`FAILED` at rung 0), not a source that looked and found
+  nothing. `IndexedSourceSearchService` emits that outcome whether or not the ladder ran.
+- A cache is invalidated by age alone. A snapshot's `freshness` (`CURRENT` / `STALE` /
+  `UNAVAILABLE`) is reported to the caller and turns the outcome `PARTIAL`, which `aggregateRun`
+  counts under D-061 both as a source that answered and as a gap.
+
+**What it costs.** A second ingestion path to operate, with its own failure modes, its own
+storage, and its own way of being silently wrong: a snapshot that stopped updating still answers
+confidently. That is why freshness rides on every outcome rather than living in a dashboard, and
+why `GET /v1/admin/indexed-sources` exists.
+
+---
+
+## D-063 — A refresh may fail; it may never replace a usable snapshot with a worse one
+
+**Date:** 2026-09-20 · **Owner:** Faisal Ali · **Status:** closed
+
+The failure that matters here is not the download failing. It is the download **succeeding** and
+the result being wrong — a publisher serving an error page with a 200, a truncated file, a schema
+change the parser silently reads as empty. A screening service that replaces 12,000 designations
+with the nine records it could parse out of an error page reports "no matches" for everybody, with
+complete confidence, and nothing in the response says anything is wrong.
+
+So fetching and parsing happen **entirely before the transaction**, and only a validated artifact
+reaches `commitSnapshot`. Four checks, each of which fails the refresh and keeps the previous
+snapshot:
+
+| Check                                          | What it catches                              |
+| :--------------------------------------------- | :------------------------------------------- |
+| HTTP status is 2xx with a body                  | error pages, empty responses                 |
+| content type is one the reviewed schedule lists | an HTML error page served for an XML feed    |
+| row count ≥ the reviewed `minimumExpectedRows`  | truncation, a schema change parsing to empty |
+| every `sourceRecordId` is present and unique    | a parser collapsing distinct designations    |
+
+A failure is recorded as refresh health — `refreshStatus`, `httpStatus`, `failureReason`, and a
+retry 15 minutes out — and the last-known-good snapshot keeps answering searches, now reported as
+`PARTIAL` with the reason attached. **Being visibly stale beats being invisibly empty.**
+
+Two smaller rules come from the same principle. A `304` when we hold **no** snapshot is an error,
+not a no-op: the publisher is answering about a version we do not have. And an identical artifact
+hash is treated exactly like a `304`, so a publisher that ignores conditional requests costs one
+download and no snapshot churn.
+
+**What it costs.** `minimumExpectedRows` is a reviewed number that a publisher can legitimately
+fall below — a list genuinely shrinking below its floor needs a human to change the number. That
+is the intended direction of the error.
+
+---
+
+## D-064 — A globally-scoped source is scoped, not exempt
+
+**Date:** 2026-09-20 · **Owner:** Faisal Ali · **Status:** closed
+
+`FetchGateService` refused any source whose `countries` did not include the subject's
+jurisdiction. Every source until now was a national publisher, so that read as "is this publisher
+relevant here?". The UNSC consolidated list has no country: it applies everywhere. Listing all of
+them would have been a lie that happened to pass.
+
+Source content now carries `jurisdictionScope`: `NAMED_COUNTRIES` (the existing behaviour, and the
+default when the field is absent on a stored record) or `GLOBAL`, which passes the jurisdiction
+check for any subject. `jurisdictionScope` and `refreshPolicy` are both **load-bearing fields**,
+so changing either requires a fresh four-eyes approval rather than an edit.
+
+The distinction is deliberately not "skip the check". A `GLOBAL` source is one whose publisher's
+remit is global, recorded as an approved claim on a reviewed version — not a source with no
+jurisdiction recorded, which is still refused. The source contract makes the two mutually
+exclusive: `NAMED_COUNTRIES` with an empty `countries` list is rejected, and so is `GLOBAL` that
+also carries one. A half-filled country list can no longer masquerade as either.
+
+The same `superRefine` requires `refreshPolicy` on every `INDEXED_*` connector, so an indexed
+source cannot reach the registry without a reviewed cadence and staleness threshold.
+
+**What it costs.** A `GLOBAL` value set carelessly turns off a real control for that source. It is
+mitigated only by review, which is why it is load-bearing.
+
+---
+
+## D-065 — Publisher contact by a scheduler needs its own gate and its own deliberate act
+
+**Date:** 2026-09-20 · **Owner:** Faisal Ali · **Status:** closed
+
+A scheduled refresh has no tenant, no subject and no taxonomy, and the document fetch gate wants
+all three. Inventing them to get through would have put false provenance on every refresh, so
+`authoriseScheduledArtifact` is a separate entrance with the **same source-level controls**: the
+SEC-02 address policy, an ACTIVE approved version, the exact endpoint URL recorded on that
+version, recorded licence terms that have not expired, a named first-contact approval, an
+established robots position, and an attributable egress identity. It relaxes nothing; it declines
+to fabricate what does not apply.
+
+Three consequences:
+
+- **Every one of the ten sources ships inert.** `firstContactApproval` is `null` and
+  `robotsPosition` is `NOT_ESTABLISHED` on every proposal, and `indexed-source-config.test.ts`
+  fails if that stops being true. Writing a connector is not the same event as deciding to call
+  someone. `docs/sources/mixed-live-go-live.md` is the runbook for the decision.
+- **A manual refresh needs `X-Allow-Publisher-Contact: true`** on top of `source:approve` and
+  `admin:write`. The header is not authentication — the credential already carries the
+  permission. It exists so a publisher's whole dataset is never downloaded by a request someone
+  sent to see what it returned.
+- **A publisher secret is supplied at fetch time by the process, never stored on the version.**
+  The World Bank gateway key arrives as a `requestHeaders` entry on the first hop only; the
+  registry version records a reference. `HttpEvidenceFetchAdapter` refuses any caller-supplied
+  header it manages itself (`host`, `user-agent`, `if-none-match`, `if-modified-since`) rather
+  than letting a secret provider quietly break conditional requests or our egress identity.
+
+**What it costs.** Ten working connectors that cannot fetch anything until people do governance
+work. That is the cost being bought, not one being paid by accident.

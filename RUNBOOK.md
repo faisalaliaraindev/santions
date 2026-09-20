@@ -261,6 +261,68 @@ _why_ the publisher refused; the domain cooldown is separate and is waited out, 
 
 ---
 
+## Indexed sources — the ones read on a schedule, not per search
+
+Ten sources are read the other way round: downloaded whole on their own cadence into a local
+snapshot, then searched in our own database. A search costs them **no publisher request**. They
+are OFAC SDN and consolidated non-SDN, the UK Sanctions List, the UNSC and EU consolidated lists,
+the World Bank debarred-firms list, and the DOJ, CFTC, FTC and FCA feeds.
+
+**None of them is in the registry, and none has contacted anybody.** Each ships with no
+first-contact approval and no established robots position, so the fetch gate refuses a refresh
+before a socket is opened. Taking one live is the same lifecycle as any other source — evidence,
+a named approval, then propose → approve → activate through Postman folder 11.
+
+### What an operator looks at
+
+```bash
+# usable? fresh? how many rows? what failed last time?
+curl -s -H "Authorization: ApiKey $OPERATOR_KEY" \
+  http://127.0.0.1:3000/v1/admin/indexed-sources | jq '.sources[] |
+  {sourceId, snapshotUsable, freshness, refreshStatus, rowCount, failureReason}'
+```
+
+Read `snapshotUsable` first. `false` means that source has never produced a snapshot, so a search
+reports it as a **coverage gap** — never as a source that looked and found nothing. `freshness` is
+about the snapshot's age against its reviewed staleness threshold and is independent of whether
+the last refresh attempt succeeded; either being bad turns the source's search outcome `PARTIAL`
+rather than hiding it.
+
+### Forcing one refresh
+
+```bash
+curl -s -X POST \
+  -H "Authorization: ApiKey $APPROVER_KEY" \
+  -H "X-Allow-Publisher-Contact: true" \
+  -H "Content-Type: application/json" \
+  -d '{"force": true}' \
+  http://127.0.0.1:3000/v1/admin/indexed-sources/ofac-sdn/refresh
+```
+
+The header is **not** authentication — the key already carries `source:approve`. It is there so a
+publisher's whole dataset is never downloaded by a request somebody sent to see what it returned.
+Without it: `400 VALIDATION_FAILED`.
+
+Five answers, all honest: `SUCCEEDED`, `NOT_MODIFIED` (a 304, or identical bytes),
+`SKIPPED_NOT_DUE`, `SKIPPED_IN_FLIGHT`, `FAILED`. **`FAILED` is the expected answer today**, with
+a reason naming the control that refused.
+
+A failed refresh **never** empties or replaces a usable snapshot. A bad content type, a row count
+below the reviewed minimum, or duplicate record ids all fail the refresh and leave the
+last-known-good snapshot answering searches. Being visibly stale beats being invisibly empty.
+
+The scheduler checks what is due every five minutes and refreshes sources **sequentially**, so a
+tick cannot become a burst at a publisher hosting several of our sources. The cadence itself is
+approved registry data, not a constant in the scheduler.
+
+`WORLD_BANK_SANCTIONS_API_KEY` in `.env` is needed only by `world-bank-debarred`. Blank leaves
+that source configured and mechanically unable to call the API — a safe state, and the refresh
+says so rather than failing obscurely.
+
+Postman folder **16** does all of the above with assertions attached.
+
+---
+
 ## Stopping
 
 ```bash

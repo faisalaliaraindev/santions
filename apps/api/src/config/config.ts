@@ -148,6 +148,9 @@ const rawSchema = z.object({
    */
   COMPANIES_HOUSE_API_KEY: optional(z.string().min(1)),
 
+  /** World Bank sanctioned-firm gateway key. Registry versions store only this secret's ref. */
+  WORLD_BANK_SANCTIONS_API_KEY: optional(z.string().min(1)),
+
   /**
    * The contact URL the outbound user agent carries (FR-06).
    *
@@ -219,6 +222,8 @@ export type AppConfig = Readonly<{
   sources: {
     /** Null when no key is configured. See `COMPANIES_HOUSE_API_KEY` for why that is fine. */
     companiesHouseApiKey: string | null;
+    /** Null keeps the World Bank source configured but mechanically unable to contact its API. */
+    worldBankSanctionsApiKey: string | null;
     /** Null when unset, which leaves the live fetch adapter unconstructed. See FR-06. */
     fetchContactUrl: string | null;
   };
@@ -474,6 +479,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     },
     sources: {
       companiesHouseApiKey: raw.COMPANIES_HOUSE_API_KEY ?? null,
+      worldBankSanctionsApiKey: raw.WORLD_BANK_SANCTIONS_API_KEY ?? null,
       fetchContactUrl: raw.FETCH_CONTACT_URL ?? null,
     },
   };

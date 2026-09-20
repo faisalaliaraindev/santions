@@ -949,6 +949,127 @@ function buildPaths(): Record<string, SchemaObject> {
       },
     },
 
+    '/v1/admin/indexed-sources': {
+      get: {
+        operationId: 'getIndexedSourceStates',
+        tags: ['admin'],
+        summary: 'Local snapshot and refresh state for every scheduled indexed source',
+        description:
+          'Includes configured sources that have never refreshed. `snapshotUsable` is explicit, ' +
+          'and a failed latest refresh does not make a retained last-known-good snapshot disappear.',
+        responses: {
+          '200': {
+            description: 'Registry, schedule, freshness and snapshot state for every indexed source.',
+            content: json({
+              type: 'object',
+              required: ['sources'],
+              properties: {
+                sources: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: [
+                      'sourceId',
+                      'sourceName',
+                      'sourceActive',
+                      'registryActiveSourceVersion',
+                      'refreshStatus',
+                      'freshness',
+                      'snapshotUsable',
+                      'rowCount',
+                      'expectedParserVersion',
+                      'endpointUrl',
+                    ],
+                    properties: {
+                      sourceId: { type: 'string' },
+                      sourceName: { type: 'string' },
+                      publisher: { type: 'string', nullable: true },
+                      sourceActive: { type: 'boolean' },
+                      registryActiveSourceVersion: { type: 'integer', nullable: true },
+                      snapshotSourceVersion: { type: 'integer', nullable: true },
+                      refreshStatus: {
+                        type: 'string',
+                        enum: ['NEVER_REFRESHED', 'REFRESHING', 'SUCCEEDED', 'NOT_MODIFIED', 'FAILED'],
+                      },
+                      freshness: { type: 'string', enum: ['CURRENT', 'STALE', 'UNAVAILABLE'] },
+                      snapshotUsable: { type: 'boolean' },
+                      rowCount: { type: 'integer', minimum: 0 },
+                      insertedCount: { type: 'integer', minimum: 0 },
+                      updatedCount: { type: 'integer', minimum: 0 },
+                      removedCount: { type: 'integer', minimum: 0 },
+                      lastAttemptAt: { type: 'string', format: 'date-time', nullable: true },
+                      lastSuccessfulRefreshAt: {
+                        type: 'string',
+                        format: 'date-time',
+                        nullable: true,
+                      },
+                      nextRefreshDueAt: { type: 'string', format: 'date-time', nullable: true },
+                      activeSnapshotVersion: { type: 'string', nullable: true },
+                      expectedParserVersion: { type: 'string' },
+                      parserVersion: { type: 'string', nullable: true },
+                      endpointUrl: { type: 'string', format: 'uri' },
+                      failureReason: { type: 'string', nullable: true },
+                      httpStatus: { type: 'integer', nullable: true },
+                    },
+                  },
+                },
+              },
+            }),
+          },
+          '401': errorRef(401),
+          '403': errorRef(403),
+        },
+      },
+    },
+
+    '/v1/admin/indexed-sources/{sourceId}/refresh': {
+      post: {
+        operationId: 'refreshIndexedSource',
+        tags: ['admin'],
+        summary: 'Run one controlled indexed-source refresh',
+        description:
+          'Contacts the publisher only after the source is ACTIVE and all fetch gates pass. ' +
+          'The explicit safety header is mandatory; a failed refresh preserves the last-known-good snapshot.',
+        parameters: [
+          { name: 'sourceId', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'X-Allow-Publisher-Contact',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', enum: ['true'] },
+          },
+          { $ref: '#/components/parameters/CsrfToken' },
+        ],
+        requestBody: {
+          required: false,
+          content: json({
+            type: 'object',
+            additionalProperties: false,
+            properties: { force: { type: 'boolean', default: false } },
+          }),
+        },
+        responses: {
+          '200': {
+            description: 'Refresh outcome and resulting source state.',
+            content: json({
+              type: 'object',
+              required: ['kind', 'state'],
+              properties: {
+                kind: {
+                  type: 'string',
+                  enum: ['SUCCEEDED', 'NOT_MODIFIED', 'SKIPPED_NOT_DUE', 'SKIPPED_IN_FLIGHT', 'FAILED'],
+                },
+                state: { type: 'object' },
+              },
+            }),
+          },
+          '400': errorRef(400),
+          '401': errorRef(401),
+          '403': errorRef(403),
+        },
+      },
+    },
+
     '/v1/admin/sources/{sourceId}/kill-switch': {
       post: {
         operationId: 'engageSourceKillSwitch',

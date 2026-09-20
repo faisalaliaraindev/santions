@@ -503,6 +503,7 @@ look" must never render as "there is nothing there".
 | `FETCH_CONTACT_URL`       | **Any live fetching**           | A URL on your domain describing the bot            |
 | `COMPANIES_HOUSE_API_KEY` | UK company/officer associations | Free: developer.company-information.service.gov.uk |
 | `COURTLISTENER_API_TOKEN` | US court records                | Free: courtlistener.com                            |
+| `WORLD_BANK_SANCTIONS_API_KEY` | The `world-bank-debarred` indexed source | Free: the World Bank sanctioned-firms API gateway |
 | `SEC_EDGAR_USER_AGENT`    | SEC EDGAR bulk endpoints        | Just a contact string they require                 |
 | `MEILI_MASTER_KEY`        | Search index                    | Local default is fine                              |
 | `OIDC_CLIENT_SECRET`      | Panel login                     | Local default is fine                              |

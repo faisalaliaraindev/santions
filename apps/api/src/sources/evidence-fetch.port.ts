@@ -159,6 +159,8 @@ export interface FetchRequest {
   readonly budget: FetchBudget;
   /** Stored ETag / Last-Modified for a conditional GET. Null on first sight of the URL. */
   readonly conditional: { readonly etag: string | null; readonly lastModified: string | null };
+  /** Secret-provider headers, sent on the first hop only and never persisted by the fetcher. */
+  readonly requestHeaders?: Readonly<Record<string, string>>;
   /**
    * Idempotent fetch key (FR-06). A redelivered queue message re-uses the stored response
    * instead of hitting the source again — which is both politeness and correctness, since two

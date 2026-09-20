@@ -99,6 +99,53 @@ Run the mixed live test with Postman folder **15 — Mixed Live E2E: SEC + GDELT
 `mixedLiveConfirm = yes-contact-sec-and-gdelt`. The runbook is
 [`../sources/mixed-live-go-live.md`](../sources/mixed-live-go-live.md).
 
+### TEN INDEXED SOURCES EXIST IN CODE, NONE IS IN THE REGISTRY — added 2026-09-20
+
+A source can now be read in a **second** shape. The three live sources above are read at query
+time. An **indexed** source is downloaded whole on a schedule, parsed into a local snapshot, and
+searched in our own database — so it costs **no publisher request per search** and keeps
+answering while the publisher is down. Decisions **D-062** to **D-065**; the mechanism is in
+[`../architecture.md`](../architecture.md) under "Indexed sources".
+
+| Source id                              | Connector           | Publisher                       |
+| :------------------------------------- | :------------------ | :------------------------------ |
+| `ofac-sdn`                              | `INDEXED_BULK_XML`  | US Treasury OFAC                |
+| `ofac-consolidated-non-sdn`             | `INDEXED_BULK_XML`  | US Treasury OFAC                |
+| `uk-sanctions-list`                     | `INDEXED_BULK_XML`  | FCDO                            |
+| `unsc-consolidated`                     | `INDEXED_BULK_XML`  | UN Security Council             |
+| `eu-consolidated-financial-sanctions`   | `INDEXED_BULK_XML`  | European Commission             |
+| `world-bank-debarred`                   | `INDEXED_BULK_JSON` | World Bank                      |
+| `doj-fraud-enforcement`                 | `INDEXED_RSS`       | US DOJ                          |
+| `cftc-enforcement-press-releases`       | `INDEXED_RSS`       | CFTC                            |
+| `ftc-consumer-protection-press-releases`| `INDEXED_RSS`       | FTC                             |
+| `fca-warnings`                          | `INDEXED_RSS`       | FCA                             |
+
+**NOTHING HAS CONTACTED ANY OF THESE PUBLISHERS.** Every proposal ships with
+`firstContactApproval: null` and `robotsPosition: NOT_ESTABLISHED`, and
+`apps/api/test/indexed-source-config.test.ts` fails if that stops being true. They are **content
+builders in code only** — no bootstrap seeds them, so `GET /v1/admin/sources` will not list one
+until a person proposes it. Taking one live is the same lifecycle as any other source: robots and
+terms evidence, a named first-contact approval, then propose → approve → activate through Postman
+folder 11. [`../sources/mixed-live-go-live.md`](../sources/mixed-live-go-live.md) is the runbook.
+
+Until then a forced refresh answers **`FAILED` with the gate's reason, before any socket opens**.
+That is the expected answer, not a broken build.
+
+Two things an operator uses:
+
+- `GET /v1/admin/indexed-sources` — usability, freshness, row count and last failure per source.
+  Needs `platform:read_health`, the same credential folder 8 uses.
+- `POST /v1/admin/indexed-sources/{sourceId}/refresh` — one refresh now. Needs `source:approve`
+  **and** the header `X-Allow-Publisher-Contact: true`. Postman folder **16** covers both, and
+  16.4 halts unless `indexedRefreshConfirm` is `yes-contact-the-publisher`.
+
+`WORLD_BANK_SANCTIONS_API_KEY` is the one new environment variable. Blank leaves that source
+configured and mechanically unable to call the API, which is a safe state, not a broken one.
+
+A refresh **never** replaces a usable snapshot with a worse one (D-063), and a source with no
+snapshot is reported as a **coverage gap** at cascade rung 0 — never as a source that looked and
+found nothing.
+
 ### A recorded ceiling is now enforced — 2026-09-18
 
 `accessPolicy.requestCeilingPerSecond` had been recorded on every source version since FR-05 and

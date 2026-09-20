@@ -4900,6 +4900,461 @@
           ]
         }
       ]
+    },
+    {
+      "name": "16 - Admin: indexed sources (local snapshots)",
+      "description": "THE SECOND WAY A SOURCE CAN BE READ. Folders 14 and 15 search publishers AT QUERY TIME, one request per plan. An INDEXED source is downloaded WHOLE on a schedule, parsed into a local snapshot, and searched in our own database — so a search costs no publisher request at all, and the ten sanctions and regulator datasets stay answerable when the publisher is down.\n\nTEN SOURCES EXIST IN CODE AND NONE IS IN THE REGISTRY. OFAC SDN, OFAC consolidated non-SDN, the UK Sanctions List, the UNSC consolidated list, the EU consolidated financial sanctions list, the World Bank debarred-firms list, and the DOJ / CFTC / FTC / FCA enforcement feeds. Every one is proposed with firstContactApproval null and robotsPosition NOT_ESTABLISHED, so nothing in this folder can reach a publisher until a person walks that source through folder 11. That is the point: writing a connector is not the same event as deciding to call someone.\n\nWHAT A REFRESH CANNOT DO. It never replaces a usable snapshot with a bad one. A non-2xx, an unexpected content type, a parse below the reviewed minimum row count, or a duplicate record id all record refresh health and LEAVE THE LAST-KNOWN-GOOD SNAPSHOT IN PLACE. A search over a stale snapshot reports PARTIAL and names the snapshot it read — it does not quietly answer 'no matches' from nothing.\n\nSAFETY. Every refresh here needs BOTH the header X-Allow-Publisher-Contact: true AND a credential holding source:approve. 16.4 additionally halts unless indexedRefreshConfirm is exactly: yes-contact-the-publisher",
+      "item": [
+        {
+          "name": "16.1 Indexed source states - what a local snapshot can answer",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources"
+              ]
+            },
+            "description": "Operator view of every scheduled source: refresh status, freshness, row count and whether a usable snapshot exists at all.\n\nNeeds platform:read_health and scope admin:read — the same credential folder 8 uses. An analyst key is authenticated and not permitted, and answers 403.\n\nREAD snapshotUsable FIRST. False means this source has never produced a snapshot, so a search reports it as a COVERAGE GAP (FAILED) rather than as a source that looked and found nothing. freshness CURRENT / STALE / UNAVAILABLE is about the snapshot's age against the reviewed staleAfterSeconds, and is independent of whether the LAST refresh attempt succeeded."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('readable with platform:read_health', function () {",
+                  "  pm.expect(pm.response.code,",
+                  "    '403 means this key lacks platform:read_health - pnpm key:issue --role platform_operator'",
+                  "  ).to.eql(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const rows = pm.response.json().sources || [];",
+                  "  pm.test('every scheduled source reports a state row', () => pm.expect(rows.length).to.be.above(0));",
+                  "  console.log('sourceId                              usable  freshness    status       rows');",
+                  "  rows.forEach(function (s) {",
+                  "    console.log('  ' + String(s.sourceId).padEnd(36) + ' ' +",
+                  "      String(s.snapshotUsable).padEnd(7) + ' ' +",
+                  "      String(s.freshness).padEnd(12) + ' ' +",
+                  "      String(s.refreshStatus).padEnd(12) + ' ' + String(s.rowCount));",
+                  "    if (s.failureReason) { console.log('      last failure: ' + s.failureReason); }",
+                  "  });",
+                  "  rows.forEach(function (s) {",
+                  "    pm.test(s.sourceId + ': freshness is a state this system has', () =>",
+                  "      pm.expect(['CURRENT', 'STALE', 'UNAVAILABLE']).to.include(s.freshness));",
+                  "    pm.test(s.sourceId + ': a usable snapshot names the version it would search', function () {",
+                  "      if (s.snapshotUsable) { pm.expect(s.activeSnapshotVersion).to.be.a('string'); }",
+                  "      else { pm.expect(s.activeSnapshotVersion).to.eql(null); }",
+                  "    });",
+                  "  });",
+                  "  const wanted = pm.environment.get('indexedSourceId');",
+                  "  const chosen = rows.filter(function (s) { return s.sourceId === wanted; })[0] || rows[0];",
+                  "  if (chosen) {",
+                  "    pm.environment.set('indexedSourceId', chosen.sourceId);",
+                  "    pm.environment.set('indexedSnapshotBefore',",
+                  "      chosen.activeSnapshotVersion === null ? 'null' : chosen.activeSnapshotVersion);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.2 A refresh without the safety header is refused",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{approverKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources",
+                "{{indexedSourceId}}",
+                "refresh"
+              ]
+            },
+            "description": "The same request 16.5 makes, minus X-Allow-Publisher-Contact: true.\n\nThe header is not authentication — the key already carries source:approve. It exists so that a publisher is never contacted by a request somebody sent to see what it returns. Contacting a publisher is deliberate or it does not happen.\n\nExpect 400 VALIDATION_FAILED, and no request to the publisher.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400, not a refresh', () => pm.expect(pm.response.code).to.eql(400));",
+                  "pm.test('the refusal names the missing header', function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code || (b.error && b.error.code)).to.eql('VALIDATION_FAILED');",
+                  "  pm.expect(JSON.stringify(b)).to.include('X-Allow-Publisher-Contact');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.3 A refresh from a key without source:approve is refused",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Allow-Publisher-Contact",
+                "value": "true",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources",
+                "{{indexedSourceId}}",
+                "refresh"
+              ]
+            },
+            "description": "The header is present and correct; the credential is a tenant's own analyst key.\n\nDownloading a publisher's whole dataset is a platform act, not a tenant one. It needs source:approve and scope admin:write — the same permission that takes a source version live. Expect 403, and the header changes nothing.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('authenticated is not permitted', () => pm.expect([401, 403]).to.include(pm.response.code));",
+                  "pm.test('the body does not leak a refresh result', () =>",
+                  "  pm.expect(pm.response.text()).to.not.include('activeSnapshotVersion'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.4 STOP - confirm you mean to contact this publisher",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": "A harmless readiness check whose only job is to halt the folder before 16.5 runs.\n\n16.5 DOWNLOADS A PUBLISHER'S ENTIRE DATASET — tens of megabytes for OFAC SDN. It will not run unless indexedRefreshConfirm is exactly: yes-contact-the-publisher\n\nA separate variable from liveConfirm and mixedLiveConfirm on purpose. Arming a query-time search of the SEC must not arm a bulk download of a list nobody here has cleared.\n\nIf the source has no ACTIVE version, 16.5 is still safe to send: it is refused by the fetch gate BEFORE any socket is opened, and that refusal is the assertion."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const confirmed = pm.environment.get('indexedRefreshConfirm') === 'yes-contact-the-publisher';",
+                  "pm.test('indexedRefreshConfirm is set to yes-contact-the-publisher', () => pm.expect(confirmed).to.eql(true));",
+                  "",
+                  "const required = ['baseUrl', 'approverKey', 'indexedSourceId'];",
+                  "const missing = required.filter(function (name) {",
+                  "  const value = pm.environment.get(name);",
+                  "  return value === undefined || value === null || String(value).trim() === '';",
+                  "});",
+                  "pm.test('every environment variable this folder needs is set', () => pm.expect(missing, 'missing: ' + missing.join(', ')).to.eql([]));",
+                  "pm.test('the service is ready', () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "if (!confirmed || missing.length > 0 || pm.response.code !== 200) {",
+                  "  console.error('16.5 downloads a publisher dataset in full, and is not armed.');",
+                  "  console.error('Set indexedRefreshConfirm to: yes-contact-the-publisher');",
+                  "  if (missing.length > 0) { console.error('Also set: ' + missing.join(', ')); }",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.5 Refresh one indexed source",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{approverKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Allow-Publisher-Contact",
+                "value": "true",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources",
+                "{{indexedSourceId}}",
+                "refresh"
+              ]
+            },
+            "description": "Runs the refresh lifecycle for {{indexedSourceId}} now, ignoring the schedule (force: true). It answers one of five kinds, and all five are honest answers:\n\n  SUCCEEDED         a new snapshot was parsed, validated and committed\n  NOT_MODIFIED      the publisher answered 304, or the bytes hashed identically\n  SKIPPED_NOT_DUE   the reviewed interval has not elapsed (only without force)\n  SKIPPED_IN_FLIGHT another refresh of this source holds the lease\n  FAILED            the attempt failed AND the previous snapshot was kept\n\nFAILED IS THE EXPECTED ANSWER UNTIL GOVERNANCE ACTS. Every indexed source ships with no ACTIVE version and no first-contact approval, so the gate refuses before a socket is opened and the reason names the control that refused. That is not a broken test — it is the separation between writing a connector and deciding to call someone.\n\nThe World Bank source additionally needs WORLD_BANK_SANCTIONS_API_KEY in the API process's environment. Without it the refresh fails saying contact was not attempted; the key is never stored on the registry version, only referenced.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - the refresh lifecycle answered', () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  const KINDS = ['SUCCEEDED', 'NOT_MODIFIED', 'SKIPPED_NOT_DUE', 'SKIPPED_IN_FLIGHT', 'FAILED'];",
+                  "  pm.test('the outcome is one this system has', () => pm.expect(KINDS).to.include(b.kind));",
+                  "  const s = b.state || {};",
+                  "  console.log('REFRESH  ' + pm.environment.get('indexedSourceId') + '  ->  ' + b.kind);",
+                  "  console.log('  snapshot  ' + s.activeSnapshotVersion + '   rows ' + s.rowCount +",
+                  "    '   freshness ' + s.freshness);",
+                  "  if (s.failureReason) { console.log('  reason    ' + s.failureReason); }",
+                  "",
+                  "  pm.test('a failure explains itself', function () {",
+                  "    if (b.kind === 'FAILED') { pm.expect(s.failureReason).to.be.a('string').and.not.empty; }",
+                  "  });",
+                  "  pm.test('a failed refresh did not discard the last-known-good snapshot', function () {",
+                  "    if (b.kind !== 'FAILED') { return; }",
+                  "    const before = pm.environment.get('indexedSnapshotBefore');",
+                  "    if (before === undefined || before === null || String(before) === '') { return; }",
+                  "    const after = s.activeSnapshotVersion === null ? 'null' : s.activeSnapshotVersion;",
+                  "    pm.expect(after, 'a failure must never empty the snapshot').to.eql(String(before));",
+                  "  });",
+                  "  pm.test('a committed snapshot names its parser', function () {",
+                  "    if (b.kind === 'SUCCEEDED') {",
+                  "      pm.expect(s.parserVersion).to.be.a('string');",
+                  "      pm.expect(s.rowCount).to.be.above(0);",
+                  "    }",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.6 The snapshot is visible to a search, or it is a coverage gap",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources"
+              ]
+            },
+            "description": "The same route as 16.1, re-read after the refresh, asserting the one thing a search depends on: a source with no usable snapshot must be reported as a GAP, never as a source that looked and found nothing.\n\nIn a search that shows up in sourceOutcomes at cascade rung 0 — FAILED when there is no snapshot, PARTIAL when the snapshot is stale or the last refresh failed, COMPLETED otherwise — and the detail line always names the snapshot version and row count it actually read. Findings from a snapshot carry sourceRecordId, sourceSnapshotVersion, parserVersion and rawEvidenceHash on the finding document, so a reviewer can say which row of which published list a match came from."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const rows = pm.response.json().sources || [];",
+                  "  const id = pm.environment.get('indexedSourceId');",
+                  "  const row = rows.filter(function (s) { return s.sourceId === id; })[0];",
+                  "  pm.test('the refreshed source still reports a state', () => pm.expect(row).to.not.eql(undefined));",
+                  "  if (row) {",
+                  "    pm.test('an unusable snapshot is a gap, not a silent no-match', function () {",
+                  "      if (!row.snapshotUsable) {",
+                  "        console.log(id + ' has no usable snapshot: a search reports it as a COVERAGE GAP.');",
+                  "        pm.expect(row.rowCount).to.eql(0);",
+                  "      } else {",
+                  "        console.log(id + ' would search snapshot ' + row.activeSnapshotVersion +",
+                  "          ' (' + row.rowCount + ' records, ' + row.freshness + ').');",
+                  "        pm.expect(row.rowCount).to.be.above(0);",
+                  "      }",
+                  "    });",
+                  "    pm.test('the registry version and the snapshot version are both reported', function () {",
+                  "      pm.expect(row).to.have.property('registryActiveSourceVersion');",
+                  "      pm.expect(row).to.have.property('snapshotSourceVersion');",
+                  "    });",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

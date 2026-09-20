@@ -560,6 +560,75 @@ stamped on the envelope from the running configuration, and content that declare
 
 ---
 
+## Indexed sources: a publisher read on a schedule, not per query
+
+`apps/api/src/sources/indexed/` holds the second way this service can read a publisher. A
+query-time source answers one planned query per request; an **indexed** source is downloaded
+whole on its own cadence, parsed into a local snapshot, and searched in our own database. See
+decision **D-062** for why that is a source shape rather than a cache.
+
+It is one lifecycle over two artifact shapes:
+
+| Connector          | Artifact                   | Sources                                              |
+| :----------------- | :------------------------- | :--------------------------------------------------- |
+| `INDEXED_BULK_XML` | one complete list document | OFAC SDN, OFAC non-SDN, UK Sanctions List, UNSC, EU   |
+| `INDEXED_BULK_JSON`| one complete list document | World Bank debarred firms                             |
+| `INDEXED_RSS`      | a rolling publication feed | DOJ, CFTC, FTC, FCA warnings                          |
+
+**The pieces, and what each one is not allowed to do.**
+
+- `IndexedSourceScheduler` — a due check every five minutes. It owns **no** cadence of its own;
+  `refreshIntervalMs` and `staleAfterMs` come from the approved registry version. `refreshDue`
+  walks sources **sequentially** on purpose: one tick must not become a burst at a publisher that
+  hosts several of our sources.
+- `IndexedSourceRefreshService` — the lifecycle. Fetch and parse happen entirely before the
+  transaction, and only a validated artifact reaches `commitSnapshot` (D-063). A refresh is
+  claimed with a ten-minute database lease, so two processes cannot refresh one source at once,
+  and an in-process promise map collapses concurrent callers onto one attempt.
+- `ScheduledArtifactTransportAdapter` — the only path to the network, through
+  `FetchGateService.authoriseScheduledArtifact` and then the same `EvidenceFetchPort` a document
+  fetch uses. It therefore inherits the SEC-02 address policy, the recorded request ceiling, the
+  breaker and the budget without a second implementation of any of them (D-065).
+- `IndexedSourceRepository` — snapshot storage and candidate retrieval. A snapshot version is
+  derived from the artifact hash, so the same bytes can never produce two snapshot identities.
+- `IndexedSourceSearchService` — retrieval and banding. It runs **once per subject**, not once per
+  planned query, and it runs whether or not the ladder ran.
+
+**The projection.** Every parser produces `NormalizedSourceRecord`: names, aliases,
+original-script names, dates with an explicit precision, places, nationalities, identifiers,
+programmes, listing dates, and `rawEvidence` carrying the publisher's own fields untouched. Every
+normalised field is nullable **because normalising a dataset must never turn an absence into an
+invented fact** — a designation with no recorded date of birth must come out with no date of
+birth, not with a plausible one.
+
+**Where it sits in the pipeline.** `SearchPipeline.execute` calls the search service before the
+ladder is built and prepends its findings and source outcomes to the run's. The outcomes are
+reported at **cascade rung 0**, and they say which snapshot was read and how many records were in
+it:
+
+| Snapshot state                             | Outcome     |
+| :----------------------------------------- | :---------- |
+| none usable                                 | `FAILED`    |
+| usable, but stale or last refresh failed    | `PARTIAL`   |
+| usable and current                          | `COMPLETED` |
+
+The `FAILED` row is the important one. A source with no snapshot is a **coverage gap**, never a
+source that looked and found nothing — which is the same rule D-061 states for query-time
+sources, applied to a shape that could otherwise fail silently.
+
+**Provenance.** A finding from a snapshot carries `sourceRecordId`, `sourceSnapshotVersion`,
+`parserVersion` and `rawEvidenceHash` on its document, so a reviewer can name the row of the
+published list it came from and the parse that produced it. Those four fields are optional on the
+finding contract and absent for fetched documents — they describe how this evidence exists, and a
+fetched HTML page has no row id.
+
+**Operating it.** `GET /v1/admin/indexed-sources` (needs `platform:read_health`) reports
+usability, freshness, row counts and the last failure per source.
+`POST /v1/admin/indexed-sources/{sourceId}/refresh` (needs `source:approve` **and** the header
+`X-Allow-Publisher-Contact: true`) runs one refresh now. Postman folder 16 exercises both.
+
+---
+
 ## The association graph (Phase D step D3)
 
 FR-02, in `apps/api/src/associations` with the decisions in `packages/domain/src/association`.

@@ -67,6 +67,11 @@ export interface FindingRecord {
     readonly retrievalDate: PreciseDate;
     readonly cascadeRung: number;
     readonly mode: 'MOCK' | 'LIVE';
+    /** Structured indexed-source provenance. Absent for fetched documents. */
+    readonly sourceRecordId?: string | undefined;
+    readonly sourceSnapshotVersion?: string | undefined;
+    readonly parserVersion?: string | undefined;
+    readonly rawEvidenceHash?: string | undefined;
   };
   /** Offsets into the **normalised** text, which is what `textNormalisation` describes. */
   readonly subjectMentionSpans: readonly { readonly start: number; readonly end: number }[];

@@ -118,6 +118,17 @@ Recorded because they are the kind that stay hidden until they cause a wrong res
   2026-09-18 (fifteenth) handoff entry. Every other source contract in the plan is unverified
   against a real endpoint. The G10 measurements do not exist and `docs/coverage-matrix.md`
   is a template with no measured figures.
+- **Ten indexed sources exist in code and none of them has contacted anybody** (added
+  2026-09-20, decisions **D-062** to **D-065**). OFAC SDN and consolidated non-SDN, the UK
+  Sanctions List, the UNSC and EU consolidated lists, the World Bank debarred-firms list, and the
+  DOJ, CFTC, FTC and FCA feeds are downloaded whole on a schedule into a local snapshot and
+  searched in our own database rather than queried per plan. Every one is a content builder in
+  code only: no bootstrap seeds it into the registry, `firstContactApproval` is `null` and
+  `robotsPosition` is `NOT_ESTABLISHED`, so a forced refresh is refused by the gate before a
+  socket opens. **No snapshot has ever been built**, so the seven parsers are verified against
+  fixtures and not against a publisher's real file, and the reviewed `minimumExpectedRows` and
+  accepted content types are unvalidated guesses until the first real download.
+
 - **No language is enabled.** Per FR-03 a language is enabled only with a measured recall
   figure, and none has been measured. The seed dataset spans several languages but that is a
   fixture corpus, not a measurement.

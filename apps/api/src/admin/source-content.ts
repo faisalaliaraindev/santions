@@ -46,6 +46,7 @@ import type { AdminRecordKind } from './versioned-record.service.js';
 export const LOAD_BEARING_SOURCE_FIELDS: readonly string[] = [
   'connectorType',
   'canonicalDomains',
+  'jurisdictionScope',
   'countries',
   'languages',
   'parserVersion',
@@ -55,6 +56,7 @@ export const LOAD_BEARING_SOURCE_FIELDS: readonly string[] = [
   'cascadeRung',
   'contentFormat',
   'licenceTermsVersion',
+  'refreshPolicy',
 ];
 
 /**

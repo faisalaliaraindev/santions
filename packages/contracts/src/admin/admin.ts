@@ -86,6 +86,14 @@ export const intendedUseSchema = z.enum([
  * configuring a reviewed connector and shipping code through an admin form.
  */
 export const connectorTypeSchema = z.enum([
+  /** Scheduled machine-readable publisher artifact, parsed and searched from a local snapshot. */
+  'INDEXED_BULK_XML',
+  /** Scheduled machine-readable JSON artifact, parsed and searched from a local snapshot. */
+  'INDEXED_BULK_JSON',
+  /** Scheduled RSS/Atom ingestion into the same local snapshot store. */
+  'INDEXED_RSS',
+  /** Scheduled deterministic HTML ingestion where no structured official artifact exists. */
+  'INDEXED_HTML',
   'NEWS_DISCOVERY_RSS',
   /**
    * GDELT DOC 2.0 — rung 3. A separate type from `NEWS_DISCOVERY_RSS` because it returns JSON
@@ -325,7 +333,12 @@ export const sourceContentSchema = z
     /** 1 is the highest authority for the reported act — never confidence in identity. */
     authorityTier: z.number().int().min(1).max(5),
     cascadeRung: z.number().int().min(0).max(7),
-    countries: z.array(countryCodeSchema).min(1).max(50),
+    /**
+     * Jurisdictions this deployment may use the source for. A genuinely worldwide authority may
+     * declare GLOBAL explicitly; an empty country list alone never means global.
+     */
+    jurisdictionScope: z.enum(['NAMED_COUNTRIES', 'GLOBAL']).default('NAMED_COUNTRIES'),
+    countries: z.array(countryCodeSchema).max(249),
     languages: z.array(z.string().min(2).max(35)).min(1).max(30),
     /** A reference to a credential held elsewhere. Never the credential (SEC-04). */
     credentialsRef: z.string().max(200).nullable(),
@@ -346,11 +359,46 @@ export const sourceContentSchema = z
     /** Robots position, recorded per source. Exceptions are open decision D6. */
     robotsPosition: z.enum(['HONOURED', 'EXCEPTION_APPROVED', 'NOT_ESTABLISHED']),
     /** How the source publishes: CR's gazette is PDF, most news is HTML. Drives extraction. */
-    contentFormat: z.enum(['HTML', 'PDF', 'JSON', 'XML_FEED', 'MIXED']),
+    contentFormat: z.enum(['HTML', 'PDF', 'JSON', 'XML', 'CSV', 'XML_FEED', 'MIXED']),
     /** The publisher's own access policy, where they publish one. See above (D17). */
     accessPolicy: sourceAccessPolicySchema.nullable().optional(),
+    /**
+     * Refresh policy for locally indexed sources. It is approved registry content because it
+     * controls publisher contact and determines when a snapshot becomes stale.
+     */
+    refreshPolicy: z
+      .object({
+        intervalSeconds: z.number().int().min(900).max(2_592_000),
+        staleAfterSeconds: z.number().int().min(900).max(7_776_000),
+        minimumExpectedRows: z.number().int().positive().max(10_000_000),
+      })
+      .strict()
+      .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((content, context) => {
+    if (content.jurisdictionScope === 'NAMED_COUNTRIES' && content.countries.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['countries'],
+        message: 'NAMED_COUNTRIES requires at least one explicit ISO country code.',
+      });
+    }
+    if (content.jurisdictionScope === 'GLOBAL' && content.countries.length > 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['countries'],
+        message: 'GLOBAL jurisdiction scope must not also carry an incomplete named-country list.',
+      });
+    }
+    if (content.connectorType.startsWith('INDEXED_') && content.refreshPolicy === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['refreshPolicy'],
+        message: 'An indexed connector must declare its reviewed refresh and anomaly policy.',
+      });
+    }
+  });
 
 /**
  * Note what is **not** in this schema: `mode`.

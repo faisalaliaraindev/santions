@@ -21,6 +21,7 @@ import { ApiKeyService } from './tenancy/api-key.service.js';
 import { SignupService } from './tenancy/signup.service.js';
 import { SearchesService } from './searches/searches.service.js';
 import { DomainHealthService } from './sources/domain-health.service.js';
+import { IndexedSourceRepository } from './sources/indexed/indexed-source.repository.js';
 import { assertOutboundUserAgent } from './sources/egress-identity.js';
 import { SourceHealthService } from './sources/source-health.service.js';
 import { NameFrequencyService } from './subjects/name-frequency.service.js';
@@ -67,6 +68,7 @@ export class StartupService implements OnModuleInit {
     private readonly capabilities: CapabilityCoverageService,
     private readonly sourceHealth: SourceHealthService,
     private readonly domainHealth: DomainHealthService,
+    private readonly indexedSources: IndexedSourceRepository,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -103,6 +105,7 @@ export class StartupService implements OnModuleInit {
       this.capabilities.ensureIndexes(),
       this.sourceHealth.ensureIndexes(),
       this.domainHealth.ensureIndexes(),
+      this.indexedSources.ensureIndexes(),
     ]);
     this.logger.log('Indexes ensured.');
   }
