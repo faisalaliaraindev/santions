@@ -27,6 +27,128 @@ Say what you did about it.
 
 ---
 
+## 2026-09-21 (nineteenth) — Audit only: architecture/product audit of the adverse-search product
+
+**Did.** No production code changed, no docs rewritten, no source activated, nothing contacted.
+Full code-first audit (runtime path, sources, indexed ingestion, matching, classification, result
+semantics, resilience, API, control plane) answering "can we offer our own adverse-search API
+without buying sanctions.io adverse search". Findings delivered in-session; this entry is the
+durable record.
+
+**Verified.** `npx vitest run --project unit --project invariants` → **63 files, 1044 tests, all
+passing, 8.46s**. (The eighteenth entry recorded 1013/62 — the tree has grown by 31 tests.)
+Integration/e2e/security/live NOT run: Docker Desktop is not running on this machine. `.env` is
+still `ADVERSE_SEARCH_MODE=mock`, `COMPANIES_HOUSE_API_KEY` and `WORLD_BANK_SANCTIONS_API_KEY`
+empty.
+
+**Found.** Six things that are not in any existing doc:
+
+1. **The discovery-path identity matcher is degenerate.** `pipeline/search-pipeline.service.ts:1036`
+   calls `matchNameForms(normaliseName(subject.fullName), normaliseName(subject.fullName or ''))`
+   — the subject's name compared to **itself**. Spans present ⇒ always `EXACT`. It then asserts one
+   hardcoded factor `RARE_FULL_NAME_PLUS_CITY` / MODERATE / CORROBORATING (`:1043`). Consequences:
+   DOB, country, nationality, address, identifiers and aliases are never consulted on this path;
+   axis A is always `PARTIAL`; `bands.ts:162` treats PARTIAL as sufficient for `SUPPORTED`; so a
+   **name-only subject yields CONFIRMED_MATCHES_FOUND**. The only brake is the top-decile frequency
+   penalty and no distribution is loaded, so it never fires. The served rationale claims a city
+   check that never ran — the hardest thing to defend in an audit. NOT FIXED.
+   The indexed path (`indexed-source-search.service.ts:270-330`) does this correctly and is the
+   template to copy.
+2. **`authorityTier: 2` is hardcoded** at `search-pipeline.service.ts:1116`, so tier-1 court
+   documents and tier-5 blogs band identically and `canSupportFinding: false` for tier 5 is never
+   enforced on the discovery path.
+3. **FR-10 clustering has no runtime caller.** `packages/domain/src/clustering/rules.ts` is
+   exercised only by its own unit tests; `computeAuthority` is called with a hardcoded
+   single-element tier-2 array. Ten syndicated copies of one story are ten findings.
+4. **`RetentionSweeper.sweepOnce()` has no caller anywhere.** It is wired as a provider
+   (`app.module.ts:527`) and never started — `worker-main.ts` starts only `WorkerRuntime` and
+   `IndexedSourceScheduler`. Retention actions are scheduled and never executed.
+5. **Indexed snapshots are never pruned.** No `deleteMany` on `indexedSourceRecords`. Every
+   content-changing refresh writes a full new snapshot and keeps the old one forever.
+6. **Budget spend is not atomic.** `source-health.service.ts:167-176` is load → spendAccess →
+   `$set` save. Concurrent replicas lose increments. Together with the process-local `RequestPacer`
+   (`request-pacer.ts:147`, and `app.module.ts:868` does not even pass a pacer to `LadderBuilder`)
+   and in-process `FixedFeedPollCache`, **two replicas violate a publisher's ceiling together**.
+   For GDELT (`haltOnRateLimit: true` + `requiresFreshApprovalOnHalt: true`) that is a
+   self-inflicted outage requiring a human to release.
+
+Also confirmed, contradicting existing docs: `reserved.controller.ts:29` claims usage "counters are
+recorded but not yet exposed" — **no counters are recorded anywhere**. And the eighteenth entry's
+note that the SEC database records say `robotsPosition: HONOURED` is now moot: no database exists,
+so a fresh deployment gets the code value `NOT_ESTABLISHED` and a refused source.
+
+Confirmed healthy and worth not re-auditing: result/coverage semantics (`domain/coverage/
+result-state.ts`) are correct on all five scenarios; `NO_MATCHES_FOUND` **cannot** coexist with an
+AMBIGUOUS finding (`describeFindings` + `assertNoMatchIsHonest` + the read-path self-correction at
+`searches.service.ts:778`). The indexed refresh lifecycle is genuinely production-shaped: DB lease
+claim is cross-replica safe, validation is entirely pre-transaction, last-known-good is preserved,
+stale-but-valid stays searchable. Tenant/search scoping has no contamination path.
+
+**The source situation in one line.** Zero real sources are usable. All ten indexed sources (OFAC
+SDN + non-SDN, UK, UN, EU, World Bank, DOJ, CFTC, FTC, FCA) have parser + schedule + search code
+and **no registry row at all** — `scripts/bootstrap/seed-data.mjs` seeds only fixtures plus
+google-news and bing-news as PROPOSED. Every real source ships `firstContactApproval: null` AND
+`robotsPosition: 'NOT_ESTABLISHED'`, either of which the fetch gate refuses
+(`fetch-gate.service.ts:373,380`).
+
+**Left half-done.** Nothing started. This was audit-only by instruction.
+
+**Next session should:** implement **P0-1 + P0-3** — register and activate the ten indexed sources
+end to end (repeatable seeding path, real first-contact approvals, robots read and recorded through
+the four-eyes lifecycle), and bound snapshot growth + start the retention sweeper. Leave `sec-*`,
+`gdelt-doc-v2`, `google-news-*` and `bing-news-*` PROPOSED until the discovery matcher (finding 1)
+is fixed — the indexed path has its own correct matching, so activating it does not expose the bug.
+First contact itself is the user's to trigger.
+
+**Decisions touched.** None closed. D7 (extraction model) still open and still blocked on a labelled
+corpus. D12 unchanged. D-042/D-048 both confirmed as still-accurate descriptions of the code.
+
+---
+
+## 2026-09-21 (eighteenth) — Audit only: the four pure gates re-run clean, and every source is now in one catalogue
+
+**Did.** No production code changed. Wrote
+[`docs/sources/source-catalogue.md`](../sources/source-catalogue.md): all sixteen real sources plus
+the eight fixtures, in five groups, each row carrying endpoint URL, credential requirement, the
+recorded licence position, what the source actually yields, and which of the five go-live
+preconditions it is still missing. Section 8 is the ordered work each blocked source needs.
+
+**Verified.** On the tree as found, nothing started, no publisher contacted:
+
+- `pnpm typecheck` — clean. `pnpm lint` — clean.
+- `pnpm test:unit` — **1013 passed, 62 files**. `pnpm test:invariants` — **31 passed**.
+  `pnpm test:evaluation` — **12 passed**. Identical to the seventeenth entry's numbers.
+- **Nothing live was run.** Docker Desktop is not running, so no stack exists; and `.env` is
+  `ADVERSE_SEARCH_MODE=mock` with `DISABLE_SOURCE_FOUR_EYES_FOR_TESTING=true`, which is a
+  fixtures-only configuration. Folder 16 is still unrun and folder 15 is still owed.
+
+**Found.**
+
+1. **`COURTLISTENER_API_TOKEN` and `SEARXNG_URL` are in `.env` and read by nothing** — no grep hit
+   anywhere in `apps/`, `packages/` or `scripts/`. SearXNG is in the compose stack but unwired. A
+   credential slot with no consumer reads as coverage that does not exist. Either build the
+   connector or delete the variable; recorded in catalogue §6, not acted on.
+2. **The live `.env` cannot test any source.** Mock mode, four-eyes disabled, and
+   `COMPANIES_HOUSE_API_KEY` / `WORLD_BANK_SANCTIONS_API_KEY` / `SEC_EDGAR_USER_AGENT` all empty.
+   `FETCH_CONTACT_URL` and `OUTBOUND_USER_AGENT` are set. Going live is a deliberate `.env` change,
+   not a flag someone will hit by accident — which is the intended shape, but it means "run folder
+   15" is three steps, not one.
+3. **The SEC registry templates in code still say `robotsPosition: 'NOT_ESTABLISHED'`** while the
+   database records say `HONOURED`. That is correct and must stay: the `HONOURED` value was set on
+   the draft by the person who read the evidence. A future session must not "fix" the code to match
+   the database — doing so makes the next proposal assert a robots position nobody checked. Flagged
+   in catalogue §1.
+
+**Left half-done:** nothing started. The catalogue is complete as written.
+
+**Next session should:** start Docker Desktop, `pnpm local:up && pnpm dev`, and run Postman folder
+16 unarmed (16.1–16.4), pasting 16.1's table into this log — still the seventeenth entry's next
+action, still undone.
+
+**Decisions touched:** none.
+
+---
+
 ## 2026-09-20 (seventeenth) — A source can be read on a schedule into a local snapshot; ten of them exist and none can call anyone
 
 **Context this entry has to give first: the previous session ran out of budget mid-stream and
