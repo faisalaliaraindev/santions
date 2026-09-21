@@ -62,6 +62,7 @@ const FIXED_FEED_SOURCE: ActiveSourceVersion = {
     approvedOn: '2026-09-15',
     decision: 'D17',
   },
+  robotsException: null,
   endpointUrl: 'https://www.sec.gov/enforcement-litigation/litigation-releases/rss',
   endpointKind: 'FIXED_FEED',
   queryParam: null,

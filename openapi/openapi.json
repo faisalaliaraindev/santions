@@ -2500,7 +2500,32 @@
             "additionalProperties": false
           },
           "rationale": { "type": "array", "items": { "type": "string" } },
-          "category": { "type": "string", "nullable": true },
+          "category": {
+            "type": "string",
+            "enum": [
+              "FRAUD_FINANCIAL_CRIME",
+              "MONEY_LAUNDERING_TF",
+              "BRIBERY_CORRUPTION",
+              "MARKET_ABUSE",
+              "SANCTIONS_EVASION_EXPORT_CONTROL",
+              "TAX_OFFENCES",
+              "ORGANISED_CRIME",
+              "DRUG_OFFENCES",
+              "HUMAN_TRAFFICKING_MODERN_SLAVERY",
+              "TERRORISM_VIOLENT_EXTREMISM",
+              "VIOLENT_CRIME",
+              "CYBERCRIME",
+              "REGULATORY_PROFESSIONAL_MISCONDUCT",
+              "ENVIRONMENTAL_HEALTH_SAFETY",
+              "CONSUMER_HARM_MISSELLING",
+              "INSOLVENCY_MISCONDUCT",
+              "GOVERNANCE_INTEGRITY",
+              "SANCTIONS_DESIGNATION",
+              "DEBARMENT_EXCLUSION",
+              "REGULATORY_WARNING_LIST"
+            ],
+            "nullable": true
+          },
           "proceduralStage": { "type": "string" },
           "partyRole": { "type": "string" },
           "namingAuthority": { "type": "string", "nullable": true },
@@ -2701,7 +2726,14 @@
                 "outcome": { "type": "string" },
                 "detail": { "type": "string", "nullable": true },
                 "truncation": { "type": "string", "nullable": true },
-                "failureClass": { "type": "string", "nullable": true }
+                "failureClass": { "type": "string", "nullable": true },
+                "snapshotVersion": { "type": "string", "nullable": true },
+                "freshness": {
+                  "type": "string",
+                  "enum": ["CURRENT", "STALE", "UNAVAILABLE"],
+                  "nullable": true
+                },
+                "snapshotRowCount": { "type": "integer", "minimum": 0, "nullable": true }
               },
               "required": [
                 "sourceId",
@@ -3160,6 +3192,34 @@
                   "decision": { "type": "string", "minLength": 1, "maxLength": 40 }
                 },
                 "required": ["approvedBy", "role", "approvedOn", "decision"],
+                "additionalProperties": false,
+                "nullable": true
+              },
+              "robotsException": {
+                "type": "object",
+                "properties": {
+                  "approvedBy": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "role": { "type": "string", "minLength": 1, "maxLength": 120 },
+                  "approvedOn": { "type": "string", "minLength": 10, "maxLength": 40 },
+                  "decision": { "type": "string", "minLength": 1, "maxLength": 40 },
+                  "scope": { "type": "string", "minLength": 1, "maxLength": 1000 },
+                  "deliveryHosts": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/SourceContent/properties/canonicalDomains/items"
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "approvedBy",
+                  "role",
+                  "approvedOn",
+                  "decision",
+                  "scope",
+                  "deliveryHosts"
+                ],
                 "additionalProperties": false,
                 "nullable": true
               }

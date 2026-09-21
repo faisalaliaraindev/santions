@@ -249,6 +249,7 @@ function fetchRequest(overrides: Partial<FetchRequest> = {}): FetchRequest {
       licenceTermsVersion: 'sec-fair-access-2026-09-15',
       robotsPosition: 'HONOURED',
       robotsExceptionApprovedBy: null,
+      robotsExceptionDeliveryHosts: [],
       requestCeilingPerSecond: null,
       jurisdictionEnabled: true,
       languageEnabled: true,

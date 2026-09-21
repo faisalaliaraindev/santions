@@ -21,6 +21,7 @@ export * from './tenure/tenure.js';
 
 export * from './identity/name-forms.js';
 export * from './identity/axis-a.js';
+export * from './identity/evidence.js';
 
 export * from './attribution/axis-b.js';
 
@@ -32,6 +33,8 @@ export * from './banding/bands.js';
 export * from './banding/finding-attributes.js';
 
 export * from './clustering/rules.js';
+export * from './clustering/assign.js';
+export * from './clustering/near-duplicate.js';
 
 export * from './planning/query-families.js';
 export * from './planning/build-plan.js';

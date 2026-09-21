@@ -206,9 +206,18 @@ describe('T02 — restart and persistence', () => {
 
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
+    // `ADVERSE_SEARCH_MODE=mock` is passed explicitly rather than inherited.
+    //
+    // The bootstrap refuses to seed in live mode — fixtures must never be servable as live
+    // results (T55) — and that refusal is right and stays. But it means this test used to depend
+    // on the mode in the developer's own `.env`: once a stack was switched to live to populate
+    // the indexed sources, an unrelated assertion about *idempotence* began failing with a
+    // message about seeding. The subject here is whether re-running the bootstrap duplicates
+    // records, which is true or false regardless of what `.env` currently says.
     await promisify(execFile)('node', ['scripts/local-bootstrap.mjs'], {
       cwd: process.cwd(),
       timeout: 180_000,
+      env: { ...process.env, ADVERSE_SEARCH_MODE: 'mock' },
     });
 
     const after = await mongo.db().collection('tenants').countDocuments();

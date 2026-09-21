@@ -232,6 +232,12 @@ export class IndexedSourceRefreshService {
         records: parsed.records,
         refreshId: claim.refreshId,
       });
+      // Prune after the commit, never inside it. The snapshot is already active and searchable at
+      // this point, so a prune that fails leaves a correct system with more history than it needs
+      // — whereas a prune inside the transaction would make a delete failure roll back a good
+      // snapshot. Bounded, so a large source yields rather than monopolising the worker; whatever
+      // it does not finish is picked up by the next refresh of the same source.
+      await this.pruneQuietly(sourceId);
       return { kind: 'SUCCEEDED', state: await this.repository.state(sourceId) };
     } catch (error) {
       const status = error instanceof RefreshValidationError ? error.httpStatus : null;
@@ -247,6 +253,37 @@ export class IndexedSourceRefreshService {
         retryAt: new Date(now.getTime() + FAILURE_RETRY_MS),
       });
       return { kind: 'FAILED', state: await this.repository.state(sourceId) };
+    }
+  }
+
+  /**
+   * Prune superseded snapshots, and never fail a good refresh because pruning failed.
+   *
+   * Storage growth is an operational problem; a committed snapshot is a correctness one. Letting
+   * the first turn a successful refresh into a `FAILED` result would mean a full disk stops the
+   * source answering, which is exactly backwards — the snapshot it already has is what keeps it
+   * answering. So this logs and moves on, and the next refresh tries again.
+   */
+  private async pruneQuietly(sourceId: string): Promise<void> {
+    try {
+      const summary = await this.repository.pruneSupersededSnapshots({
+        sourceId,
+        now: this.clock(),
+      });
+      if (summary.snapshotsDeleted > 0 || summary.recordsDeleted > 0) {
+        this.logger.log(
+          `${sourceId} snapshot prune: ${String(summary.snapshotsDeleted)} snapshot(s) and ` +
+            `${String(summary.recordsDeleted)} record(s) removed; active ` +
+            `${summary.activeSnapshotVersion ?? 'none'} and previous ` +
+            `${summary.retainedPreviousSnapshotVersion ?? 'none'} retained` +
+            (summary.complete ? '.' : '; more remains for the next pass.'),
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `${sourceId} snapshot prune failed; the snapshot is committed and searchable regardless: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
     }
   }
 

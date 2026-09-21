@@ -6,6 +6,7 @@ import type { Collection, Db } from 'mongodb';
 import { normaliseName } from '@erly/adverse-domain';
 
 import type {
+  IndexedSnapshotPruneSummary,
   IndexedSourceRefreshState,
   IndexedSourceTransactionPort,
   NormalizedSourceRecord,
@@ -32,6 +33,11 @@ interface RefreshClaim {
   readonly previous: IndexedSourceRefreshState | null;
 }
 
+/** Records deleted in one pruning pass before it yields. */
+const DEFAULT_MAX_RECORD_DELETES = 20_000;
+/** Ids read and deleted per round trip inside a pass. */
+const DEFAULT_PRUNE_BATCH = 1_000;
+
 const EMPTY_STATE = (sourceId: string): IndexedSourceRefreshState => ({
   sourceId,
   activeSourceVersion: null,
@@ -52,6 +58,7 @@ const EMPTY_STATE = (sourceId: string): IndexedSourceRefreshState => ({
   freshness: 'UNAVAILABLE',
   nextRefreshDueAt: null,
   refreshLease: null,
+  lastPrune: null,
 });
 
 @Injectable()
@@ -264,7 +271,9 @@ export class IndexedSourceRepository {
           { upsert: true, session },
         );
 
-        const newById = new Map(stored.map((record) => [record.sourceRecordId, record.rawEvidenceHash]));
+        const newById = new Map(
+          stored.map((record) => [record.sourceRecordId, record.rawEvidenceHash]),
+        );
         const insertedCount = [...newById.keys()].filter((id) => !oldById.has(id)).length;
         const updatedCount = [...newById].filter(
           ([id, hash]) => oldById.has(id) && oldById.get(id) !== hash,
@@ -301,6 +310,125 @@ export class IndexedSourceRepository {
     );
   }
 
+  /**
+   * Delete the records of snapshots that nothing will read again — **bounded**, and never the
+   * active one.
+   *
+   * # What is kept, and why two rather than one
+   *
+   * The **active** snapshot is what every search reads; deleting it would empty the shelf while
+   * the source reported itself healthy. The **most recent completed snapshot behind it** is kept
+   * as well, for two concrete uses: rolling back when a refresh promotes a snapshot that turns
+   * out to be wrong, and answering "what changed?" — `commitSnapshot` already computes inserted,
+   * updated and removed counts against the previous snapshot, and with only one snapshot retained
+   * that comparison has nothing to compare against.
+   *
+   * Everything older is superseded. Before this existed, nothing deleted it: every
+   * content-changing refresh wrote a full new snapshot and kept every previous one forever, so a
+   * source refreshed four times a day grew its indexed records without bound.
+   *
+   * # Why the delete is bounded
+   *
+   * `deleteMany` over a superseded OFAC snapshot is seventeen thousand documents in one
+   * unbounded operation, and doing that inline is how a refresh of one source stalls the process
+   * for everything else. Ids are read in pages and deleted in pages, up to a ceiling; whatever is
+   * left is picked up by the next pass. `complete` reports which of those happened, so a caller
+   * that needs the work finished drains rather than assuming one call did it.
+   *
+   * **The active snapshot cannot be deleted by any path through this method.** It is excluded
+   * from the candidate list by version, not by ordering, so a clock skew or an equal `createdAt`
+   * cannot promote it into the superseded set.
+   */
+  async pruneSupersededSnapshots(input: {
+    readonly sourceId: string;
+    readonly now: Date;
+    readonly maxRecordDeletes?: number;
+    readonly batchSize?: number;
+  }): Promise<IndexedSnapshotPruneSummary> {
+    const maxRecordDeletes = input.maxRecordDeletes ?? DEFAULT_MAX_RECORD_DELETES;
+    const batchSize = input.batchSize ?? DEFAULT_PRUNE_BATCH;
+    const state = await this.state(input.sourceId);
+    const active = state.activeSnapshotVersion;
+
+    const snapshots = await this.snapshots
+      .find({ sourceId: input.sourceId })
+      .sort({ createdAt: -1, snapshotVersion: -1 })
+      .toArray();
+
+    // Excluded by version rather than by position: if `createdAt` ties or a clock moved
+    // backwards, ordering alone could put the active snapshot outside the first two.
+    const behindActive = snapshots.filter((snapshot) => snapshot.snapshotVersion !== active);
+    const retainedPrevious = behindActive[0]?.snapshotVersion ?? null;
+    const superseded = behindActive.filter(
+      (snapshot) => snapshot.snapshotVersion !== retainedPrevious,
+    );
+
+    let recordsDeleted = 0;
+    let snapshotsDeleted = 0;
+    let complete = true;
+
+    for (const snapshot of superseded) {
+      if (snapshot.snapshotVersion === active) {
+        // Unreachable by construction; asserted anyway because the cost of being wrong here is
+        // an emptied index on a source that reports itself healthy.
+        continue;
+      }
+      let drained = true;
+      while (recordsDeleted < maxRecordDeletes) {
+        const page = await this.records
+          .find(
+            { sourceId: input.sourceId, sourceSnapshotVersion: snapshot.snapshotVersion },
+            {
+              projection: { _id: 1 },
+              limit: Math.min(batchSize, maxRecordDeletes - recordsDeleted),
+            },
+          )
+          .toArray();
+        if (page.length === 0) {
+          break;
+        }
+        const result = await this.records.deleteMany({
+          _id: { $in: page.map((document) => document._id) },
+        });
+        recordsDeleted += result.deletedCount;
+      }
+      const remaining = await this.records.countDocuments(
+        { sourceId: input.sourceId, sourceSnapshotVersion: snapshot.snapshotVersion },
+        { limit: 1 },
+      );
+      if (remaining > 0) {
+        // Out of budget with records still present. The snapshot row stays, so the next pass
+        // finds it again — a snapshot row deleted ahead of its records would orphan them.
+        drained = false;
+        complete = false;
+      } else {
+        await this.snapshots.deleteOne({
+          sourceId: input.sourceId,
+          snapshotVersion: snapshot.snapshotVersion,
+        });
+        snapshotsDeleted += 1;
+      }
+      if (!drained) {
+        break;
+      }
+    }
+
+    const summary: IndexedSnapshotPruneSummary = {
+      sourceId: input.sourceId,
+      ranAt: input.now,
+      activeSnapshotVersion: active,
+      retainedPreviousSnapshotVersion: retainedPrevious,
+      snapshotsConsidered: superseded.length,
+      snapshotsDeleted,
+      recordsDeleted,
+      complete,
+    };
+    // On the state record rather than only in a log line, so `GET /v1/admin/indexed-sources`
+    // can show it and an operator can see pruning happening without shell access to the database.
+    await this.states.updateOne({ sourceId: input.sourceId }, { $set: { lastPrune: summary } });
+    return summary;
+  }
+
   async search(input: {
     readonly nameForms: readonly string[];
     readonly sourceIds?: readonly string[];
@@ -328,18 +456,54 @@ export class IndexedSourceRepository {
       .map((form) => textTokens(form))
       .filter((tokens) => tokens.length > 0)
       .map((tokens) => ({ searchTokens: { $all: tokens } }));
-    return this.records
-      .find({
-        $and: [
-          { $or: snapshots },
-          { $or: [{ nameKeys: { $in: keys } }, ...textClauses] },
-        ],
-      })
-      .limit(input.limit ?? 250)
+    const limit = input.limit ?? 250;
+
+    // **Exact name-key matches first, and never crowded out.**
+    //
+    // These two are not the same kind of candidate. A `nameKeys` hit means a name form the
+    // publisher recorded folds to a name form the subject supplied — the strongest retrieval
+    // signal this index has. A `searchTokens` hit means the same words appear somewhere in the
+    // record's searchable text, which is how an official publication naming a person in its
+    // headline is found, and which matches far more loosely.
+    //
+    // They used to be one `$or` under one `limit`, so the cap was filled in natural collection
+    // order. A short, common name — "Abu ABBAS" in the OFAC SDN list — matched hundreds of
+    // records on tokens and its own exact entry fell outside the first 250. The subject was on
+    // the list, the index held the row, and the search returned nothing for it: a false clean
+    // result, which is the one failure this product must not have.
+    //
+    // Two bounded queries, exact first, then the remaining budget for token matches.
+    const snapshotClause = { $or: snapshots };
+    const exact = await this.records
+      .find({ $and: [snapshotClause, { nameKeys: { $in: keys } }] })
+      .limit(limit)
       .toArray();
+    if (exact.length >= limit || textClauses.length === 0) {
+      return exact;
+    }
+
+    const seen = new Set(exact.map((record) => `${record.sourceId}:${record.sourceRecordId}`));
+    const loose = await this.records
+      .find({ $and: [snapshotClause, { $or: textClauses }] })
+      .limit(limit - exact.length + seen.size)
+      .toArray();
+    for (const record of loose) {
+      if (exact.length >= limit) {
+        break;
+      }
+      const key = `${record.sourceId}:${record.sourceRecordId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        exact.push(record);
+      }
+    }
+    return exact;
   }
 
-  private toStored(record: NormalizedSourceRecord, input: SnapshotCommitInput): StoredIndexedSourceRecord {
+  private toStored(
+    record: NormalizedSourceRecord,
+    input: SnapshotCommitInput,
+  ): StoredIndexedSourceRecord {
     return {
       ...record,
       sourceSnapshotVersion: input.snapshotVersion,
@@ -347,7 +511,11 @@ export class IndexedSourceRepository {
       parserVersion: input.parserVersion,
       retrievedAt: input.retrievedAt,
       artifactHash: input.artifactHash,
-      nameKeys: [...new Set([record.primaryName, ...record.aliases, ...record.originalScriptNames].map(nameKey))],
+      nameKeys: [
+        ...new Set(
+          [record.primaryName, ...record.aliases, ...record.originalScriptNames].map(nameKey),
+        ),
+      ],
       searchTokens: textTokens(record.searchableText ?? ''),
       rawEvidenceHash: sha256(stableJson(record.rawEvidence)),
       createdAt: input.retrievedAt,

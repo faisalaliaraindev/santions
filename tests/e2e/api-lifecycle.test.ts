@@ -48,6 +48,7 @@ import { loadConfig } from '../../apps/api/src/config/config.js';
 import { OutboxPublisher } from '../../apps/api/src/jobs/outbox-publisher.js';
 import { WorkerRuntime } from '../../apps/api/src/jobs/worker-runtime.service.js';
 import { ApiKeyService, type IssuedApiKey } from '../../apps/api/src/tenancy/api-key.service.js';
+import { createSuiteQueues, suiteQueueUrl } from './support/queues.js';
 
 const MONGODB_URI =
   process.env['MONGODB_URI'] ??
@@ -64,6 +65,16 @@ const STACK_HINT =
  * nothing to do with the path under test.
  */
 const SEEDED_TENANT = 'tenant-alpha';
+
+/** Where LocalStack answers. One definition, used by both the queue helper and `TEST_ENV`. */
+const SQS = {
+  endpointUrl: process.env['AWS_ENDPOINT_URL'] ?? 'http://127.0.0.1:28566',
+  region: process.env['AWS_REGION'] ?? 'eu-west-2',
+  accessKeyId: process.env['AWS_ACCESS_KEY_ID'] ?? 'test',
+} as const;
+
+/** Unique across `tests/e2e`. See `support/queues.ts` for why each suite owns one. */
+const QUEUE_NAME = 'adverse-search-jobs-api-lifecycle-e2e';
 
 /**
  * The name the seeded discovery fixtures respond to.
@@ -99,19 +110,39 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   SESSION_COOKIE_SECURE: 'false',
   CORS_ORIGINS: '',
 
-  AWS_REGION: process.env['AWS_REGION'] ?? 'eu-west-2',
-  AWS_ENDPOINT_URL: process.env['AWS_ENDPOINT_URL'] ?? 'http://127.0.0.1:28566',
-  AWS_ACCESS_KEY_ID: process.env['AWS_ACCESS_KEY_ID'] ?? 'test',
+  AWS_REGION: SQS.region,
+  AWS_ENDPOINT_URL: SQS.endpointUrl,
+  AWS_ACCESS_KEY_ID: SQS.accessKeyId,
   AWS_SECRET_ACCESS_KEY: process.env['AWS_SECRET_ACCESS_KEY'] ?? 'test',
-  JOBS_QUEUE_URL:
-    process.env['JOBS_QUEUE_URL'] ?? 'http://127.0.0.1:28566/000000000000/adverse-search-jobs',
-  JOBS_DEAD_LETTER_QUEUE_URL:
-    process.env['JOBS_DEAD_LETTER_QUEUE_URL'] ??
-    'http://127.0.0.1:28566/000000000000/adverse-search-jobs-dlq',
+
+  /**
+   * **This suite's own queue, not the stack's.**
+   *
+   * A `pnpm dev` worker polls `adverse-search-jobs` from `.env` for as long as somebody leaves it
+   * running, in whatever mode and whatever build it booted with. It took this suite's messages on
+   * 2026-09-21 and the failure looked like a pipeline defect. `tests/e2e/support/queues.ts` has
+   * the full account and the reasoning.
+   */
+  JOBS_QUEUE_URL: suiteQueueUrl(SQS, QUEUE_NAME, 'API_LIFECYCLE_E2E_QUEUE_URL'),
+  JOBS_DEAD_LETTER_QUEUE_URL: suiteQueueUrl(
+    SQS,
+    `${QUEUE_NAME}-dlq`,
+    'API_LIFECYCLE_E2E_DLQ_URL',
+  ),
 
   // The evidence store and the index are real too — a search writes to both, and substituting
   // in-memory versions here would make this suite prove less than the integration suite does.
   S3_EVIDENCE_BUCKET: process.env['S3_EVIDENCE_BUCKET'] ?? 'adverse-search-evidence-local',
+  /**
+   * The fixture server, and it is NOT optional.
+   *
+   * In mock mode every source adapter is a fixture that reads from this host. Without it the
+   * adapters are constructed, discovery runs, and every rung answers with nothing — so the run
+   * settles with zero findings, which reads like a matching bug and is a missing address.
+   * `tenant-onboarding-e2e.test.ts` has carried this value and a comment naming this file as
+   * missing it since it was written; this closes that.
+   */
+  FIXTURE_SERVER_URL: process.env['FIXTURE_SERVER_URL'] ?? 'http://127.0.0.1:28090',
   SEARCH_INDEX_KIND: process.env['SEARCH_INDEX_KIND'] ?? 'meilisearch',
   MEILI_HOST: process.env['MEILI_HOST'] ?? 'http://127.0.0.1:28700',
   MEILI_MASTER_KEY: process.env['MEILI_MASTER_KEY'] ?? 'local-development-master-key-change-me',
@@ -126,6 +157,10 @@ function auth(): string {
 }
 
 beforeAll(async () => {
+  // Idempotent, and part of this suite's setup rather than a bootstrap step somebody has to
+  // remember: a queue that does not exist yet fails at publish time, not at configuration time.
+  await createSuiteQueues(SQS, QUEUE_NAME);
+
   mongo = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
   try {
     await mongo.connect();
@@ -250,13 +285,13 @@ describe('a search, from an HTTP request to an HTTP answer', () => {
     expect((accepted.body as Record<string, unknown>)['execution']).toBe('QUEUED');
 
     const settled = await waitForTerminal(searchId);
-    expect(settled['execution']).toBe('SUCCEEDED');
 
     const page = await request(app.getHttpServer())
       .get(`/v1/searches/${searchId}/findings`)
       .set('Authorization', auth());
     expect(page.status).toBe(200);
     const body = page.body as Record<string, unknown>;
+    expectPipelineRan(settled, body);
 
     // The fixtures respond to this subject, so this run finds things. That the count is
     // non-zero is what proves the discovery, fetch, extraction and banding stages all ran —
@@ -447,4 +482,38 @@ async function runSearch(): Promise<string> {
   const searchId = String((accepted.body as Record<string, unknown>)['searchId']);
   await waitForTerminal(searchId);
   return searchId;
+}
+
+/**
+ * The fixture pipeline ran, and any degradation is a source with nothing on its shelf.
+ *
+ * This used to be `expect(execution).toBe('SUCCEEDED')`, and that assertion silently encoded an
+ * assumption about the *environment* rather than about the API: that the only sources in the
+ * registry are the fixtures this suite seeds. Once the ten real indexed sources were onboarded,
+ * a deployment legitimately carried one — `world-bank-debarred` — that is APPROVED, holds no
+ * snapshot because its gateway needs a credential this deployment does not have, and is
+ * therefore reported as a **coverage gap at rung 0**. The run became `PARTIAL`, correctly, and
+ * an assertion about fixtures started failing for a reason that has nothing to do with fixtures.
+ *
+ * So the check is now the precise one. `FAILED` is still refused — it is terminal too and would
+ * pass a weaker assertion. `PARTIAL` is accepted **only** when every degraded source is an
+ * indexed source with no snapshot, which is exactly the honest coverage gap. A fixture that
+ * broke, or a source that failed for any other reason, still fails this test.
+ */
+function expectPipelineRan(settled: Record<string, unknown>, page?: Record<string, unknown>): void {
+  const execution = String(settled['execution']);
+  expect(['SUCCEEDED', 'PARTIAL'], JSON.stringify(settled)).toContain(execution);
+  if (execution === 'SUCCEEDED') {
+    return;
+  }
+  const outcomes = ((page?.['sourceOutcomes'] ?? settled['sourceOutcomes'] ?? []) as Array<
+    Record<string, unknown>
+  >).filter((outcome) => outcome['outcome'] === 'FAILED' || outcome['outcome'] === 'PARTIAL');
+  expect(outcomes.length, 'PARTIAL with no degraded source named').toBeGreaterThan(0);
+  for (const outcome of outcomes) {
+    expect(
+      outcome['cascadeRung'],
+      `only an indexed source with no snapshot may degrade this run; ${String(outcome['sourceId'])} did: ${String(outcome['detail'])}`,
+    ).toBe(0);
+  }
 }

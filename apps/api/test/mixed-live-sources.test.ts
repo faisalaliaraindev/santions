@@ -107,6 +107,7 @@ function secDocument(sourceId: string, sourceName: string, url: string): Record<
           approvedOn: '2026-09-15',
           decision: 'D17',
         },
+        robotsException: null,
       },
     },
   };
@@ -143,6 +144,7 @@ const GDELT_DOCUMENT: Record<string, unknown> = {
         approvedOn: '2026-09-18',
         decision: 'TEST',
       },
+      robotsException: null,
     },
   },
 };
@@ -178,6 +180,7 @@ const VERSIONS: Readonly<Record<string, ActiveSourceVersion>> = {
       approvedOn: '2026-09-18',
       decision: 'TEST',
     },
+    robotsException: null,
     endpointUrl: GDELT_URL,
     endpointKind: 'QUERY_FEED',
     queryParam: 'query',
@@ -207,6 +210,7 @@ function secVersion(sourceId: string, sourceName: string, url: string): ActiveSo
       approvedOn: '2026-09-15',
       decision: 'D17',
     },
+    robotsException: null,
     endpointUrl: url,
     endpointKind: 'FIXED_FEED',
     queryParam: null,

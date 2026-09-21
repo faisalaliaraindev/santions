@@ -58,6 +58,7 @@ import { loadConfig } from '../../apps/api/src/config/config.js';
 import { originKeyFor } from '../../apps/api/src/common/attempt-limiter.js';
 import { OutboxPublisher } from '../../apps/api/src/jobs/outbox-publisher.js';
 import { WorkerRuntime } from '../../apps/api/src/jobs/worker-runtime.service.js';
+import { createSuiteQueues, suiteQueueUrl } from './support/queues.js';
 
 const MONGODB_URI =
   process.env['MONGODB_URI'] ??
@@ -78,6 +79,16 @@ const FIXTURE_SUBJECT = 'María Fernanda Solís Rojas';
 /** A password that clears the policy: long, not a known-bad, and containing neither identifier. */
 const PASSWORD = 'harbour-lantern-drift-98';
 
+/** Where LocalStack answers. One definition, used by both the queue helper and `TEST_ENV`. */
+const SQS = {
+  endpointUrl: process.env['AWS_ENDPOINT_URL'] ?? 'http://127.0.0.1:28566',
+  region: process.env['AWS_REGION'] ?? 'eu-west-2',
+  accessKeyId: process.env['AWS_ACCESS_KEY_ID'] ?? 'test',
+} as const;
+
+/** Unique across `tests/e2e`. See `support/queues.ts` for why each suite owns one. */
+const QUEUE_NAME = 'adverse-search-jobs-tenant-onboarding-e2e';
+
 const TEST_ENV: NodeJS.ProcessEnv = {
   NODE_ENV: 'test',
   ADVERSE_SEARCH_MODE: 'mock',
@@ -90,15 +101,25 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   SESSION_COOKIE_SECURE: 'false',
   CORS_ORIGINS: '',
 
-  AWS_REGION: process.env['AWS_REGION'] ?? 'eu-west-2',
-  AWS_ENDPOINT_URL: process.env['AWS_ENDPOINT_URL'] ?? 'http://127.0.0.1:28566',
-  AWS_ACCESS_KEY_ID: process.env['AWS_ACCESS_KEY_ID'] ?? 'test',
+  AWS_REGION: SQS.region,
+  AWS_ENDPOINT_URL: SQS.endpointUrl,
+  AWS_ACCESS_KEY_ID: SQS.accessKeyId,
   AWS_SECRET_ACCESS_KEY: process.env['AWS_SECRET_ACCESS_KEY'] ?? 'test',
-  JOBS_QUEUE_URL:
-    process.env['JOBS_QUEUE_URL'] ?? 'http://127.0.0.1:28566/000000000000/adverse-search-jobs',
-  JOBS_DEAD_LETTER_QUEUE_URL:
-    process.env['JOBS_DEAD_LETTER_QUEUE_URL'] ??
-    'http://127.0.0.1:28566/000000000000/adverse-search-jobs-dlq',
+
+  /**
+   * **This suite's own queue, not the stack's.**
+   *
+   * A `pnpm dev` worker polls `adverse-search-jobs` from `.env` for as long as somebody leaves it
+   * running, in whatever mode and whatever build it booted with. It took this suite's messages on
+   * 2026-09-21, and a stolen message here reads as a provisioning bug in the tenant under test —
+   * the very thing this suite exists to rule out. `tests/e2e/support/queues.ts` has the account.
+   */
+  JOBS_QUEUE_URL: suiteQueueUrl(SQS, QUEUE_NAME, 'TENANT_ONBOARDING_E2E_QUEUE_URL'),
+  JOBS_DEAD_LETTER_QUEUE_URL: suiteQueueUrl(
+    SQS,
+    `${QUEUE_NAME}-dlq`,
+    'TENANT_ONBOARDING_E2E_DLQ_URL',
+  ),
 
   /**
    * The fixture server, and it is NOT optional.
@@ -156,12 +177,23 @@ const LOOPBACK_KEYS = ['::ffff:127.0.0.1', '::1', '127.0.0.1'].map((ip) =>
 );
 
 async function clearSignupBound(): Promise<void> {
+  // SIGNUP **and** LOGIN, for the same reason and with the same narrow scope.
+  //
+  // D-056 bounds signup per origin and D-059 bounds sign-in the same way, and this suite does
+  // both several times from loopback — so running it twice within the window makes it
+  // indistinguishable from the abuse the bounds exist to stop, and it fails with a 429 that
+  // says nothing about the code under test. Only these two buckets, only for loopback: both
+  // limiters stay genuinely under test in `tests/security/`, which asserts that they fire.
   await db
     .collection('attemptLog')
-    .deleteMany({ bucket: 'SIGNUP', originKey: { $in: LOOPBACK_KEYS } });
+    .deleteMany({ bucket: { $in: ['SIGNUP', 'LOGIN'] }, originKey: { $in: LOOPBACK_KEYS } });
 }
 
 beforeAll(async () => {
+  // Idempotent, and part of this suite's setup rather than a bootstrap step somebody has to
+  // remember: a queue that does not exist yet fails at publish time, not at configuration time.
+  await createSuiteQueues(SQS, QUEUE_NAME);
+
   mongo = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
   try {
     await mongo.connect();
@@ -462,8 +494,6 @@ describe('a brand-new tenant runs an adverse search with its own key', () => {
     const searchId = await startSearch(subject);
     const settled = await waitForTerminal(searchId);
 
-    // SUCCEEDED, not merely terminal: FAILED is terminal too and would pass a weaker assertion.
-    expect(settled['execution'], JSON.stringify(settled)).toBe('SUCCEEDED');
     // The result belongs to the tenant that ran it.
     expect(settled['tenantId']).toBe(alpha.tenantId);
     expect(settled['environment']).toBe('sandbox');
@@ -473,6 +503,7 @@ describe('a brand-new tenant runs an adverse search with its own key', () => {
       .set('Authorization', sandboxAuth());
     expect(page.status).toBe(200);
     const body = page.body as Json;
+    expectPipelineRan(settled, body);
 
     // Something meaningful, not just a 200: the fixtures respond to this subject, so a non-zero
     // count is what proves discovery, fetch, extraction and banding all ran for THIS tenant's
@@ -572,3 +603,37 @@ describe('the dev mailbox route', () => {
     expect(body['token']).toBeTypeOf('string');
   });
 });
+
+/**
+ * The fixture pipeline ran, and any degradation is a source with nothing on its shelf.
+ *
+ * This used to be `expect(execution).toBe('SUCCEEDED')`, and that assertion silently encoded an
+ * assumption about the *environment* rather than about the API: that the only sources in the
+ * registry are the fixtures this suite seeds. Once the ten real indexed sources were onboarded,
+ * a deployment legitimately carried one — `world-bank-debarred` — that is APPROVED, holds no
+ * snapshot because its gateway needs a credential this deployment does not have, and is
+ * therefore reported as a **coverage gap at rung 0**. The run became `PARTIAL`, correctly, and
+ * an assertion about fixtures started failing for a reason that has nothing to do with fixtures.
+ *
+ * So the check is now the precise one. `FAILED` is still refused — it is terminal too and would
+ * pass a weaker assertion. `PARTIAL` is accepted **only** when every degraded source is an
+ * indexed source with no snapshot, which is exactly the honest coverage gap. A fixture that
+ * broke, or a source that failed for any other reason, still fails this test.
+ */
+function expectPipelineRan(settled: Record<string, unknown>, page?: Record<string, unknown>): void {
+  const execution = String(settled['execution']);
+  expect(['SUCCEEDED', 'PARTIAL'], JSON.stringify(settled)).toContain(execution);
+  if (execution === 'SUCCEEDED') {
+    return;
+  }
+  const outcomes = ((page?.['sourceOutcomes'] ?? settled['sourceOutcomes'] ?? []) as Array<
+    Record<string, unknown>
+  >).filter((outcome) => outcome['outcome'] === 'FAILED' || outcome['outcome'] === 'PARTIAL');
+  expect(outcomes.length, 'PARTIAL with no degraded source named').toBeGreaterThan(0);
+  for (const outcome of outcomes) {
+    expect(
+      outcome['cascadeRung'],
+      `only an indexed source with no snapshot may degrade this run; ${String(outcome['sourceId'])} did: ${String(outcome['detail'])}`,
+    ).toBe(0);
+  }
+}

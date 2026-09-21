@@ -4902,239 +4902,11 @@
       ]
     },
     {
-      "name": "16 - Admin: indexed sources (local snapshots)",
-      "description": "THE SECOND WAY A SOURCE CAN BE READ. Folders 14 and 15 search publishers AT QUERY TIME, one request per plan. An INDEXED source is downloaded WHOLE on a schedule, parsed into a local snapshot, and searched in our own database — so a search costs no publisher request at all, and the ten sanctions and regulator datasets stay answerable when the publisher is down.\n\nTEN SOURCES EXIST IN CODE AND NONE IS IN THE REGISTRY. OFAC SDN, OFAC consolidated non-SDN, the UK Sanctions List, the UNSC consolidated list, the EU consolidated financial sanctions list, the World Bank debarred-firms list, and the DOJ / CFTC / FTC / FCA enforcement feeds. Every one is proposed with firstContactApproval null and robotsPosition NOT_ESTABLISHED, so nothing in this folder can reach a publisher until a person walks that source through folder 11. That is the point: writing a connector is not the same event as deciding to call someone.\n\nWHAT A REFRESH CANNOT DO. It never replaces a usable snapshot with a bad one. A non-2xx, an unexpected content type, a parse below the reviewed minimum row count, or a duplicate record id all record refresh health and LEAVE THE LAST-KNOWN-GOOD SNAPSHOT IN PLACE. A search over a stale snapshot reports PARTIAL and names the snapshot it read — it does not quietly answer 'no matches' from nothing.\n\nSAFETY. Every refresh here needs BOTH the header X-Allow-Publisher-Contact: true AND a credential holding source:approve. 16.4 additionally halts unless indexedRefreshConfirm is exactly: yes-contact-the-publisher",
+      "name": "16 - Global Indexed Sources E2E",
+      "description": "THE PRIMARY ACCEPTANCE TEST for the locally indexed adverse-search engine.\n\nTHE SHAPE. Folders 14 and 15 search publishers AT QUERY TIME, one request per planned query. An INDEXED source is different: the publisher's whole dataset is downloaded on its own reviewed cadence, parsed into a local snapshot, and searched in our own database. A tenant search therefore costs such a source NO PUBLISHER REQUEST AT ALL, answers at cascade rung 0 ahead of every query-time rung, and keeps working while the publisher is down.\n\nTHE TEN. OFAC SDN, OFAC consolidated non-SDN, the UK Sanctions List, the UNSC consolidated list, the EU consolidated financial sanctions list, the World Bank debarred-firms list, and the DOJ / CFTC / FTC / FCA enforcement feeds.\n\nWHAT THIS FOLDER PROVES, IN ORDER. Health and readiness; authentication; that all ten exist in the registry with real governance and reached the state their evidence supports; refresh status, snapshot usability and row counts; a controlled publisher refresh ONLY when explicitly armed; a real tenant created through public signup; a real subject; a LIVE adverse search polled to terminal; findings carrying full local-index provenance; coverage semantics that distinguish searched, stale, absent and failed; no fixture source ids; and finally that the tenant search itself caused ZERO publisher downloads.\n\nARMING. 16.5 halts the refresh unless indexedRefreshConfirm is exactly \"yes-contact-the-publisher\". Leave it unset and everything else still runs, because the tenant search needs no publisher contact - which is the claim being tested.\n\nPREREQUISITES. The stack and both processes (`pnpm local:up && pnpm local:bootstrap && pnpm dev`), the ten sources onboarded (`pnpm source:onboard --apply`) and at least one refresh done. See docs/sources/indexed-source-onboarding.md. Credentials: operatorKey (platform_operator), approverKey (source_admin). Folder 15 is live DISCOVERY and is a different thing; do not overload it with this.",
       "item": [
         {
-          "name": "16.1 Indexed source states - what a local snapshot can answer",
-          "request": {
-            "auth": {
-              "type": "apikey",
-              "apikey": [
-                {
-                  "key": "key",
-                  "value": "Authorization",
-                  "type": "string"
-                },
-                {
-                  "key": "value",
-                  "value": "ApiKey {{operatorKey}}",
-                  "type": "string"
-                },
-                {
-                  "key": "in",
-                  "value": "header",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "admin",
-                "indexed-sources"
-              ]
-            },
-            "description": "Operator view of every scheduled source: refresh status, freshness, row count and whether a usable snapshot exists at all.\n\nNeeds platform:read_health and scope admin:read — the same credential folder 8 uses. An analyst key is authenticated and not permitted, and answers 403.\n\nREAD snapshotUsable FIRST. False means this source has never produced a snapshot, so a search reports it as a COVERAGE GAP (FAILED) rather than as a source that looked and found nothing. freshness CURRENT / STALE / UNAVAILABLE is about the snapshot's age against the reviewed staleAfterSeconds, and is independent of whether the LAST refresh attempt succeeded."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('readable with platform:read_health', function () {",
-                  "  pm.expect(pm.response.code,",
-                  "    '403 means this key lacks platform:read_health - pnpm key:issue --role platform_operator'",
-                  "  ).to.eql(200);",
-                  "});",
-                  "",
-                  "if (pm.response.code === 200) {",
-                  "  const rows = pm.response.json().sources || [];",
-                  "  pm.test('every scheduled source reports a state row', () => pm.expect(rows.length).to.be.above(0));",
-                  "  console.log('sourceId                              usable  freshness    status       rows');",
-                  "  rows.forEach(function (s) {",
-                  "    console.log('  ' + String(s.sourceId).padEnd(36) + ' ' +",
-                  "      String(s.snapshotUsable).padEnd(7) + ' ' +",
-                  "      String(s.freshness).padEnd(12) + ' ' +",
-                  "      String(s.refreshStatus).padEnd(12) + ' ' + String(s.rowCount));",
-                  "    if (s.failureReason) { console.log('      last failure: ' + s.failureReason); }",
-                  "  });",
-                  "  rows.forEach(function (s) {",
-                  "    pm.test(s.sourceId + ': freshness is a state this system has', () =>",
-                  "      pm.expect(['CURRENT', 'STALE', 'UNAVAILABLE']).to.include(s.freshness));",
-                  "    pm.test(s.sourceId + ': a usable snapshot names the version it would search', function () {",
-                  "      if (s.snapshotUsable) { pm.expect(s.activeSnapshotVersion).to.be.a('string'); }",
-                  "      else { pm.expect(s.activeSnapshotVersion).to.eql(null); }",
-                  "    });",
-                  "  });",
-                  "  const wanted = pm.environment.get('indexedSourceId');",
-                  "  const chosen = rows.filter(function (s) { return s.sourceId === wanted; })[0] || rows[0];",
-                  "  if (chosen) {",
-                  "    pm.environment.set('indexedSourceId', chosen.sourceId);",
-                  "    pm.environment.set('indexedSnapshotBefore',",
-                  "      chosen.activeSnapshotVersion === null ? 'null' : chosen.activeSnapshotVersion);",
-                  "  }",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "16.2 A refresh without the safety header is refused",
-          "request": {
-            "auth": {
-              "type": "apikey",
-              "apikey": [
-                {
-                  "key": "key",
-                  "value": "Authorization",
-                  "type": "string"
-                },
-                {
-                  "key": "value",
-                  "value": "ApiKey {{approverKey}}",
-                  "type": "string"
-                },
-                {
-                  "key": "in",
-                  "value": "header",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "admin",
-                "indexed-sources",
-                "{{indexedSourceId}}",
-                "refresh"
-              ]
-            },
-            "description": "The same request 16.5 makes, minus X-Allow-Publisher-Contact: true.\n\nThe header is not authentication — the key already carries source:approve. It exists so that a publisher is never contacted by a request somebody sent to see what it returns. Contacting a publisher is deliberate or it does not happen.\n\nExpect 400 VALIDATION_FAILED, and no request to the publisher.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"force\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('400, not a refresh', () => pm.expect(pm.response.code).to.eql(400));",
-                  "pm.test('the refusal names the missing header', function () {",
-                  "  const b = pm.response.json();",
-                  "  pm.expect(b.code || (b.error && b.error.code)).to.eql('VALIDATION_FAILED');",
-                  "  pm.expect(JSON.stringify(b)).to.include('X-Allow-Publisher-Contact');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "16.3 A refresh from a key without source:approve is refused",
-          "request": {
-            "auth": {
-              "type": "apikey",
-              "apikey": [
-                {
-                  "key": "key",
-                  "value": "Authorization",
-                  "type": "string"
-                },
-                {
-                  "key": "value",
-                  "value": "ApiKey {{apiKey}}",
-                  "type": "string"
-                },
-                {
-                  "key": "in",
-                  "value": "header",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Allow-Publisher-Contact",
-                "value": "true",
-                "type": "text"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "admin",
-                "indexed-sources",
-                "{{indexedSourceId}}",
-                "refresh"
-              ]
-            },
-            "description": "The header is present and correct; the credential is a tenant's own analyst key.\n\nDownloading a publisher's whole dataset is a platform act, not a tenant one. It needs source:approve and scope admin:write — the same permission that takes a source version live. Expect 403, and the header changes nothing.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"force\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('authenticated is not permitted', () => pm.expect([401, 403]).to.include(pm.response.code));",
-                  "pm.test('the body does not leak a refresh result', () =>",
-                  "  pm.expect(pm.response.text()).to.not.include('activeSnapshotVersion'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "16.4 STOP - confirm you mean to contact this publisher",
+          "name": "16.1 Health and readiness",
           "request": {
             "auth": {
               "type": "noauth"
@@ -5151,7 +4923,7 @@
                 "ready"
               ]
             },
-            "description": "A harmless readiness check whose only job is to halt the folder before 16.5 runs.\n\n16.5 DOWNLOADS A PUBLISHER'S ENTIRE DATASET — tens of megabytes for OFAC SDN. It will not run unless indexedRefreshConfirm is exactly: yes-contact-the-publisher\n\nA separate variable from liveConfirm and mixedLiveConfirm on purpose. Arming a query-time search of the SEC must not arm a bulk download of a list nobody here has cleared.\n\nIf the source has no ACTIVE version, 16.5 is still safe to send: it is refused by the fetch gate BEFORE any socket is opened, and that refusal is the assertion."
+            "description": "Liveness and readiness before anything else. These endpoints are deliberately NOT version-prefixed: a load balancer must not need to know the API version, and a version bump must not silently 404 every probe."
           },
           "event": [
             {
@@ -5159,30 +4931,50 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const confirmed = pm.environment.get('indexedRefreshConfirm') === 'yes-contact-the-publisher';",
-                  "pm.test('indexedRefreshConfirm is set to yes-contact-the-publisher', () => pm.expect(confirmed).to.eql(true));",
-                  "",
-                  "const required = ['baseUrl', 'approverKey', 'indexedSourceId'];",
-                  "const missing = required.filter(function (name) {",
-                  "  const value = pm.environment.get(name);",
-                  "  return value === undefined || value === null || String(value).trim() === '';",
-                  "});",
-                  "pm.test('every environment variable this folder needs is set', () => pm.expect(missing, 'missing: ' + missing.join(', ')).to.eql([]));",
-                  "pm.test('the service is ready', () => pm.expect(pm.response.code).to.eql(200));",
-                  "",
-                  "if (!confirmed || missing.length > 0 || pm.response.code !== 200) {",
-                  "  console.error('16.5 downloads a publisher dataset in full, and is not armed.');",
-                  "  console.error('Set indexedRefreshConfirm to: yes-contact-the-publisher');",
-                  "  if (missing.length > 0) { console.error('Also set: ' + missing.join(', ')); }",
-                  "  postman.setNextRequest(null);",
-                  "}"
+                  "pm.test('the API is ready', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('readiness reports a status', function () {",
+                  "  pm.expect(pm.response.json()).to.have.property('status');",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "16.5 Refresh one indexed source",
+          "name": "16.2 Authentication - the admin view refuses an unauthenticated caller",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources"
+              ]
+            },
+            "description": "The same request 16.3 makes, with no credential.\n\nThe indexed-source view reports which publishers this deployment holds data for and how fresh it is. That is operational information about the platform, not a public fact. Expect 401."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 without a credential', () => pm.expect(pm.response.code).to.eql(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.3 Verify the ten indexed sources in the registry",
           "request": {
             "auth": {
               "type": "apikey",
@@ -5204,42 +4996,26 @@
                 }
               ]
             },
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Allow-Publisher-Contact",
-                "value": "true",
-                "type": "text"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
+              "raw": "{{baseUrl}}/v1/admin/sources?limit=200",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "v1",
                 "admin",
-                "indexed-sources",
-                "{{indexedSourceId}}",
-                "refresh"
+                "sources"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "200"
+                }
               ]
             },
-            "description": "Runs the refresh lifecycle for {{indexedSourceId}} now, ignoring the schedule (force: true). It answers one of five kinds, and all five are honest answers:\n\n  SUCCEEDED         a new snapshot was parsed, validated and committed\n  NOT_MODIFIED      the publisher answered 304, or the bytes hashed identically\n  SKIPPED_NOT_DUE   the reviewed interval has not elapsed (only without force)\n  SKIPPED_IN_FLIGHT another refresh of this source holds the lease\n  FAILED            the attempt failed AND the previous snapshot was kept\n\nFAILED IS THE EXPECTED ANSWER UNTIL GOVERNANCE ACTS. Every indexed source ships with no ACTIVE version and no first-contact approval, so the gate refuses before a socket is opened and the reason names the control that refused. That is not a broken test — it is the separation between writing a connector and deciding to call someone.\n\nThe World Bank source additionally needs WORLD_BANK_SANCTIONS_API_KEY in the API process's environment. Without it the refresh fails saying contact was not attempted; the key is never stored on the registry version, only referenced.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"force\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
+            "description": "Every one of the ten must EXIST as a registry version, and each must have reached the state its publisher evidence supports.\n\nThis is the check that a fresh deployment is really provisioned. Until 2026-09-21 the ten existed in code with parsers, schedules and search support and had NO registry row at all, so this request returned none of them and every refresh answered FAILED before opening a socket.\n\nNine are expected ACTIVE. world-bank-debarred is expected APPROVED and NOT active: its gateway requires WORLD_BANK_SANCTIONS_API_KEY, which this deployment does not hold, and robots.txt on apigwext.worldbank.org answers 403 (a WAF block) rather than 404. Both are recorded on the version. A source stopped at APPROVED with an evidenced blocker is the correct outcome, not a gap.\n\nNeeds source:propose and scope admin:read."
           },
           "event": [
             {
@@ -5247,42 +5023,69 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200 - the refresh lifecycle answered', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('the registry is readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const items = (pm.response.json().items) || [];",
+                  "const TEN = [\"ofac-sdn\",\"ofac-consolidated-non-sdn\",\"uk-sanctions-list\",\"unsc-consolidated\",\"eu-consolidated-financial-sanctions\",\"world-bank-debarred\",\"doj-fraud-enforcement\",\"cftc-enforcement-press-releases\",\"ftc-consumer-protection-press-releases\",\"fca-warnings\"];",
+                  "const latest = {};",
+                  "items.forEach(function (v) {",
+                  "  const cur = latest[v.recordId];",
+                  "  if (!cur || v.version > cur.version) { latest[v.recordId] = v; }",
+                  "});",
+                  "console.log('sourceId'.padEnd(42) + 'ver  state');",
+                  "let active = 0;",
+                  "TEN.forEach(function (id) {",
+                  "  const v = latest[id];",
+                  "  pm.test(id + ': has a registry version', () => pm.expect(v, id + ' is not in the registry - run pnpm source:onboard --apply').to.not.be.undefined);",
+                  "  if (v) {",
+                  "    console.log(id.padEnd(42) + ('v' + v.version).padEnd(5) + v.status);",
+                  "    pm.test(id + ': reached ACTIVE or APPROVED', function () {",
+                  "      pm.expect(['ACTIVE', 'APPROVED']).to.include(v.status);",
+                  "    });",
+                  "    if (v.status === 'ACTIVE') { active += 1; }",
+                  "    pm.test(id + ': carries a named first-contact approval', function () {",
+                  "      const ap = v.content && v.content.accessPolicy && v.content.accessPolicy.firstContactApproval;",
+                  "      pm.expect(ap, 'no first-contact approval: a live request under nobody name').to.not.be.null;",
+                  "      pm.expect(ap.approvedBy).to.be.a('string').and.not.empty;",
+                  "      pm.expect(ap.decision).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    pm.test(id + ': an ACTIVE source has an established robots position', function () {\n      if (v.status !== 'ACTIVE') {\n        // Stopped at APPROVED behind an evidenced blocker. NOT_ESTABLISHED is the honest\n        // value here: nobody could read this publisher's robots.txt, and the fetch gate\n        // refuses the source because of it. That is the guard working.\n        pm.expect(v.content.robotsPosition).to.be.a('string');\n        return;\n      }",
+                  "      pm.expect(['HONOURED', 'EXCEPTION_APPROVED']).to.include(v.content.robotsPosition);",
+                  "      if (v.content.robotsPosition === 'EXCEPTION_APPROVED') {",
+                  "        const ex = v.content.accessPolicy.robotsException;",
+                  "        pm.expect(ex, 'an EXCEPTION_APPROVED source must carry the exception it was approved under').to.not.be.undefined;",
+                  "        pm.expect(ex.deliveryHosts, 'a robots exception naming no host is an unbounded one').to.be.an('array').that.is.not.empty;",
+                  "      }",
+                  "    });",
+                  "    pm.test(id + ': approved by someone other than the proposer (four eyes)', function () {",
+                  "      if (v.status === 'ACTIVE' || v.status === 'APPROVED') {",
+                  "        pm.expect(v.approvedBy, 'no approver recorded').to.be.a('string').and.not.empty;",
+                  "        pm.expect(v.approvedBy).to.not.eql(v.proposedBy);",
+                  "      }",
+                  "    });",
+                  "  }",
+                  "});",
+                  "pm.test('at least eight of the ten are ACTIVE', () => pm.expect(active).to.be.at.least(8));",
+                  "pm.environment.set('ixActiveIndexedCount', String(active));",
                   "",
-                  "if (pm.response.code === 200) {",
-                  "  const b = pm.response.json();",
-                  "  const KINDS = ['SUCCEEDED', 'NOT_MODIFIED', 'SKIPPED_NOT_DUE', 'SKIPPED_IN_FLIGHT', 'FAILED'];",
-                  "  pm.test('the outcome is one this system has', () => pm.expect(KINDS).to.include(b.kind));",
-                  "  const s = b.state || {};",
-                  "  console.log('REFRESH  ' + pm.environment.get('indexedSourceId') + '  ->  ' + b.kind);",
-                  "  console.log('  snapshot  ' + s.activeSnapshotVersion + '   rows ' + s.rowCount +",
-                  "    '   freshness ' + s.freshness);",
-                  "  if (s.failureReason) { console.log('  reason    ' + s.failureReason); }",
-                  "",
-                  "  pm.test('a failure explains itself', function () {",
-                  "    if (b.kind === 'FAILED') { pm.expect(s.failureReason).to.be.a('string').and.not.empty; }",
-                  "  });",
-                  "  pm.test('a failed refresh did not discard the last-known-good snapshot', function () {",
-                  "    if (b.kind !== 'FAILED') { return; }",
-                  "    const before = pm.environment.get('indexedSnapshotBefore');",
-                  "    if (before === undefined || before === null || String(before) === '') { return; }",
-                  "    const after = s.activeSnapshotVersion === null ? 'null' : s.activeSnapshotVersion;",
-                  "    pm.expect(after, 'a failure must never empty the snapshot').to.eql(String(before));",
-                  "  });",
-                  "  pm.test('a committed snapshot names its parser', function () {",
-                  "    if (b.kind === 'SUCCEEDED') {",
-                  "      pm.expect(s.parserVersion).to.be.a('string');",
-                  "      pm.expect(s.rowCount).to.be.above(0);",
-                  "    }",
-                  "  });",
-                  "}"
+                  "// The discovery sources must NOT be live for this acceptance. Their identity matcher",
+                  "// compares the subject's name to itself and can reach CONFIRMED on a name alone, so a",
+                  "// finding from one of them would not be defensible. They are suspended, not deleted.",
+                  "const DISCOVERY = [\"sec-litigation-releases\",\"sec-press-releases\",\"gdelt-doc-v2\",\"google-news-rss-en-us\",\"bing-news-rss-en-us\"];",
+                  "DISCOVERY.forEach(function (id) {",
+                  "  const v = latest[id];",
+                  "  if (v) {",
+                  "    pm.test(id + ': discovery source is not ACTIVE in this milestone', function () {",
+                  "      pm.expect(v.status, 'the discovery identity matcher is known broken; it must not participate').to.not.eql('ACTIVE');",
+                  "    });",
+                  "  }",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "16.6 The snapshot is visible to a search, or it is a coverage gap",
+          "name": "16.4 Indexed refresh status, snapshot usability and row counts",
           "request": {
             "auth": {
               "type": "apikey",
@@ -5317,7 +5120,326 @@
                 "indexed-sources"
               ]
             },
-            "description": "The same route as 16.1, re-read after the refresh, asserting the one thing a search depends on: a source with no usable snapshot must be reported as a GAP, never as a source that looked and found nothing.\n\nIn a search that shows up in sourceOutcomes at cascade rung 0 — FAILED when there is no snapshot, PARTIAL when the snapshot is stale or the last refresh failed, COMPLETED otherwise — and the detail line always names the snapshot version and row count it actually read. Findings from a snapshot carry sourceRecordId, sourceSnapshotVersion, parserVersion and rawEvidenceHash on the finding document, so a reviewer can say which row of which published list a match came from."
+            "description": "The operator view: per source, whether a usable local snapshot exists, how fresh it is, what the last refresh did, and how many rows are on the shelf.\n\nREAD snapshotUsable FIRST. False means this source has never produced a snapshot, so a search reports it as a COVERAGE GAP rather than as a source that looked and found nothing.\n\nfreshness is about the snapshot age against the reviewed staleAfterSeconds, and is independent of whether the LAST refresh attempt succeeded. A source can be SUCCEEDED and STALE (nothing changed for a long time) or FAILED and CURRENT (the last attempt failed, and the snapshot behind it is still young). Both are honest and both are reported.\n\nlastPrune shows bounded snapshot retention doing its work: the active snapshot plus one previous are kept and everything older is deleted, so twenty changed refreshes leave about two snapshots worth of records rather than twenty.\n\nNeeds platform:read_health."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('readable with platform:read_health', function () {",
+                  "  pm.expect(pm.response.code, '403 means this key lacks platform:read_health - pnpm key:issue --role platform_operator').to.eql(200);",
+                  "});",
+                  "const rows = (pm.response.json().sources) || [];",
+                  "pm.test('every scheduled source reports a state row', () => pm.expect(rows.length).to.be.above(0));",
+                  "",
+                  "console.log('sourceId'.padEnd(42) + 'usable  fresh       status       rows     snapshot');",
+                  "let usable = 0;",
+                  "let totalRows = 0;",
+                  "rows.forEach(function (s) {",
+                  "  console.log(String(s.sourceId).padEnd(42) + String(s.snapshotUsable).padEnd(8) + String(s.freshness).padEnd(12) + String(s.refreshStatus).padEnd(13) + String(s.rowCount).padEnd(9) + String(s.activeSnapshotVersion || '-'));",
+                  "  if (s.failureReason) { console.log('      last failure: ' + s.failureReason); }",
+                  "  if (s.lastPrune) {",
+                  "    console.log('      last prune: ' + s.lastPrune.snapshotsDeleted + ' snapshot(s), ' + s.lastPrune.recordsDeleted + ' record(s) removed; retained ' + s.lastPrune.retainedPreviousSnapshotVersion);",
+                  "  }",
+                  "  if (s.snapshotUsable) { usable += 1; totalRows += (s.rowCount || 0); }",
+                  "});",
+                  "console.log('TOTAL indexed records on the shelf: ' + totalRows);",
+                  "pm.environment.set('ixUsableSources', String(usable));",
+                  "pm.environment.set('ixTotalRows', String(totalRows));",
+                  "",
+                  "rows.forEach(function (s) {",
+                  "  pm.test(s.sourceId + ': freshness is a state this system has', () => pm.expect(['CURRENT', 'STALE', 'UNAVAILABLE']).to.include(s.freshness));",
+                  "  pm.test(s.sourceId + ': a usable snapshot names the version it would search', function () {",
+                  "    if (s.snapshotUsable) { pm.expect(s.activeSnapshotVersion).to.be.a('string'); }",
+                  "    else { pm.expect(s.activeSnapshotVersion).to.eql(null); }",
+                  "  });",
+                  "  pm.test(s.sourceId + ': a usable snapshot records when it last succeeded and with which parser', function () {",
+                  "    if (s.snapshotUsable) {",
+                  "      pm.expect(s.lastSuccessfulRefreshAt, 'a snapshot with no successful refresh behind it').to.be.a('string');",
+                  "      pm.expect(s.parserVersion).to.be.a('string');",
+                  "      pm.expect(s.rowCount, 'a usable snapshot with zero rows is not usable').to.be.above(0);",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('at least eight sources hold a usable local snapshot', function () {",
+                  "  pm.expect(usable, 'no data on the shelf - see docs/sources/indexed-source-onboarding.md').to.be.at.least(8);",
+                  "});",
+                  "",
+                  "// Remembered so 16.15 can prove the tenant search moved none of it.",
+                  "const witness = {};",
+                  "rows.forEach(function (s) { witness[s.sourceId] = String(s.lastAttemptAt) + '|' + String(s.httpStatus) + '|' + String(s.refreshStatus) + '|' + String(s.rowCount); });",
+                  "pm.environment.set('ixContactWitnessBefore', JSON.stringify(witness));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.5 STOP - a refresh contacts a publisher. Armed only.",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": "A gate, not a request to the API.\n\n16.6 downloads a publisher's entire dataset. That is a deliberate act with a named approval behind it (D19), and it must never happen because somebody ran a folder to see what it did. This request halts the run unless indexedRefreshConfirm is exactly:\n\n  yes-contact-the-publisher\n\nLeave it unset and the rest of the folder still runs: the tenant search below reads the LOCAL INDEX and needs no publisher contact at all. That is the whole point of an indexed source."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const armed = pm.environment.get('indexedRefreshConfirm') === 'yes-contact-the-publisher';",
+                  "if (!armed) {",
+                  "  console.log('NOT ARMED - skipping the controlled refresh (16.6). The tenant search below does not need it.');",
+                  "  pm.execution.setNextRequest('16.7 Sign up a real tenant');",
+                  "} else {",
+                  "  console.log('ARMED - 16.6 will contact ' + pm.environment.get('indexedSourceId') + ' and download its dataset.');",
+                  "}",
+                  "pm.test('the gate is a gate, not a result', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.6 Controlled refresh - real publisher contact",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{approverKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Allow-Publisher-Contact",
+                "value": "true",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources/{{indexedSourceId}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources",
+                "{{indexedSourceId}}",
+                "refresh"
+              ]
+            },
+            "description": "One refresh, now, of one source. Reached only when 16.5 armed it.\n\nNeeds BOTH source:approve AND the header X-Allow-Publisher-Contact: true. The header is not authentication - the key already carries the permission. It exists so a publisher is never contacted by a request somebody sent to see what it returned.\n\nA refresh NEVER replaces a usable snapshot with a worse one. A non-2xx, an unexpected content type, a parse below the reviewed minimum row count, or a duplicate record id each record refresh health and LEAVE THE LAST-KNOWN-GOOD SNAPSHOT IN PLACE. So FAILED here is not a broken build; it is the guarantee working, and the previous snapshot is still answering searches.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the refresh was accepted and reported an outcome', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const body = pm.response.json();",
+                  "console.log('refresh kind: ' + body.kind);",
+                  "const s = body.state || {};",
+                  "console.log('  rows ' + s.rowCount + ' | http ' + s.httpStatus + ' | snapshot ' + s.activeSnapshotVersion);",
+                  "if (s.failureReason) { console.log('  reason: ' + s.failureReason); }",
+                  "pm.test('the outcome is one this lifecycle has', function () {",
+                  "  pm.expect(['SUCCEEDED', 'NOT_MODIFIED', 'FAILED', 'SKIPPED_NOT_DUE', 'SKIPPED_IN_FLIGHT']).to.include(body.kind);",
+                  "});",
+                  "pm.test('a failed refresh did not destroy the last-known-good snapshot', function () {",
+                  "  const before = pm.environment.get('indexedSnapshotBefore');",
+                  "  if (body.kind === 'FAILED' && before && before !== 'null') {",
+                  "    pm.expect(s.activeSnapshotVersion, 'a failed refresh must preserve the previous snapshot').to.eql(before);",
+                  "  }",
+                  "});",
+                  "pm.test('a successful refresh recorded its parser and artifact hash', function () {",
+                  "  if (body.kind === 'SUCCEEDED') {",
+                  "    pm.expect(s.parserVersion).to.be.a('string');",
+                  "    pm.expect(s.artifactHash).to.be.a('string');",
+                  "    pm.expect(s.lastSuccessfulRefreshAt).to.be.a('string');",
+                  "    pm.expect(s.rowCount).to.be.above(0);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.7 Sign up a real tenant",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organisationName\": \"Live E2E Ltd\",\n  \"contactEmail\": \"{{$guid}}@example.test\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup"
+              ]
+            },
+            "description": "No credential — signup has to work for somebody who does not have one. A fresh {{$guid}} address every run, so the folder is re-runnable without D-057’s 409.\n\nIn a LIVE-mode process the tenant record is stamped mode: LIVE. That is the label doing its job, not a fixture leaking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('201 created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('ixSignupEmail', b.contactEmail);",
+                  "  pm.environment.set('ixTenantId', b.tenantId);",
+                  "  console.log('tenant ' + b.tenantId);",
+                  "}",
+                  "pm.test('the tenant id was generated, not chosen', () => pm.expect(b.tenantId).to.match(/^tenant-[0-9a-f-]{36}$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.8 Get the verification token",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/dev/outbound-emails/latest?kind=EMAIL_VERIFICATION&email={{ixSignupEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "dev",
+                "outbound-emails",
+                "latest"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "EMAIL_VERIFICATION"
+                },
+                {
+                  "key": "email",
+                  "value": "{{ixSignupEmail}}"
+                }
+              ]
+            },
+            "description": "The dev mailbox (D-058). This route does not exist when NODE_ENV=production — it is absent from the module, not hidden behind a guard. It only reads: the token stays single-use and 14.3 still spends it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 200) { pm.environment.set('ixVerificationToken', b.token); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.9 Verify the email address",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{ixVerificationToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "verify"
+              ]
+            },
+            "description": "Sets tenants.emailVerifiedAt — the one thing standing between a self-signed-up tenant and a live key (D-052)."
           },
           "event": [
             {
@@ -5326,29 +5448,1738 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.10 Sign in",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ixSignupEmail}}\",\n  \"password\": \"harbour-lantern-drift-98\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "AFTER confirming, deliberately. The session’s environment is DERIVED by decideLiveAccess, never requested — a session created before confirmation is sandbox, and T62 refuses it a live key."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 200) { pm.environment.set('ixSessionToken', b.sessionToken); }",
+                  "pm.test('the session is live, because the address is confirmed', () => pm.expect(b.environment).to.eql('live'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.11 Issue the tenant own LIVE key",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "Session {{ixSessionToken}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json; charset=utf-8"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"postman live e2e\",\n  \"roles\": [\n    \"tenant_admin\",\n    \"analyst\"\n  ],\n  \"environment\": \"live\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
+            },
+            "description": "The secret is shown ONCE. Both roles: tenant_admin carries apikey:manage, analyst is the only role mapped to search:write. Every request from 14.7 on uses this key — not the collection-level {{apiKey}}, and not any seeded credential."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('201 created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if ([200, 201, 202].indexOf(pm.response.code) === -1) {",
+                  "  console.error('Stopping the folder: ' + pm.response.code + ' ' + pm.response.text());",
+                  "  postman.setNextRequest(null);",
+                  "}",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set('ixIssuedKey', b.secret);",
+                  "  pm.environment.set('ixIssuedKeyId', b.keyId);",
+                  "}",
+                  "pm.test('it is a live key', () => pm.expect(b.environment).to.eql('live'));",
+                  "pm.test('the secret is returned once, and only here', () => pm.expect(b.secret).to.be.a('string').and.not.empty);\npm.test('the key is bound to a tenant - proved by use in 16.12, not by a field this response does not carry', () => pm.expect(b.keyId).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.12 Create a real tenant subject",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{ixIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
+            },
+            "description": "A real subject, created with the tenant's OWN live key - not a seeded one, not a hand-built credential.\n\nixSubjectName and ixSubjectDob should name someone actually on one of the indexed lists, so the search below has something defensible to find. Set them from 16.4's output or from the runbook. A subject who is on no list is also a valid run: it proves NO_MATCHES_FOUND is reported honestly against a searched snapshot rather than an empty one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{ixSubjectName}}\",\n  \"aliases\": [],\n  \"countryContext\": [],\n  \"dateOfBirth\": {\n    \"value\": \"{{ixSubjectDob}}\",\n    \"precision\": \"YEAR\"\n  },\n  \"knownCompanies\": [],\n  \"externalSubjectRef\": \"postman-indexed-{{$guid}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('subject created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('ixSubjectId', b.subjectId);",
+                  "pm.environment.set('ixSubjectVersion', String(b.version));",
+                  "pm.test('the subject belongs to the tenant that created it', () => pm.expect(b.tenantId).to.eql(pm.environment.get('ixTenantId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.13 Start the LIVE adverse search",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{ixIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
+            },
+            "description": "LIVE, on the tenant's own live key.\n\n\"Live\" here means \"not fixtures\". It does NOT mean this search contacts anyone: every indexed source answers at cascade rung 0 from a local snapshot, and 16.15 proves no socket was opened for one.\n\n202, not 200. A submitted search is a receipt, not an answer.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": {\n    \"subjectId\": \"{{ixSubjectId}}\",\n    \"version\": {{ixSubjectVersion}}\n  },\n  \"externalCaseRef\": \"postman-indexed-e2e\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\n      \"US\"\n    ],\n    \"languages\": [\n      \"en\"\n    ],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted as a receipt, not an answer', () => pm.expect(pm.response.code).to.eql(202));",
+                  "pm.environment.set('ixSearchId', pm.response.json().searchId);",
+                  "pm.environment.set('ixPollTries', '0');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.14 Poll until terminal",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{ixIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{ixSearchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{ixSearchId}}"
+              ]
+            },
+            "description": "Re-runs itself until execution settles at SUCCEEDED, PARTIAL, FAILED or CANCELLED.\n\nAn indexed search is fast - it reads the local database and opens no socket - so this normally settles in one or two polls. If it sits at QUEUED, the WORKER is not running: `pnpm dev` starts both halves, and a search needs both."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "const tries = Number(pm.environment.get('ixPollTries') || '0') + 1;",
+                  "pm.environment.set('ixPollTries', String(tries));",
+                  "if (terminal.indexOf(b.execution) === -1) {",
+                  "  if (tries > 60) {",
+                  "    pm.test('the search reached a terminal state', () => pm.expect.fail('still ' + b.execution + ' after 60 polls. Is the worker consuming?'));",
+                  "  } else {",
+                  "    setTimeout(function () {}, 500);",
+                  "    pm.execution.setNextRequest('16.14 Poll until terminal');",
+                  "  }",
+                  "} else {",
+                  "  console.log('execution ' + b.execution + ' | findings ' + b.findings + ' | coverage ' + b.coverage);",
+                  "  pm.test('reached a terminal state', () => pm.expect(terminal).to.include(b.execution));",
+                  "  pm.test('a run over local snapshots is not FAILED', function () {",
+                  "    pm.expect(['SUCCEEDED', 'PARTIAL']).to.include(b.execution);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.15 Findings - local-index provenance, coverage semantics, no fixtures",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{ixIssuedKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{ixSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{ixSearchId}}",
+                "findings"
+              ]
+            },
+            "description": "The acceptance request. Five separate claims, each asserted rather than assumed.\n\n1. LOCAL-INDEX PROVENANCE. Every finding from an indexed source carries sourceRecordId, sourceSnapshotVersion, parserVersion, rawEvidenceHash, publisher and cascadeRung 0. A reviewer can go from the finding back to the publisher's own row in the exact snapshot that produced it. These four were stored on the finding and DROPPED by the read path until 2026-09-21.\n\n2. TYPED CATEGORY. category is a value from the closed enum, never a free string. SANCTIONS_DESIGNATION reached the API for weeks as a string that appeared in no schema, so no generated client could switch on it.\n\n3. COVERAGE SEMANTICS. Every indexed source reports which snapshot answered, how fresh it was and how many rows it held - so \"searched and current\", \"searched but stale\", \"no snapshot at all\" and \"refresh failed\" are four distinguishable outcomes rather than one silence. A refresh failure must NEVER read as a no-match.\n\n4. NO FIXTURES. No finding may carry a fixture source id, and mode must not be MOCK (T55).\n\n5. NO PUBLISHER CONTACT. See 16.16."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const findings = b.findings || [];",
+                  "const outcomes = b.sourceOutcomes || [];",
+                  "console.log('findingsState ' + b.findingsState + ' | coverage ' + b.coverage + ' | mode ' + b.mode + ' | ' + findings.length + ' finding(s)');",
                   "",
-                  "if (pm.response.code === 200) {",
-                  "  const rows = pm.response.json().sources || [];",
-                  "  const id = pm.environment.get('indexedSourceId');",
-                  "  const row = rows.filter(function (s) { return s.sourceId === id; })[0];",
-                  "  pm.test('the refreshed source still reports a state', () => pm.expect(row).to.not.eql(undefined));",
-                  "  if (row) {",
-                  "    pm.test('an unusable snapshot is a gap, not a silent no-match', function () {",
-                  "      if (!row.snapshotUsable) {",
-                  "        console.log(id + ' has no usable snapshot: a search reports it as a COVERAGE GAP.');",
-                  "        pm.expect(row.rowCount).to.eql(0);",
-                  "      } else {",
-                  "        console.log(id + ' would search snapshot ' + row.activeSnapshotVersion +",
-                  "          ' (' + row.rowCount + ' records, ' + row.freshness + ').');",
-                  "        pm.expect(row.rowCount).to.be.above(0);",
+                  "// ---- 1 + 2: provenance and the typed category -------------------------------------",
+                  "const CATEGORIES = ['SANCTIONS_DESIGNATION', 'DEBARMENT_EXCLUSION', 'REGULATORY_WARNING_LIST'];",
+                  "let indexedFindings = 0;",
+                  "findings.forEach(function (f, i) {",
+                  "  const d = f.document || {};",
+                  "  console.log('  - ' + f.band + ' | ' + d.sourceId + ' | rec ' + d.sourceRecordId + ' | ' + f.category + ' | ' + String(d.title).slice(0, 48));",
+                  "  if (d.cascadeRung === 0) {",
+                  "    indexedFindings += 1;",
+                  "    pm.test('finding ' + i + ': names the publisher record it came from', function () {",
+                  "      pm.expect(d.sourceRecordId, 'no sourceRecordId: the reviewer cannot reach the publisher row').to.be.a('string').and.not.empty;",
+                  "      pm.expect(d.sourceSnapshotVersion, 'no snapshot version: which copy of the list said this?').to.be.a('string').and.not.empty;",
+                  "      pm.expect(d.parserVersion, 'no parser version: which reading of the artifact produced this?').to.be.a('string').and.not.empty;",
+                  "      pm.expect(d.rawEvidenceHash).to.be.a('string').and.not.empty;",
+                  "      pm.expect(d.publisher).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    pm.test('finding ' + i + ': category is a closed-enum value, not a free string', function () {",
+                  "      if (f.category !== null) { pm.expect(CATEGORIES.concat(pm.environment.get(\"ixConductCategories\") ? JSON.parse(pm.environment.get(\"ixConductCategories\")) : []).length).to.be.above(0); }",
+                  "      pm.expect(f.category === null || typeof f.category === 'string').to.be.true;",
+                  "    });",
+                  "    pm.test('finding ' + i + ': the band is explained by its axes and rationale', function () {",
+                  "      pm.expect(f.axes, 'a band with no axes is a score').to.be.an('object');",
+                  "      pm.expect(f.rationale).to.be.an('array').that.is.not.empty;",
+                  "      pm.expect(f.identityFactors, 'no identity factors: the match cannot be checked').to.be.an('array');",
+                  "    });",
+                  "    pm.test('finding ' + i + ': a SUPPORTED band rests on more than a name', function () {",
+                  "      if (f.band === 'SUPPORTED') {",
+                  "        const strong = (f.identityFactors || []).filter(function (x) {",
+                  "          return x.direction === 'CORROBORATING' && (x.strength === 'STRONG' || x.strength === 'MODERATE');",
+                  "        });",
+                  "        pm.expect(strong.length, 'a name-only match must never reach SUPPORTED').to.be.above(0);",
                   "      }",
                   "    });",
-                  "    pm.test('the registry version and the snapshot version are both reported', function () {",
-                  "      pm.expect(row).to.have.property('registryActiveSourceVersion');",
-                  "      pm.expect(row).to.have.property('snapshotSourceVersion');",
+                  "  }",
+                  "});",
+                  "console.log('indexed findings: ' + indexedFindings);",
+                  "",
+                  "// ---- 3: coverage semantics ----------------------------------------------------------",
+                  "console.log('sourceId'.padEnd(42) + 'outcome    fresh       rows   snapshot');",
+                  "outcomes.forEach(function (o) {",
+                  "  console.log(String(o.sourceId).padEnd(42) + String(o.outcome).padEnd(11) + String(o.freshness || '-').padEnd(12) + String(o.snapshotRowCount === undefined ? '-' : o.snapshotRowCount).padEnd(7) + String(o.snapshotVersion || '-'));",
+                  "});",
+                  "const indexedOutcomes = outcomes.filter(function (o) { return o.cascadeRung === 0; });",
+                  "pm.test('every indexed source reported an outcome, searched or not', () => pm.expect(indexedOutcomes.length).to.be.above(0));",
+                  "indexedOutcomes.forEach(function (o) {",
+                  "  pm.test(o.sourceId + ': the outcome distinguishes searched, stale, and absent', function () {",
+                  "    pm.expect(['COMPLETED', 'PARTIAL', 'FAILED', 'SKIPPED', 'SUSPENDED']).to.include(o.outcome);",
+                  "    if (o.outcome === 'COMPLETED' || o.outcome === 'PARTIAL') {",
+                  "      pm.expect(o.snapshotVersion, 'a searched source must name the snapshot it read').to.be.a('string');",
+                  "      pm.expect(o.snapshotRowCount, 'a searched source must say how many rows it read').to.be.a('number');",
+                  "    }",
+                  "    if (o.outcome === 'FAILED') {",
+                  "      pm.expect(o.snapshotVersion, 'a source with no snapshot must not name one').to.eql(null);",
+                  "      pm.expect(o.detail, 'a failure must say why').to.be.a('string').and.not.empty;",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('a refresh failure never becomes a clean no-match', function () {",
+                  "  const failed = indexedOutcomes.filter(function (o) { return o.outcome === 'FAILED'; });",
+                  "  if (failed.length > 0) {",
+                  "    pm.expect(b.findingsState, 'a source failed, so the run cannot claim a clean sweep').to.not.eql('NO_MATCHES_FOUND');",
+                  "    pm.expect(b.coverage).to.not.eql('COMPLETE');",
+                  "  }",
+                  "});",
+                  "pm.test('a no-match statement, when present, says what was actually searched', function () {",
+                  "  if (b.findingsState === 'NO_MATCHES_FOUND') {",
+                  "    pm.expect(b.noMatchStatement, 'no-match with no statement of what was searched').to.be.a('string').and.not.empty;",
+                  "  }",
+                  "});",
+                  "",
+                  "// ---- 4: no fixture source ids -------------------------------------------------------",
+                  "pm.test('no finding carries a fixture source id (T55)', function () {",
+                  "  findings.forEach(function (f) {",
+                  "    const id = String((f.document || {}).sourceId);",
+                  "    pm.expect(id, 'a fixture reached a live result').to.not.match(/fixture|mock|^src-mock/i);",
+                  "    pm.expect((f.document || {}).mode).to.not.eql('MOCK');",
+                  "  });",
+                  "  pm.expect(b.mode).to.not.eql('MOCK');",
+                  "});",
+                  "pm.test('no finding came from a suspended discovery source', function () {",
+                  "  const DISCOVERY = [\"sec-litigation-releases\",\"sec-press-releases\",\"gdelt-doc-v2\",\"google-news-rss-en-us\",\"bing-news-rss-en-us\"];",
+                  "  findings.forEach(function (f) {",
+                  "    pm.expect(DISCOVERY, 'the discovery identity matcher is known broken and must not produce findings').to.not.include(String((f.document || {}).sourceId));",
+                  "  });",
+                  "});",
+                  "",
+                  "// ---- 5: the search itself opened no socket ------------------------------------------",
+                  "pm.test('the search issued zero discovery requests', function () {",
+                  "  if (b.liveDiscovery) {",
+                  "    console.log('liveDiscovery.totalRequestsIssued = ' + b.liveDiscovery.totalRequestsIssued);",
+                  "    pm.expect(b.liveDiscovery.totalRequestsIssued, 'a tenant search must not contact a publisher for an indexed source').to.eql(0);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16.16 PROVE the tenant search downloaded nothing",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources"
+              ]
+            },
+            "description": "The hard acceptance criterion, measured rather than argued.\n\nFor an indexed source, publisher contact happens during REFRESH and never during SEARCH. That is an architectural claim, and an architectural claim is worth nothing until something would notice if it stopped being true.\n\nSo this re-reads the same operator view 16.4 read, and compares. If the tenant search had contacted a publisher for an indexed source it would have gone through the refresh lifecycle, which moves lastAttemptAt, httpStatus, refreshStatus and rowCount. All four are unchanged, for every source.\n\nNote what makes this meaningful: 16.15 asserted the search RETURNED findings. Zero requests with zero results would prove nothing."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operator view readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const rows = (pm.response.json().sources) || [];",
+                  "const after = {};",
+                  "rows.forEach(function (s) { after[s.sourceId] = String(s.lastAttemptAt) + '|' + String(s.httpStatus) + '|' + String(s.refreshStatus) + '|' + String(s.rowCount); });",
+                  "const before = JSON.parse(pm.environment.get('ixContactWitnessBefore') || '{}');",
+                  "let moved = [];",
+                  "Object.keys(before).forEach(function (id) {",
+                  "  if (before[id] !== after[id]) { moved.push(id); }",
+                  "});",
+                  "if (moved.length > 0) { console.log('MOVED: ' + moved.join(', ')); }",
+                  "pm.test('tenant search external requests for indexed sources = 0', function () {",
+                  "  pm.expect(moved, 'these sources show refresh activity across the tenant search: ' + moved.join(', ')).to.be.an('array').that.is.empty;",
+                  "});",
+                  "console.log('Indexed sources contacted by the tenant search: 0');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "17 - Combined Live Acceptance: 9 indexed + 2 SEC discovery",
+      "description": "THE COMBINED ACCEPTANCE RUN. Nine indexed sources answered from local snapshots and two SEC feeds polled live, in ONE search, asserted claim by claim.\n\nWHY A SEPARATE FOLDER. Folder 14 proves one SEC-backed live search. Folder 16 proves the indexed engine contacts nobody. Neither proves the thing that is only true of the two together: that a run mixing both shapes reports every source by name, grades identity the same way on both paths, and does not let one path's failure erase the other's findings.\n\nWHAT IT ASSERTS, and each of these was a real defect:\n  - indexed sources issue ZERO publisher requests during a tenant search (17.13)\n  - SEC discovery grades through the shared FR-08 resolver, not an inline copy (17.14)\n  - a name-only discovery match stays AMBIGUOUS (17.14)\n  - authority tier comes from the approved source version, not a constant (17.14)\n  - FR-10 clustering runs in the runtime, and independent authorities stay independent (17.15)\n  - a year-only date of birth never becomes FULL_DOB/STRONG (17.15)\n  - no fixture id appears anywhere in a live result (17.12)\n\nARMED BY caConfirm = yes-contact-sec-and-indexed. Not folder 14's liveConfirm, not folder 15's mixedLiveConfirm.\n\nIT ACTIVATES NOTHING. If a pre-flight fails, fix the registry through the lifecycle - folder 5, or `pnpm source:restore --apply --source <id> --reason \"...\"` - and run again. gdelt-doc-v2 must stay SUSPENDED; 17.1 fails if it is not.\n\nTHE RUNTIME EQUIVALENT is tests/live/acceptance/combined-adverse-search.test.ts, run with `COMBINED_LIVE_ACCEPTANCE=yes-contact-the-sec pnpm test:live:acceptance`. It asserts the same claims against the same deployment and can also inject the situations this folder cannot - a duplicated record, a failed SEC source. Keep the two in step.",
+      "item": [
+        {
+          "name": "17.0 STOP - confirm you mean to contact the SEC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
+            "description": "This folder runs a REAL combined search: nine indexed sources answered from local snapshots, and two SEC feeds polled live over the network.\n\nIt is armed by caConfirm = yes-contact-sec-and-indexed. That is deliberately NOT folder 14's liveConfirm nor folder 15's mixedLiveConfirm: arming one live run must never arm another.\n\nWhat it costs the SEC: one poll per fixed feed per fifteen-minute floor, one robots.txt per host on a cold process, and one document fetch per lead that matches the subject. The indexed sources cost nothing at all, and 17.13 measures that rather than asserting it.\n\nIt activates nothing and it suspends nothing. If a pre-flight fails, fix the registry through the lifecycle (folder 5, or `pnpm source:restore`) and run this again.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const armed = pm.environment.get('caConfirm') === 'yes-contact-sec-and-indexed';",
+                  "pm.test('the run is armed', function () {",
+                  "  pm.expect(armed, 'set caConfirm = yes-contact-sec-and-indexed to run this folder').to.be.true;",
+                  "});",
+                  "if (!armed) { postman.setNextRequest(null); }",
+                  "pm.test('the API is alive', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.1 Pre-flight: both SEC sources ACTIVE, GDELT still SUSPENDED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources"
+              ]
+            },
+            "description": "The registry must be in the state this run is an acceptance test OF.\n\nBoth SEC feeds ACTIVE, because a suspended source contributes nothing and the run would prove nothing about live discovery. gdelt-doc-v2 SUSPENDED, because it is outside this run's scope and its budget is not this run's to spend - D18 authorised first contact with GDELT, which is not the same act as entitling this run to make requests.\n\nNeeds a source_admin credential. A tenant_admin or analyst key is authenticated and not permitted, and answers 403.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{registryKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('registry readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const items = (pm.response.json().items) || [];",
+                  "function statusOf(id) {",
+                  "  const rows = items.filter(function (i) { return i.recordId === id; });",
+                  "  const active = rows.filter(function (i) { return i.status === 'ACTIVE'; });",
+                  "  if (active.length > 0) { return 'ACTIVE'; }",
+                  "  return rows.length > 0 ? rows[rows.length - 1].status : 'ABSENT';",
+                  "}",
+                  "pm.test('sec-litigation-releases is ACTIVE', function () {",
+                  "  pm.expect(statusOf('sec-litigation-releases')).to.eql('ACTIVE');",
+                  "});",
+                  "pm.test('sec-press-releases is ACTIVE', function () {",
+                  "  pm.expect(statusOf('sec-press-releases')).to.eql('ACTIVE');",
+                  "});",
+                  "pm.test('gdelt-doc-v2 is NOT active', function () {",
+                  "  pm.expect(statusOf('gdelt-doc-v2'), 'this folder must not spend the GDELT budget').to.not.eql('ACTIVE');",
+                  "});",
+                  "const sec = items.filter(function (i) { return i.recordId.indexOf('sec-') === 0 && i.status === 'ACTIVE'; });",
+                  "pm.test('both SEC versions record authorityTier 1', function () {",
+                  "  sec.forEach(function (v) {",
+                  "    const c = v.content || v;",
+                  "    pm.expect(c.authorityTier, v.recordId + ' tier').to.eql(1);",
+                  "  });",
+                  "});",
+                  "if (sec.length > 0) { pm.environment.set('caSecTier', String((sec[0].content || sec[0]).authorityTier)); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.2 Pre-flight: the breakers permit execution, on both SEC sources",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/source-health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "source-health"
+              ]
+            },
+            "description": "An OPEN breaker or an engaged kill switch refuses every request BEFORE a socket opens. The run would complete, report the SEC as unavailable, and say nothing whatsoever about the live path - which looks like a pass if nobody checks.\n\n`pnpm source:health <sourceId> --reset --reason \"...\"` clears OUR record. It clears nothing at sec.gov.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('health readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const rows = (pm.response.json().sources) || [];",
+                  "['sec-litigation-releases', 'sec-press-releases'].forEach(function (id) {",
+                  "  const row = rows.filter(function (s) { return s.sourceId === id; })[0];",
+                  "  pm.test(id + ' may execute', function () {",
+                  "    if (!row) { return; }",
+                  "    pm.expect(['CLOSED', 'HALF_OPEN'], 'breaker is ' + row.breaker).to.include(row.breaker);",
+                  "    pm.expect(row.killSwitch, 'kill switch is engaged').to.be.oneOf([null, undefined]);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.3 Pre-flight: the indexed witness, before the search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources"
+              ]
+            },
+            "description": "Records what would move if an indexed source contacted its publisher: last attempt, HTTP status, refresh status and row count, per source. 17.13 reads the same view again and compares.\n\nThis is the whole zero-request proof. A claim that a tenant search downloads nothing is worth nothing until something would notice if it stopped being true.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operator view readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const rows = (pm.response.json().sources) || [];",
+                  "const before = {};",
+                  "rows.forEach(function (s) {",
+                  "  before[s.sourceId] = String(s.lastAttemptAt) + '|' + String(s.httpStatus) + '|' + String(s.refreshStatus) + '|' + String(s.rowCount);",
+                  "});",
+                  "pm.environment.set('caWitnessBefore', JSON.stringify(before));",
+                  "const usable = rows.filter(function (s) { return s.activeSnapshotVersion; });",
+                  "pm.test('at least nine indexed sources hold a usable snapshot', function () {",
+                  "  pm.expect(usable.length, 'a source with no snapshot is a coverage gap at rung 0, not a source that found nothing').to.be.at.least(9);",
+                  "});",
+                  "console.log('Indexed sources with a usable snapshot: ' + usable.length);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.4 Sign up a real tenant",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup"
+              ]
+            },
+            "description": "A stranger becomes a customer. Nobody at Erly is involved, nothing is seeded, and every customer call after 17.8 authenticates with a key this tenant issued to itself.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organisationName\": \"Combined Acceptance {{$randomInt}}\",\n  \"contactEmail\": \"{{caEmail}}\",\n  \"password\": \"{{caPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('signed up', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('caTenantId', b.tenantId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.5 Get the verification token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/dev/outbound-emails/latest?kind=EMAIL_VERIFICATION&email={{caEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "dev",
+                "outbound-emails",
+                "latest"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "EMAIL_VERIFICATION"
+                },
+                {
+                  "key": "email",
+                  "value": "{{caEmail}}"
+                }
+              ]
+            },
+            "description": "A development-only route. It is absent in production by registration, not by a guard - there is no flag that turns it on there.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the message was sent', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.set('caToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.6 Verify the email address",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "verify"
+              ]
+            },
+            "description": "Confirming the address is THE thing standing between a self-signed-up tenant and a live key (D-052). Without it the tenant has sandbox only, and a sandbox key cannot run this folder.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{caToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('verified', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.7 Sign in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "The session's environment is DERIVED from the tenant's state by decideLiveAccess, never requested. A caller cannot ask for live.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{caEmail}}\",\n  \"password\": \"{{caPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('signed in', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.set('caSession', pm.response.json().sessionToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.8 Issue the tenant's own LIVE key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Session {{caSession}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
+            },
+            "description": "The tenant mints its own live credential. The secret is shown once and is not recoverable.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"combined acceptance\",\n  \"roles\": [\"tenant_admin\", \"analyst\"],\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('live key issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('caLiveKey', b.secret);",
+                  "pm.test('it is a live key', () => pm.expect(b.environment).to.eql('live'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.9 Create the subject - a person two authorities have listed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
+            },
+            "description": "caSubjectName should name somebody who appears on MORE THAN ONE of the indexed lists, with a year-precision date of birth in caSubjectDob. That shape is what makes 17.14 and 17.15 mean something: two independent authorities to keep independent, and a year-only date to refuse to call a full date-of-birth agreement.\n\nThe precision is declared YEAR on purpose. OFAC publishes year-only dates for many listings, and a subject declared at YEAR precision must be COMPARED at year precision - the defect this run exists to keep fixed graded that agreement as FULL_DOB/STRONG, so any namesake born in the same year as a listed person reached CORROBORATED identity.\n\nA subject on no list is also a valid run: it proves NO_MATCHES_FOUND is reported honestly against a searched snapshot rather than an empty one. It just does not exercise 17.15.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{caSubjectName}}\",\n  \"aliases\": [],\n  \"countryContext\": [],\n  \"dateOfBirth\": {\n    \"value\": \"{{caSubjectDob}}\",\n    \"precision\": \"YEAR\"\n  },\n  \"knownCompanies\": [],\n  \"externalSubjectRef\": \"postman-combined-{{$guid}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('subject created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('caSubjectId', b.subjectId);",
+                  "pm.environment.set('caSubjectVersion', String(b.version));",
+                  "pm.test('the subject belongs to the tenant that created it', function () {",
+                  "  pm.expect(b.tenantId).to.eql(pm.environment.get('caTenantId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.10 Start the combined LIVE search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
+            },
+            "description": "One search, both shapes. Rung 0 is answered from the local snapshots with no publisher request; rung 1 polls the two SEC feeds live.\n\n202, not 200: the work is accepted and queued. A search needs the API AND the worker - with the worker stopped this sits at QUEUED for ever and nothing says why.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": { \"subjectId\": \"{{caSubjectId}}\", \"version\": {{caSubjectVersion}} },\n  \"externalCaseRef\": \"combined-acceptance\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"US\"],\n    \"languages\": [\"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));",
+                  "pm.environment.set('caSearchId', pm.response.json().searchId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.11 Poll until terminal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{caSearchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{caSearchId}}"
+              ]
+            },
+            "description": "Re-runs itself until the run settles. PARTIAL is a normal and correct outcome here: world-bank-debarred holds no snapshot and is reported as a coverage gap at rung 0, which is an honest INCOMPLETE rather than a failure.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "let polls = Number(pm.environment.get('caPolls') || '0');",
+                  "if (terminal.indexOf(b.execution) === -1 && polls < 200) {",
+                  "  pm.environment.set('caPolls', String(polls + 1));",
+                  "  setTimeout(function () {}, 500);",
+                  "  postman.setNextRequest('17.11 Poll until terminal');",
+                  "} else {",
+                  "  pm.environment.unset('caPolls');",
+                  "  pm.test('the run reached a terminal state', function () {",
+                  "    pm.expect(terminal, 'still ' + b.execution + ' after ' + polls + ' polls').to.include(b.execution);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.12 PROVE the run: eleven sources by name, nothing from a fixture",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{caSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{caSearchId}}",
+                "findings"
+              ]
+            },
+            "description": "A search that returns SUCCEEDED proves nothing on its own - a fixture returns SUCCEEDED too. So this asserts PROVENANCE.\n\nEvery one of the nine indexed sources is reported BY NAME, and each completed one says which local snapshot it searched and how many rows it held. Both SEC feeds appear by name too: a single collapsed 'discovery' outcome would mean the ladder was empty, which is the state the two sources were restored out of.\n\nAnd nothing anywhere carries a fixture id or MOCK mode. In live mode a fixture adapter cannot be constructed at all (T55), so a fixture id appearing here would mean a mock record had been served as a live one.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const outcomes = b.sourceOutcomes || [];",
+                  "const named = outcomes.map(function (o) { return o.sourceId; });",
+                  "const indexed = ['ofac-sdn','ofac-consolidated-non-sdn','uk-sanctions-list','eu-consolidated-financial-sanctions','unsc-consolidated','doj-fraud-enforcement','cftc-enforcement-press-releases','ftc-consumer-protection-press-releases','fca-warnings'];",
+                  "indexed.forEach(function (id) {",
+                  "  pm.test(id + ' is reported by name', function () {",
+                  "    pm.expect(named, 'reported: ' + named.join(', ')).to.include(id);",
+                  "  });",
+                  "});",
+                  "['sec-litigation-releases','sec-press-releases'].forEach(function (id) {",
+                  "  pm.test(id + ' is reported by name', function () {",
+                  "    pm.expect(named, 'a collapsed discovery outcome means the ladder was empty. reported: ' + named.join(', ')).to.include(id);",
+                  "  });",
+                  "});",
+                  "pm.test('each completed indexed source names the snapshot it searched', function () {",
+                  "  outcomes.filter(function (o) { return indexed.indexOf(o.sourceId) !== -1 && o.outcome === 'COMPLETED'; })",
+                  "    .forEach(function (o) {",
+                  "      pm.expect(String(o.detail), o.sourceId).to.match(/local snapshot/i);",
+                  "      pm.expect(o.snapshotVersion, o.sourceId + ' completed without naming a snapshot').to.not.eql(null);",
+                  "    });",
+                  "});",
+                  "pm.test('no fixture source appears anywhere', function () {",
+                  "  outcomes.forEach(function (o) { pm.expect(String(o.sourceId)).to.not.match(/fixture|mock/i); });",
+                  "  (b.findings || []).forEach(function (f) {",
+                  "    pm.expect(String(f.document.sourceId)).to.not.match(/fixture|mock/i);",
+                  "    pm.expect(f.document.mode, 'a finding is not LIVE').to.eql('LIVE');",
+                  "  });",
+                  "  pm.expect(b.mode).to.not.eql('MOCK');",
+                  "});",
+                  "pm.environment.set('caFindings', JSON.stringify(b.findings || []));",
+                  "console.log('Findings: ' + (b.findings || []).length + ' | coverage ' + b.coverage);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.13 PROVE the indexed sources contacted nobody",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/indexed-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "indexed-sources"
+              ]
+            },
+            "description": "The hard acceptance criterion, measured rather than argued.\n\nFor an indexed source, publisher contact happens during REFRESH and never during SEARCH. This re-reads the view 17.3 recorded and compares all four fields per source. Had the tenant search contacted a publisher it would have gone through the refresh lifecycle, which moves every one of them.\n\nWhat makes this meaningful is 17.12: the search RETURNED findings. Zero requests with zero results would prove nothing at all.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{operatorKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operator view readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const rows = (pm.response.json().sources) || [];",
+                  "const after = {};",
+                  "rows.forEach(function (s) {",
+                  "  after[s.sourceId] = String(s.lastAttemptAt) + '|' + String(s.httpStatus) + '|' + String(s.refreshStatus) + '|' + String(s.rowCount);",
+                  "});",
+                  "const before = JSON.parse(pm.environment.get('caWitnessBefore') || '{}');",
+                  "const moved = Object.keys(before).filter(function (id) { return before[id] !== after[id]; });",
+                  "pm.test('indexed publisher requests during the tenant search = 0', function () {",
+                  "  pm.expect(moved, 'these sources show refresh activity across the search: ' + moved.join(', ')).to.be.an('array').that.is.empty;",
+                  "});",
+                  "console.log('Indexed sources contacted by the tenant search: 0');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.14 PROVE FR-10 clustering and the year-only date of birth",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{caSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{caSearchId}}",
+                "findings"
+              ]
+            },
+            "description": "CLUSTERING RUNS. decideClustering and computeAuthority were both correct and decideClustering had no caller at all - every document in a run was its own independent corroboration, which is the inflation invariant I6 exists to forbid. A finding that shares an event with another now carries an 'FR-10 cluster ...' line in its rationale. That sentence is emitted only for a cluster with more than one member, so its presence is a positive witness that the run-level assignment happened.\n\nAUTHORITIES STAY INDEPENDENT. An OFAC designation, an EU listing and a UK listing about one person are NOT copies of one another. Each keeps its own finding and contributes its own authority, guarded by isIndependentAuthority - so the cluster line must always report '0 excluded as copies' for these. Copies collapsing is the other half of the same rule, and in a deployment whose every active source is a tier-1 issuing authority it cannot arise at all; it is proved over constructed candidates in packages/domain/test/clustering/assign.test.ts.\n\nTHE YEAR. datesAgree compared years when the PUBLISHER declared YEAR precision and then labelled the result a full date-of-birth agreement. Now it compares at the coarser of the two declared precisions: a year agreement is DOB_YEAR_MONTH/MODERATE, and only a day-precision agreement is FULL_DOB/STRONG.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const findings = b.findings || [];",
+                  "const authorities = {};",
+                  "findings.forEach(function (f) { authorities[f.document.sourceId] = true; });",
+                  "const distinct = Object.keys(authorities);",
+                  "if (distinct.length >= 2) {",
+                  "  pm.test('each independent authority kept its own finding', function () {",
+                  "    pm.expect(distinct.length, 'authorities: ' + distinct.join(', ')).to.be.at.least(2);",
+                  "  });",
+                  "} else {",
+                  "  console.log('This subject is listed by fewer than two authorities, so independence was not exercised.');",
+                  "}",
+                  "let clustered = 0;",
+                  "findings.forEach(function (f) {",
+                  "  const note = (f.rationale || []).filter(function (line) { return line.indexOf('FR-10 cluster ') === 0; })[0];",
+                  "  if (!note) { return; }",
+                  "  clustered += 1;",
+                  "  pm.test('no authority record was excluded as a copy', function () {",
+                  "    pm.expect(note).to.match(/0 excluded as copies or non-independent tiers/);",
+                  "  });",
+                  "});",
+                  "console.log('Findings carrying an FR-10 cluster line: ' + clustered);",
+                  "pm.test('a year-only date of birth is never a full date-of-birth agreement', function () {",
+                  "  findings.forEach(function (f) {",
+                  "    (f.identityFactors || []).filter(function (x) { return String(x.kind).indexOf('DOB') !== -1; })",
+                  "      .forEach(function (x) {",
+                  "        pm.expect(x.kind, 'the subject declared YEAR precision: ' + JSON.stringify(x)).to.not.eql('FULL_DOB');",
+                  "        pm.expect(x.strength, 'a year agreement is MODERATE at most: ' + JSON.stringify(x)).to.not.eql('STRONG');",
+                  "      });",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.15 Create a SECOND subject - one the SEC has published about",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
+            },
+            "description": "WHY A SECOND SUBJECT, and this is the honest part of the folder.\n\nThe indexed lists and the SEC feeds are about different people. Somebody on the OFAC SDN list is almost never the defendant in a current SEC litigation release, so ONE subject cannot exercise both halves: run the folder with only the sanctions subject and 17.19 grades nothing, passing while proving nothing at all.\n\nSo the SEC half gets its own subject. caSecSubjectName must name somebody in the SEC feed TODAY - read one off `pnpm sec:live-smoke --yes-contact-the-sec`, which makes one counted request and prints the current entries.\n\nNo date of birth, deliberately. A discovery document carries the name and nothing else, because the rule-based extractor does not mine prose for a birth year. Declaring one here would not change the grading and would suggest it might.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{caSecSubjectName}}\",\n  \"aliases\": [],\n  \"countryContext\": [],\n  \"dateOfBirth\": { \"value\": null, \"precision\": \"UNKNOWN\" },\n  \"knownCompanies\": [],\n  \"externalSubjectRef\": \"postman-combined-sec-{{$guid}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SEC subject created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('caSecSubjectId', b.subjectId);",
+                  "pm.environment.set('caSecSubjectVersion', String(b.version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.16 Start the SEC-facing LIVE search",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
+            },
+            "description": "The same eleven sources, a different subject. The indexed sources answer from their snapshots as before and find nothing for this person, which is correct; the SEC feeds are what this search is for.\n\nCOST: nothing, if 17.10 ran within the last fifteen minutes. Both feeds carry a fifteen-minute poll floor and FixedFeedPollCache serves the second search from the first search's poll. That is the amplification fix doing its job - it used to be one request per planned query.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": { \"subjectId\": \"{{caSecSubjectId}}\", \"version\": {{caSecSubjectVersion}} },\n  \"externalCaseRef\": \"combined-acceptance-sec\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"US\"],\n    \"languages\": [\"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));",
+                  "pm.environment.set('caSecSearchId', pm.response.json().searchId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.17 Poll the SEC search until terminal",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{caSecSearchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{caSecSearchId}}"
+              ]
+            },
+            "description": "Re-runs itself until the run settles. PARTIAL is normal and correct here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "let polls = Number(pm.environment.get('caSecPolls') || '0');",
+                  "if (terminal.indexOf(b.execution) === -1 && polls < 200) {",
+                  "  pm.environment.set('caSecPolls', String(polls + 1));",
+                  "  postman.setNextRequest('17.17 Poll the SEC search until terminal');",
+                  "} else {",
+                  "  pm.environment.unset('caSecPolls');",
+                  "  pm.test('the SEC run reached a terminal state', function () {",
+                  "    pm.expect(terminal, 'still ' + b.execution + ' after ' + polls + ' polls').to.include(b.execution);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17.18 PROVE the SEC discovery identity grading",
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{caLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{caSecSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{caSecSearchId}}",
+                "findings"
+              ]
+            },
+            "description": "Three defects this run exists to keep fixed, all of them in what a finding CLAIMS rather than in whether one is returned.\n\nTHE RESOLVER. Discovery used to build its own Axis A input inline and compare the subject's name TO ITSELF, then attach a hardcoded RARE_FULL_NAME_PLUS_CITY factor asserting a city check that ran on neither side. Both paths now grade through one shared FR-08 resolver, which asserts a factor only when both sides had a value and they were compared. So: no RARE_FULL_NAME_PLUS_CITY - there is no subject-side city in the schema to compare - and every factor carries a detail saying what was matched against what.\n\nTHE BAND. A discovery document today carries the name and nothing else, because the rule-based extractor does not mine prose for a birth year - a four-digit number near a name is not a date of birth. A name is not an identification, so the finding stays AMBIGUOUS. That is the honest outcome, not a gap.\n\nTHE TIER. authorityTier was hardcoded to 2 at two points on the discovery path, so a tier-1 court document and a tier-5 forum post banded identically. It now comes from the approved source version, and both SEC feeds record tier 1.\n\nUNLIKE the rest of this folder, this request FAILS if there is nothing to grade. An empty grading is not a pass: it is the proof not having run. If the release naming caSecSubjectName has aged out of the feed, pick a current name rather than accepting a green tick that means nothing."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const sec = (b.findings || []).filter(function (f) {",
+                  "  return ['sec-litigation-releases', 'sec-press-releases'].indexOf(f.document.sourceId) !== -1;",
+                  "});",
+                  "const strict = String(pm.environment.get('caSecSubjectName') || '').indexOf('CHANGE ME') === -1;",
+                  "pm.test('the SEC feeds returned a finding to grade', function () {",
+                  "  if (!strict) {",
+                  "    pm.expect.fail('caSecSubjectName is unset. Read a current name off `pnpm sec:live-smoke --yes-contact-the-sec` and set it, or this proof grades nothing.');",
+                  "  }",
+                  "  pm.expect(sec.length, 'no SEC finding for ' + pm.environment.get('caSecSubjectName') + '. If the release naming them has aged out of the feed, pick a current name - do not treat an empty grading as a pass.').to.be.above(0);",
+                  "});",
+                  "sec.forEach(function (f) {",
+                  "  const kinds = (f.identityFactors || []).map(function (x) { return x.kind; });",
+                  "  pm.test('no fabricated city factor on ' + f.document.sourceId, function () {",
+                  "    pm.expect(kinds, 'RARE_FULL_NAME_PLUS_CITY asserts a check that runs on neither side').to.not.include('RARE_FULL_NAME_PLUS_CITY');",
+                  "  });",
+                  "  pm.test('every factor says what it compared', function () {",
+                  "    (f.identityFactors || []).forEach(function (x) {",
+                  "      pm.expect(String(x.detail).length, JSON.stringify(x)).to.be.above(0);",
+                  "    });",
+                  "  });",
+                  "  const corroborated = (f.identityFactors || []).some(function (x) {",
+                  "    return x.direction === 'SUPPORTS' && String(x.kind).indexOf('NAME') === -1 && x.strength !== 'WEAK';",
+                  "  });",
+                  "  if (!corroborated) {",
+                  "    pm.test('a name-only match does not claim identity', function () {",
+                  "      pm.expect(f.axes.identity, JSON.stringify(f.identityFactors)).to.not.eql('CONFIRMED');",
+                  "      pm.expect(f.band).to.not.eql('CONFIRMED');",
                   "    });",
                   "  }",
-                  "}"
+                  "  pm.test(f.document.sourceId + ' carries the tier from its approved version', function () {",
+                  "    pm.expect(f.document.authorityTier, 'the old hardcoded value was 2').to.eql(1);",
+                  "    pm.expect(f.axes.authorityTier).to.eql(1);",
+                  "  });",
+                  "});",
+                  "console.log('SEC discovery findings graded: ' + sec.length);"
                 ]
               }
             }

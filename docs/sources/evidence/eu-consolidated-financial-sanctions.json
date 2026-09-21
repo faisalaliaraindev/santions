@@ -1,0 +1,69 @@
+{
+  "sourceId": "eu-consolidated-financial-sanctions",
+  "sourceName": "EU Consolidated Financial Sanctions List",
+  "publisher": "European Commission, DG FISMA",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://webgate.ec.europa.eu/robots.txt",
+      "pathChecked": "/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw",
+      "requestedAt": "2026-09-21T08:23:39.068Z",
+      "httpStatus": 404,
+      "wireBytes": 139,
+      "contentType": "text/html; charset=iso-8859-1",
+      "verdict": "ALLOWED",
+      "absent": true,
+      "body": "<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"
+    },
+    "policyRobots": {
+      "url": "https://data.europa.eu/robots.txt",
+      "pathChecked": "/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions",
+      "requestedAt": "2026-09-21T08:23:39.627Z",
+      "httpStatus": 200,
+      "wireBytes": 782,
+      "contentType": "text/plain",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "#\n# robots.txt\n#\n# This file is to prevent the crawling and indexing of certain parts\n# of your site by web crawlers and spiders run by sites like Yahoo!\n# and Google. By telling these \"robots\" where not to go on your site,\n# you save bandwidth and server resources.\n#\n# This file will be ignored unless it is at the root of your host:\n# Used:    http://example.com/robots.txt\n# Ignored: http://example.com/site/robots.txt\n#\n# For more information about the robots.txt standard, see:\n# http://www.robotstxt.org/robotstxt.html\n\nUser-agent: *\n# CSS, JS, Images\nAllow: /core/*.css$\nAllow: /core/*.css?\nAllow: /core/*.js$\nAllow: /core/*.js?\nAllow: /core/*.gif\nAllow: /core/*.jpg\nAllow: /core/*.jpeg\nAllow: /core/*.png\nAllow: /core/*.svg\nAllow: /profiles/*.css$\nAllow: /profiles/*.css?\nAllow: /profiles/*.js$\nAllow: /profiles/*.js?\nAllow: /profiles/*.gif\nAllow: /profiles/*.jpg\nAllow: /profiles/*.jpeg\nAllow: /profiles/*.png\nAllow: /profiles/*.svg\n# Directories\nDisallow: /core/\nDisallow: /profiles/\n# Files\nDisallow: /README.txt\nDisallow: /web.config\n# Paths (clean URLs)\nDisallow: /admin/\nDisallow: /comment/reply/\nDisallow: /filter/tips\nDisallow: /node/add/\nDisallow: /search/\nDisallow: /user/register\nDisallow: /user/password\nDisallow: /user/login\nDisallow: /user/logout\n# Paths (no clean URLs)\nDisallow: /index.php/admin/\nDisallow: /index.php/comment/reply/\nDisallow: /index.php/filter/tips\nDisallow: /index.php/node/add/\nDisallow: /index.php/search/\nDisallow: /index.php/user/password\nDisallow: /index.php/user/register\nDisallow: /index.php/user/login\nDisallow: /index.php/user/logout\n\nDisallow: /*&sort=*\nDisallow: /*&bounds=*\nDisallow: /*feedback/form?type=*\nDisallow: /*search?*\nDisallow: /*?query=*\nDisallow: /*?keywords=*\nDisallow: /*?type=highlights\nDisallow: /*?title=*\n\nSitemap: https://data.europa.eu/sitemap.xml\nSitemap: https://data.europa.eu/en/sitemap.xml\n\nSitemap: https://data.europa.eu/dashboard/sitemap.xml\nSitemap: https://data.europa.eu/dashboard/en/sitemap.xml\n\nUser-agent: Googlebot\nDisallow: /data/datasets/*/embed\nDisallow: /*useNormalizedId=true\nDisallow: /api/hub/search//feeds/datasets/.rss\n\nUser-agent: Bingbot\nDisallow: /data/datasets/*/embed\nDisallow: /*useNormalizedId=true\nDisallow: /api/hub/search//feeds/datasets/.rss\n"
+    },
+    "terms": {
+      "url": "https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions?locale=en",
+      "requestedAt": "2026-09-21T08:23:43.634Z",
+      "httpStatus": 200,
+      "wireBytes": 1152,
+      "contentType": "text/html",
+      "lastModified": "Thu, 17 Sep 2026 13:07:24 GMT",
+      "bodySha256": "b5aee8d542357bbe60b9593a05429e70c86bf4a221b69e6db5d80767c4b40e5b",
+      "extractedTermsSentences": [],
+      "textLength": 20
+    },
+    "endpoint": {
+      "url": "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw",
+      "resolvedUrl": "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw",
+      "requestedAt": "2026-09-21T08:23:43.815Z",
+      "httpStatus": 200,
+      "wireBytes": 3321245,
+      "decompressedBytes": 25766640,
+      "contentType": "application/xml",
+      "mediaType": "application/xml",
+      "bodySha256": "0c83e632fea7709d9c75bdd1deb4fa50782a93d2c99459f01c7a7a2d873c79c9",
+      "bodyPreview": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<export xmlns=\"http://eu.europa.ec/fpi/fsd/export\" generationDate=\"2026-08-05T16:47:04.449+02:00\" globalFileId=\"184961\">\n    <sanctionEntity designationDetails=\"\" unitedNationId=\"\" euReferenceNumber=\"EU.27.28\" logicalId=\"13\">\n        <remark>UNSC RESOLUTION 1483</remark>\n        <regulation regulationType=\"regulation\" organisationType=\"commis",
+      "looksLikeHtmlErrorPage": false,
+      "credentialRequired": null,
+      "verified": true
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": true,
+    "activationSupported": true,
+    "blocker": null
+  }
+}

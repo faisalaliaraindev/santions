@@ -143,6 +143,7 @@ function sourceContent(): Record<string, unknown> {
         requiresFreshApprovalOnHalt: true,
       },
       firstContactApproval: null,
+      robotsException: null,
     },
   };
 }

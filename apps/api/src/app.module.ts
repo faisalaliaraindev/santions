@@ -36,6 +36,7 @@ import { WorldBankDebarmentParser } from './sources/indexed/parsers/world-bank-d
 import {
   EU_SANCTIONS_SOURCE_ID,
   EU_SANCTIONS_XML_URL,
+  GLOBAL_INDEXED_SOURCE_CONTENT,
   OFAC_NON_SDN_SOURCE_ID,
   OFAC_NON_SDN_XML_URL,
   OFAC_SDN_SOURCE_ID,
@@ -48,6 +49,7 @@ import {
 import {
   CFTC_ENFORCEMENT_RSS_URL,
   CFTC_ENFORCEMENT_SOURCE_ID,
+  REGULATOR_INDEXED_SOURCE_CONTENT,
   DOJ_FRAUD_RSS_URL,
   DOJ_FRAUD_SOURCE_ID,
   FCA_WARNINGS_RSS_URL,
@@ -57,6 +59,7 @@ import {
 } from './sources/registry/regulator-indexed-sources.js';
 import {
   WORLD_BANK_DEBARRED_API_URL,
+  WORLD_BANK_DEBARRED_CONTENT,
   WORLD_BANK_DEBARRED_SOURCE_ID,
 } from './sources/registry/world-bank-indexed-source.js';
 import { CapabilityCoverageService } from './admin/capability-coverage.service.js';
@@ -102,6 +105,7 @@ import { SourceDocumentService } from './persistence/source-document.service.js'
 import { StageExecutionService } from './persistence/stage-execution.service.js';
 import { IndexerService } from './search-index/indexer.service.js';
 import { EvidenceStagingService } from './storage/evidence-staging.service.js';
+import { RetentionScheduler } from './storage/retention-scheduler.service.js';
 import { RetentionSweeper } from './storage/retention-sweeper.service.js';
 import { S3ObjectStoreAdapter } from './storage/s3-object-store.adapter.js';
 import {
@@ -142,26 +146,55 @@ import { PolicyService } from './tenancy/policy.service.js';
 // Re-exported for convenience; defined in ./tokens.js to avoid a circular import.
 export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
 
+/**
+ * Every indexed source's reviewed content, in one lookup.
+ *
+ * The cadence, the staleness horizon and the minimum row count are **approved registry content**
+ * — they control publisher contact and they decide when a snapshot is rejected. Restating them as
+ * call arguments here made a second copy of each, and the copies drifted the first time one of
+ * them was corrected: `ofac-consolidated-non-sdn`'s row floor was lowered to 300 on the version an
+ * approver signed, the scheduler kept refusing every parse at 1,000, and the failure named the
+ * reviewed minimum while reading a number nobody had reviewed.
+ */
+const INDEXED_SOURCE_REFRESH_POLICIES: Readonly<
+  Record<string, { intervalSeconds: number; staleAfterSeconds: number; minimumExpectedRows: number }>
+> = {
+  ...Object.fromEntries(
+    Object.entries(GLOBAL_INDEXED_SOURCE_CONTENT).map(([sourceId, content]) => [
+      sourceId,
+      content.refreshPolicy,
+    ]),
+  ),
+  ...Object.fromEntries(
+    Object.entries(REGULATOR_INDEXED_SOURCE_CONTENT).map(([sourceId, content]) => [
+      sourceId,
+      content.refreshPolicy,
+    ]),
+  ),
+  [WORLD_BANK_DEBARRED_SOURCE_ID]: WORLD_BANK_DEBARRED_CONTENT.refreshPolicy,
+};
+
 function indexedSchedule(
   sourceId: string,
   artifactUrl: string,
   parser: IndexedSourceSchedule['parser'],
-  intervalSeconds: number,
-  staleAfterSeconds: number,
-  minimumExpectedRows: number,
   acceptedContentTypes: readonly string[] = [
     'application/xml',
     'text/xml',
     'application/octet-stream',
   ],
 ): IndexedSourceSchedule {
+  const policy = INDEXED_SOURCE_REFRESH_POLICIES[sourceId];
+  if (policy === undefined) {
+    throw new Error(`Indexed source ${sourceId} has no reviewed refresh policy in the registry.`);
+  }
   return {
     sourceId,
     artifactUrl,
     parser,
-    refreshIntervalMs: intervalSeconds * 1000,
-    staleAfterMs: staleAfterSeconds * 1000,
-    minimumExpectedRows,
+    refreshIntervalMs: policy.intervalSeconds * 1000,
+    staleAfterMs: policy.staleAfterSeconds * 1000,
+    minimumExpectedRows: policy.minimumExpectedRows,
     acceptedContentTypes,
   };
 }
@@ -533,6 +566,14 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
       inject: [OBJECT_STORE_PORT, RetentionService, SourceDocumentService],
     },
     {
+      // Registered here, started only by `worker-main.ts`. A provider that started its own loop
+      // on construction would run one in every process that builds this graph — including the
+      // API and every integration test.
+      provide: RetentionScheduler,
+      useFactory: (sweeper: RetentionSweeper) => new RetentionScheduler(sweeper),
+      inject: [RetentionSweeper],
+    },
+    {
       // The dead-letter queue. In-process only when none is configured, and warned about in
       // the same terms as the other stand-ins: a message held in memory is a message lost at
       // restart, and this is the one class of message whose loss destroys evidence.
@@ -588,9 +629,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               OFAC_SDN_SOURCE_ID,
               OFAC_SDN_XML_URL,
               ofac,
-              21_600,
-              86_400,
-              10_000,
             ),
           ],
           [
@@ -599,9 +637,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               OFAC_NON_SDN_SOURCE_ID,
               OFAC_NON_SDN_XML_URL,
               ofac,
-              21_600,
-              86_400,
-              1_000,
             ),
           ],
           [
@@ -610,9 +645,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               UKSL_SOURCE_ID,
               UKSL_XML_URL,
               new UkslXmlParser(),
-              21_600,
-              86_400,
-              1_000,
             ),
           ],
           [
@@ -621,9 +653,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               UNSC_SOURCE_ID,
               UNSC_XML_URL,
               new UnscXmlParser(),
-              86_400,
-              259_200,
-              900,
             ),
           ],
           [
@@ -632,9 +661,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               EU_SANCTIONS_SOURCE_ID,
               EU_SANCTIONS_XML_URL,
               new EuSanctionsXmlParser(),
-              86_400,
-              259_200,
-              2_000,
             ),
           ],
           [
@@ -650,9 +676,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
                 defaultStage: 'ALLEGATION',
                 includeItem: (item) => item.link?.includes('/pr/') ?? false,
               }),
-              3_600,
-              86_400,
-              1,
               ['application/rss+xml', 'application/xml', 'text/xml'],
             ),
           ],
@@ -668,9 +691,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
                 category: 'MARKET_ABUSE',
                 defaultStage: 'REGULATORY_ACTION_FINE',
               }),
-              3_600,
-              86_400,
-              1,
               ['application/rss+xml', 'application/xml', 'text/xml'],
             ),
           ],
@@ -686,9 +706,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
                 category: 'CONSUMER_HARM_MISSELLING',
                 defaultStage: 'REGULATORY_ACTION_FINE',
               }),
-              3_600,
-              86_400,
-              1,
               ['application/rss+xml', 'application/xml', 'text/xml'],
             ),
           ],
@@ -702,12 +719,12 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
                 parserVersion: 'official-feed-fca-warnings-1',
                 publisherUrl:
                   'https://www.fca.org.uk/consumers/warning-list-unauthorised-firms',
-                category: 'CONSUMER_HARM_MISSELLING',
+                // The FCA warning list is a regulator naming firms and individuals it has not
+                // authorised. That is its own kind of adverse signal, and calling it
+                // CONSUMER_HARM_MISSELLING asserted a mis-selling finding the FCA has not made.
+                category: 'REGULATORY_WARNING_LIST',
                 defaultStage: 'ALLEGATION',
               }),
-              3_600,
-              86_400,
-              1,
               ['application/rss+xml', 'application/xml', 'text/xml'],
             ),
           ],
@@ -717,9 +734,6 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               WORLD_BANK_DEBARRED_SOURCE_ID,
               WORLD_BANK_DEBARRED_API_URL,
               new WorldBankDebarmentParser(),
-              10_800,
-              43_200,
-              1_000,
               ['application/json', 'text/json'],
             ),
           ],

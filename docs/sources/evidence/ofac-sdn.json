@@ -1,0 +1,83 @@
+{
+  "sourceId": "ofac-sdn",
+  "sourceName": "OFAC Specially Designated Nationals List",
+  "publisher": "US Department of the Treasury, Office of Foreign Assets Control",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://sanctionslistservice.ofac.treas.gov/robots.txt",
+      "pathChecked": "/api/PublicationPreview/exports/SDN.XML",
+      "requestedAt": "2026-09-21T08:02:37.820Z",
+      "httpStatus": 404,
+      "wireBytes": 0,
+      "contentType": null,
+      "verdict": "ALLOWED",
+      "absent": true,
+      "body": ""
+    },
+    "policyRobots": {
+      "url": "https://ofac.treasury.gov/robots.txt",
+      "pathChecked": "/sdn-list-data-formats-data-schemas",
+      "requestedAt": "2026-09-21T08:02:38.959Z",
+      "httpStatus": 200,
+      "wireBytes": 688,
+      "contentType": "text/plain",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "#\n# robots.txt\n#\n# This file is to prevent the crawling and indexing of certain parts\n# of your site by web crawlers and spiders run by sites like Yahoo!\n# and Google. By telling these \"robots\" where not to go on your site,\n# you save bandwidth and server resources.\n#\n# This file will be ignored unless it is at the root of your host:\n# Used:    http://example.com/robots.txt\n# Ignored: http://example.com/site/robots.txt\n#\n# For more information about the robots.txt standard, see:\n# http://www.robotstxt.org/robotstxt.html\n\nUser-agent: *\n# CSS, JS, Images\nAllow: /core/*.css$\nAllow: /core/*.css?\nAllow: /core/*.js$\nAllow: /core/*.js?\nAllow: /core/*.gif\nAllow: /core/*.jpg\nAllow: /core/*.jpeg\nAllow: /core/*.png\nAllow: /core/*.svg\nAllow: /profiles/*.css$\nAllow: /profiles/*.css?\nAllow: /profiles/*.js$\nAllow: /profiles/*.js?\nAllow: /profiles/*.gif\nAllow: /profiles/*.jpg\nAllow: /profiles/*.jpeg\nAllow: /profiles/*.png\nAllow: /profiles/*.svg\n# Directories\nDisallow: /core/\nDisallow: /profiles/\n# Files\nDisallow: /README.md\nDisallow: /composer/Metapackage/README.txt\nDisallow: /composer/Plugin/ProjectMessage/README.md\nDisallow: /composer/Plugin/Scaffold/README.md\nDisallow: /composer/Plugin/VendorHardening/README.txt\nDisallow: /composer/Template/README.txt\nDisallow: /modules/README.txt\nDisallow: /sites/README.txt\nDisallow: /themes/README.txt\nDisallow: /web.config\n# Paths (clean URLs)\nDisallow: /admin/\nDisallow: /comment/reply/\nDisallow: /filter/tips\nDisallow: /node/add/\nDisallow: /search/\nDisallow: /user/register\nDisallow: /user/password\nDisallow: /user/login\nDisallow: /user/logout\nDisallow: /media/oembed\nDisallow: /*/media/oembed\n# Paths (no clean URLs)\nDisallow: /index.php/admin/\nDisallow: /index.php/comment/reply/\nDisallow: /index.php/filter/tips\nDisallow: /index.php/node/add/\nDisallow: /index.php/search/\nDisallow: /index.php/user/password\nDisallow: /index.php/user/register\nDisallow: /index.php/user/login\nDisallow: /index.php/user/logout\nDisallow: /index.php/media/oembed\nDisallow: /index.php/*/media/oembed\n"
+    },
+    "terms": {
+      "url": "https://ofac.treasury.gov/sdn-list-data-formats-data-schemas",
+      "requestedAt": "2026-09-21T08:02:49.461Z",
+      "httpStatus": 404,
+      "wireBytes": 30919,
+      "contentType": "text/html; charset=UTF-8",
+      "lastModified": null,
+      "bodySha256": "af1430efdea76a1e451c9734396ade9a16afdd1049891b3c64a4fb19b2c1fa92",
+      "extractedTermsSentences": [
+        "ntry Information Submit a Report Contact Us Search Enter Search Term(s): Breadcrumb Home Page Not Found Specially Designated Nationals List (SDN List) Consolidated Sanctions List (Non-SDN Lists) Additional Sanctions Lists Search OFAC&#039;s Sanctions Lists Sanctions Programs and Country Information Recent Actions OFAC License Application Page Additional OFAC Resources Frequently Asked Questions Civil Penalties and Enforcement Information OFAC Reporting System Selected General Licenses Issued by OFAC Contact OFAC Page Not Found The requested page could not be found."
+      ],
+      "textLength": 2269
+    },
+    "redirectRobots:wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com": {
+      "url": "https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/robots.txt",
+      "pathChecked": "/Published/6f141e88-8b06-41e6-89e7-d4017d73a738/2026-09-17/ac391fbd-8ac6-4dce-b73b-115435194157/SDN.XML?X-Amz-Expires=3600&X-Amz-Security-Token=FwoDYXdzEMb%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDNnAnJzaKV%2B4%2B4SkfCLsBFtjHDedjGdnxLhBwSmlakoGIFMTm%2BZ0fc6DAFWXanJJ0mN6XFqSp5aiFH%2FDf2zTgCIEivPZiPO8JStovGhe3Gy%2BW3pblRIuzNUDAplv9HoSWNCq11rHOJKyPCvgh9bOrM7zRQ3%2Flh5m4BP7ClkOGM9ZCbKwCj5vj%2BRdQBywq4eBbJmDf6bScvUOutJS5TLqMqrMHVOf92ckIbHVdDWbGnD2DjdfYSKo0pen34jDia5UpDRbfChpsIdhG4mfEJfu8G4M8Twgefrfh0UrK7rW8mYmvzQFgVfIdtQDUGgUFMWrHjxa3yTO7v5FS9ZZUoG1Z2DpllP0Qve5mLCUaPtlHY4ET%2F7DIsl2ZP8eKCgBaOYN72ObEg6rQq8VvGL7RCpLijRhzWXzc2TU7A9Mrm5L%2BQ3BOA8ZRqJGWyqj5eNjdTv3T6%2FEbI2kQQXnchD3zL2qP8dhisL8qoLJ0P5qjGvcUZL6C8xveDbnhJzyNKvPr%2Flss02MQbKoQY39T4Bw%2BR4aJAVPDnDYtrAxK0PNWYcf65wY7CbmRCHqerYOY8UpV8%2FN48QMYmeYrAom2X%2BfQbTq0ip1dXZFI83oWj9Cz0Ut82EpLe4HrZSmDcydKD9vNLLPYtoia%2F7R1mazffaku6pOPiUi8oF5OV%2BltkWtDDnimcNq3%2BqvirvQRjC%2F4WFaLiBSarA24jqUNYe2KXP27scsrwizdsj6%2BktqELn2mAgf5YyUUPDMmVGynHFSFyrYWApA0i9gE83OXplBjsqQ81ot5GMCzGp81hxsBfcuXfF%2B0PV59%2BhiFnAVS5RmcbS%2Fd8JYxOrM43Z%2Bfn5iYbmDKNK7w9UGMkHhzztbc5Lb0hXqKl2eYuCssSBlYr9h0FX2X0ELPtrPK5uiFUuZiY%2FRnOjX7EhUAgdcol8ANeS8oG7SCDnpHOJp4A%3D%3D&response-content-disposition=attachment%3B%20filename%3D%22sdn.xml%22&response-content-type=text%2Fxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIASARBLFPLGUJSFBHV%2F20260921%2Fus-gov-west-1%2Fs3%2Faws4_request&X-Amz-Date=20260921T080259Z&X-Amz-SignedHeaders=host&X-Amz-Signature=ad49130ecf51ecdef490ccdb65c4605a2c9d85af607177d573b5dfedbb32767b",
+      "requestedAt": "2026-09-21T08:03:00.863Z",
+      "httpStatus": 403,
+      "wireBytes": 275,
+      "contentType": "application/xml",
+      "verdict": "UNKNOWN",
+      "absent": false,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>HG3BVJNH3T9KJS2H</RequestId><HostId>SUnEy1xDzbJX+/V2FghPSLUClUQghUFgXHtAL6wFAanD06syXc8uqWThNXH0nBgdV5xnqzPsJ5oQi+gKAsGXaxf+RSTTMUSlM7UW/f/n7UI=</HostId></Error>"
+    },
+    "redirects": [
+      {
+        "from": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
+        "status": 302,
+        "to": "https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/Published/6f141e88-8b06-41e6-89e7-d4017d73a738/2026-09-17/ac391fbd-8ac6-4dce-b73b-115435194157/SDN.XML?X-Amz-Expires=3600&X-Amz-Security-Token=FwoDYXdzEMb%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDNnAnJzaKV%2B4%2B4SkfCLsBFtjHDedjGdnxLhBwSmlakoGIFMTm%2BZ0fc6DAFWXanJJ0mN6XFqSp5aiFH%2FDf2zTgCIEivPZiPO8JStovGhe3Gy%2BW3pblRIuzNUDAplv9HoSWNCq11rHOJKyPCvgh9bOrM7zRQ3%2Flh5m4BP7ClkOGM9ZCbKwCj5vj%2BRdQBywq4eBbJmDf6bScvUOutJS5TLqMqrMHVOf92ckIbHVdDWbGnD2DjdfYSKo0pen34jDia5UpDRbfChpsIdhG4mfEJfu8G4M8Twgefrfh0UrK7rW8mYmvzQFgVfIdtQDUGgUFMWrHjxa3yTO7v5FS9ZZUoG1Z2DpllP0Qve5mLCUaPtlHY4ET%2F7DIsl2ZP8eKCgBaOYN72ObEg6rQq8VvGL7RCpLijRhzWXzc2TU7A9Mrm5L%2BQ3BOA8ZRqJGWyqj5eNjdTv3T6%2FEbI2kQQXnchD3zL2qP8dhisL8qoLJ0P5qjGvcUZL6C8xveDbnhJzyNKvPr%2Flss02MQbKoQY39T4Bw%2BR4aJAVPDnDYtrAxK0PNWYcf65wY7CbmRCHqerYOY8UpV8%2FN48QMYmeYrAom2X%2BfQbTq0ip1dXZFI83oWj9Cz0Ut82EpLe4HrZSmDcydKD9vNLLPYtoia%2F7R1mazffaku6pOPiUi8oF5OV%2BltkWtDDnimcNq3%2BqvirvQRjC%2F4WFaLiBSarA24jqUNYe2KXP27scsrwizdsj6%2BktqELn2mAgf5YyUUPDMmVGynHFSFyrYWApA0i9gE83OXplBjsqQ81ot5GMCzGp81hxsBfcuXfF%2B0PV59%2BhiFnAVS5RmcbS%2Fd8JYxOrM43Z%2Bfn5iYbmDKNK7w9UGMkHhzztbc5Lb0hXqKl2eYuCssSBlYr9h0FX2X0ELPtrPK5uiFUuZiY%2FRnOjX7EhUAgdcol8ANeS8oG7SCDnpHOJp4A%3D%3D&response-content-disposition=attachment%3B%20filename%3D%22sdn.xml%22&response-content-type=text%2Fxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIASARBLFPLGUJSFBHV%2F20260921%2Fus-gov-west-1%2Fs3%2Faws4_request&X-Amz-Date=20260921T080259Z&X-Amz-SignedHeaders=host&X-Amz-Signature=ad49130ecf51ecdef490ccdb65c4605a2c9d85af607177d573b5dfedbb32767b",
+        "at": "2026-09-21T08:02:59.977Z"
+      }
+    ],
+    "resolvedEndpointUrl": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
+    "endpoint": {
+      "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
+      "resolvedUrl": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
+      "requestedAt": "2026-09-21T08:02:59.977Z",
+      "failure": "The redirect target host wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com has robots verdict UNKNOWN; it was not followed.",
+      "verified": false
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": false,
+    "activationSupported": false,
+    "blocker": "The configured endpoint did not return a usable XML document. See steps.endpoint for what it did return."
+  }
+}

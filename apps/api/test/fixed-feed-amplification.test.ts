@@ -84,6 +84,7 @@ const SEC_VERSION_DOCUMENT = {
         approvedOn: '2026-09-15',
         decision: 'D17',
       },
+      robotsException: null,
     },
   },
 };
@@ -108,6 +109,7 @@ const SEC_VERSION: ActiveSourceVersion = {
     approvedOn: '2026-09-15',
     decision: 'D17',
   },
+  robotsException: null,
   endpointUrl: SEC_FEED_URL,
   endpointKind: 'FIXED_FEED',
   queryParam: null,

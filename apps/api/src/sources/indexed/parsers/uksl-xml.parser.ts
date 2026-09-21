@@ -51,13 +51,28 @@ export class UkslXmlParser implements IndexedArtifactParser {
     );
     const namesContainer = asRecord(first(designation, 'Names', 'NAMES'));
     const names = records(first(namesContainer ?? {}, 'Name', 'NAME'));
-    const primary =
-      names.find((name) => /primary name$/i.test(text(first(name, 'NameType', 'NAME_TYPE')) ?? '')) ??
-      names[0] ??
-      designation;
-    const primaryName = readName(primary);
+    // Pick the first candidate that actually **yields** a name, not merely the first one labelled
+    // as primary.
+    //
+    // The published list contains designations whose `<Names>` block opens with an empty
+    // `<Name><NameType>Primary Name</NameType></Name>` — a carrier with a type and no name parts —
+    // followed by the real primary name. BEL0174 is one of them. Selecting by label alone chose
+    // the empty carrier and threw, which failed the parse of the **entire 21MB artifact** over one
+    // publisher-side data artefact, so the UK list could never produce a snapshot at all.
+    //
+    // The refusal below is kept and still means what it said: a designation with no usable name
+    // anywhere is a record this service cannot match on and must not pretend to hold.
+    const namedCandidates = [
+      ...names.filter((name) =>
+        /primary name$/i.test(text(first(name, 'NameType', 'NAME_TYPE')) ?? ''),
+      ),
+      ...names,
+      designation,
+    ];
+    const primary = namedCandidates.find((candidate) => readName(candidate) !== null);
+    const primaryName = primary === undefined ? null : readName(primary);
     if (primaryName === null) {
-      throw new Error(`UKSL designation ${sourceRecordId} has no primary name.`);
+      throw new Error(`UKSL designation ${sourceRecordId} has no usable name in any <Name> entry.`);
     }
     const aliases = names
       .filter((name) => name !== primary)
@@ -107,14 +122,20 @@ export class UkslXmlParser implements IndexedArtifactParser {
       ]),
       nationalities: texts(first(designation, 'Nationalities', 'Nationality')),
       citizenships: [],
-      countries: unique(addresses.map((address) => address.country).filter((value): value is string => value !== null)),
+      countries: unique(
+        addresses
+          .map((address) => address.country)
+          .filter((value): value is string => value !== null),
+      ),
       addresses,
       identifiers,
       companyIdentifiers,
       listingDate: parseDate(first(designation, 'DateDesignated', 'DATE_DESIGNATED')),
       programmes: texts(first(designation, 'RegimeName', 'Regimes', 'REGIME')),
       sanctionTypes: readSanctions(designation),
-      grounds: text(first(designation, 'UKStatementOfReasons', 'StatementOfReasons', 'OtherInformation')),
+      grounds: text(
+        first(designation, 'UKStatementOfReasons', 'StatementOfReasons', 'OtherInformation'),
+      ),
       status: text(first(designation, 'Status', 'DesignationStatus')) ?? 'LISTED',
       effectiveDate: parseDate(first(designation, 'DateDesignated', 'DATE_DESIGNATED')),
       expiryDate: null,
@@ -142,7 +163,11 @@ function readName(name: Record<string, unknown>): string | null {
 function readAddress(address: Record<string, unknown>): IndexedSourceAddress {
   return {
     lines: unique(
-      [1, 2, 3, 4].map((index) => text(first(address, `AddressLine${String(index)}`, `ADDRESS_${String(index)}`))).filter((value): value is string => value !== null),
+      [1, 2, 3, 4]
+        .map((index) =>
+          text(first(address, `AddressLine${String(index)}`, `ADDRESS_${String(index)}`)),
+        )
+        .filter((value): value is string => value !== null),
     ),
     city: text(first(address, 'AddressLine5', 'TownCity', 'CITY')),
     region: text(first(address, 'AddressLine6', 'StateRegion', 'STATE_PROVINCE')),

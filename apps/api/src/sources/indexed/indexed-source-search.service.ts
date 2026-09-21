@@ -4,11 +4,13 @@ import { Injectable } from '@nestjs/common';
 
 import {
   gradeIdentity,
-  matchNameForms,
-  normaliseName,
-  type IdentityFactor,
-  type NameMatch,
+  resolveIdentityEvidence,
+  type DocumentIdentityEvidence,
+  type EvidenceSpan,
+  type IdentityDate,
+  type IdentityName,
   type SourceCoverageOutcome,
+  type SubjectIdentityEvidence,
 } from '@erly/adverse-domain';
 import type { SubjectVersion } from '@erly/adverse-contracts';
 
@@ -48,7 +50,10 @@ export class IndexedSourceSearchService {
 
     const versions = new Map(
       await Promise.all(
-        states.map(async (state) => [state.sourceId, await this.versions.loadActive(state.sourceId)] as const),
+        states.map(
+          async (state) =>
+            [state.sourceId, await this.versions.loadActive(state.sourceId)] as const,
+        ),
       ),
     );
     const findings = candidates
@@ -75,6 +80,9 @@ export class IndexedSourceSearchService {
               'No usable local snapshot exists. This source contributed no no-match evidence.',
             queriesAffected: 1,
             truncation: null,
+            snapshotVersion: null,
+            freshness: state.freshness,
+            snapshotRowCount: null,
           };
         }
         const degraded = state.refreshStatus === 'FAILED' || state.freshness === 'STALE';
@@ -91,6 +99,9 @@ export class IndexedSourceSearchService {
               `(${String(state.rowCount)} records) and found ${String(counts.get(state.sourceId) ?? 0)} match(es).`,
           queriesAffected: 1,
           truncation: null,
+          snapshotVersion: state.activeSnapshotVersion,
+          freshness: state.freshness,
+          snapshotRowCount: state.rowCount,
         };
       }),
     };
@@ -109,22 +120,23 @@ export class IndexedSourceSearchService {
     if (version === null) {
       return null;
     }
-    const subjectForms = [input.subject.fullName, ...input.subject.aliases.map((alias) => alias.name)];
-    const recordForms = [record.primaryName, ...record.aliases, ...record.originalScriptNames];
-    const publicationMatch =
-      record.recordKind === 'OFFICIAL_PUBLICATION'
-        ? matchPublication(subjectForms, record.searchableText ?? '')
-        : null;
-    const match = publicationMatch?.match ?? strongestMatch(subjectForms, recordForms);
+    // Both sides of the comparison are built from their own source and handed to the one shared
+    // resolver. Until 2026-09-21 this service had its own copy of the factor logic, correct but
+    // private, while the discovery pipeline had a second copy that compared the subject's name to
+    // itself. One implementation, two callers, is the whole point of the refactor.
+    const subjectEvidence = subjectIdentityEvidence(input.subject);
+    const documentEvidence = documentIdentityEvidence(record, subjectEvidence);
+    const resolved = resolveIdentityEvidence(subjectEvidence, documentEvidence);
+    const match = resolved.match;
     if (match.form === 'NO_MATCH') {
       return null;
     }
-    const factors = identityFactors(input.subject, record, match);
+    const factors = resolved.factors;
     const identity = gradeIdentity({
       nameMatch: match.form,
       factors,
       frequencyPrior: input.subject.nameFrequencyPrior,
-      documentDistinguishesNamesake: false,
+      documentDistinguishesNamesake: documentEvidence.distinguishesNamesake,
     });
     if (identity.grade === 'CONTRADICTED') {
       return null;
@@ -144,7 +156,10 @@ export class IndexedSourceSearchService {
         ? (record.publicationDate ?? record.effectiveDate)
         : (record.listingDate ?? record.effectiveDate),
     );
-    const span = publicationMatch?.span ?? { start: 0, end: record.primaryName.length };
+    // The span the finding highlights: where the matched name was actually read. For a
+    // publication that is its offset in the feed text; for a list entry the record field has no
+    // text offset, so the resolver's field span is used.
+    const span = resolved.matchedDocumentName?.span ?? { start: 0, end: record.primaryName.length };
     const findingMetadata = record.findingMetadata;
     const proceduralStage =
       isPublication && findingMetadata !== null && findingMetadata !== undefined
@@ -173,6 +188,7 @@ export class IndexedSourceSearchService {
         independenceCount: 1,
       },
       rationale: [
+        ...resolved.rationale,
         ...identity.rationale,
         isPublication
           ? `${publisher} published this official item; the feed excerpt is a candidate and ` +
@@ -181,11 +197,18 @@ export class IndexedSourceSearchService {
         isPublication
           ? 'Party role and identity require review, so the publication remains AMBIGUOUS.'
           : entityTypeUnresolved
-          ? `The publisher classifies the record as ${record.recordType}; the subject schema does ` +
-            'not declare person/entity type, so the candidate remains AMBIGUOUS.'
-          : 'The publisher record names an individual directly.',
+            ? `The publisher classifies the record as ${record.recordType}; the subject schema does ` +
+              'not declare person/entity type, so the candidate remains AMBIGUOUS.'
+            : 'The publisher record names an individual directly.',
       ],
-      category: isPublication ? (findingMetadata?.category ?? null) : 'SANCTIONS_DESIGNATION',
+      // A publication carries the category its parser assigned; a listing carries the kind of
+      // list it came from, defaulting to a sanctions designation for the parsers that predate
+      // `listingCategory`. Both are values in the closed `FINDING_CATEGORIES` enum — until
+      // 2026-09-21 this line emitted `'SANCTIONS_DESIGNATION'` as a free string that appeared in
+      // no schema.
+      category: isPublication
+        ? (findingMetadata?.category ?? null)
+        : (record.listingCategory ?? 'SANCTIONS_DESIGNATION'),
       proceduralStage,
       partyRole,
       namingAuthority: publisher,
@@ -244,20 +267,140 @@ export class IndexedSourceSearchService {
   }
 }
 
-function matchPublication(
-  subjectForms: readonly string[],
-  searchableText: string,
-): { readonly match: NameMatch; readonly span: { readonly start: number; readonly end: number } } | null {
-  for (const form of subjectForms) {
-    const directAt = searchableText.toLocaleLowerCase('en').indexOf(form.toLocaleLowerCase('en'));
-    if (directAt >= 0) {
-      return {
-        match: { form: 'EXACT', matchedForm: form, matchedScripts: [] },
-        span: { start: directAt, end: directAt + form.length },
-      };
+/**
+ * The subject side of the comparison, projected from the FR-01 subject version.
+ *
+ * `identifiers` is empty because `subjectVersionSchema` carries none — a tenant cannot supply a
+ * passport or national id today. The resolver supports them so that the day the schema does, the
+ * factor is already graded correctly; until then no identifier factor can be asserted on this
+ * path, which is the honest outcome.
+ */
+function subjectIdentityEvidence(subject: SubjectVersion): SubjectIdentityEvidence {
+  return {
+    names: [
+      { text: subject.fullName, role: 'PRIMARY' },
+      ...subject.aliases.map(
+        (alias): IdentityName => ({ text: alias.name, role: 'ALIAS', origin: alias.origin }),
+      ),
+    ],
+    datesOfBirth: subject.dateOfBirth === null ? [] : [subject.dateOfBirth],
+    countries: subject.countryContext,
+    companyNames: subject.knownCompanies
+      .map((company) => company.name ?? '')
+      .filter((name) => name.length > 0),
+    identifiers: [],
+  };
+}
+
+/**
+ * The document side, projected from the stored publisher record.
+ *
+ * Two record kinds, two ways of reading a name out of them:
+ *
+ *  - an `AUTHORITY_LIST_ENTRY` is structured. Its names are fields — primary, aliases, original
+ *    script — and they are passed through as written.
+ *  - an `OFFICIAL_PUBLICATION` is a feed item with a title and summary. Its "names" are the
+ *    word-bounded occurrences of a subject name form **in that text**, and what is passed to the
+ *    resolver is the slice of the document at that offset, not the form used to find it. That
+ *    distinction is not pedantry: the slice is what the publisher wrote, it carries the
+ *    publisher's own casing and spacing, and it is what a reviewer is shown.
+ *
+ * Word boundaries are enforced. A bare `indexOf` puts "Ana" inside "Santana" and attributes a
+ * stranger's enforcement action to the subject; the discovery extractor has always bounded its
+ * matches and this path now does too.
+ */
+function documentIdentityEvidence(
+  record: StoredIndexedSourceRecord,
+  subject: SubjectIdentityEvidence,
+): DocumentIdentityEvidence {
+  const isPublication = record.recordKind === 'OFFICIAL_PUBLICATION';
+  const text = record.searchableText ?? '';
+
+  const names: IdentityName[] = isPublication
+    ? boundedOccurrences(
+        text,
+        subject.names.map((name) => name.text),
+      )
+    : [
+        { text: record.primaryName, role: 'PRIMARY' },
+        ...record.aliases.map((alias): IdentityName => ({ text: alias, role: 'ALIAS' })),
+        ...record.originalScriptNames.map(
+          (name): IdentityName => ({ text: name, role: 'ORIGINAL_SCRIPT' }),
+        ),
+      ];
+
+  // A publication's prose is not parsed for a date of birth or a nationality: a four-digit
+  // number near a name is not a birth year, and guessing one is exactly the fabrication this
+  // work removed. Structured publisher fields are read; prose is not mined.
+  const structured = !isPublication;
+
+  return {
+    names,
+    datesOfBirth: structured ? record.datesOfBirth.map(toIdentityDate) : [],
+    countries: structured
+      ? [...record.countries, ...record.nationalities, ...record.citizenships]
+      : [],
+    // A company the subject is associated with, named in the publisher's text. The value passed
+    // is the document's own slice, for the same reason the names are.
+    companyNames: boundedOccurrences(
+      isPublication ? text : `${record.primaryName} ${record.aliases.join(' ')}`,
+      subject.companyNames,
+    ).map((occurrence) => occurrence.text),
+    identifiers: structured
+      ? record.identifiers.map((identifier) => ({
+          type: identifier.type,
+          value: identifier.value,
+        }))
+      : [],
+    // A sanctions list does not publish namesake disclaimers, and a feed excerpt is not read for
+    // one. FR-09's NAMESAKE_DISTINGUISHED reaches Axis A through the extraction path only.
+    distinguishesNamesake: false,
+    fieldSpan: isPublication ? null : { start: 0, end: record.primaryName.length },
+  };
+}
+
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+
+/**
+ * Every word-bounded occurrence of any needle, returned as the **document's** own text at that
+ * offset. Deduplicated by start offset, in document order.
+ */
+function boundedOccurrences(
+  text: string,
+  needles: readonly string[],
+): { readonly text: string; readonly role: 'PRIMARY'; readonly span: EvidenceSpan }[] {
+  const haystack = text.toLocaleLowerCase('en');
+  const seen = new Set<number>();
+  const found: { text: string; role: 'PRIMARY'; span: EvidenceSpan }[] = [];
+
+  for (const needle of needles) {
+    const target = needle.trim().toLocaleLowerCase('en');
+    if (target.length === 0) {
+      continue;
+    }
+    let from = 0;
+    for (;;) {
+      const at = haystack.indexOf(target, from);
+      if (at === -1) {
+        break;
+      }
+      const end = at + target.length;
+      const before = at === 0 ? '' : (text[at - 1] ?? '');
+      const after = text[end] ?? '';
+      if (
+        !WORD_CHARACTER.test(before) &&
+        !WORD_CHARACTER.test(after) &&
+        !seen.has(at)
+      ) {
+        seen.add(at);
+        // The slice, not the needle: what the publisher actually wrote at this offset.
+        found.push({ text: text.slice(at, end), role: 'PRIMARY', span: { start: at, end } });
+      }
+      from = end;
     }
   }
-  return null;
+
+  return found.toSorted((a, b) => a.span.start - b.span.start);
 }
 
 function findEvidenceSpan(
@@ -271,74 +414,28 @@ function findEvidenceSpan(
   return start < 0 ? null : { start, end: start + evidence.length };
 }
 
-function strongestMatch(subjectForms: readonly string[], recordForms: readonly string[]): NameMatch {
-  const rank = ['NO_MATCH', 'PHONETIC', 'SUBSET_PATRONYMIC', 'INITIAL_EXPANSION', 'PARTICLE_VARIANT', 'EXACT_WORD_ORDER_VARIANT', 'EXACT'];
-  let strongest: NameMatch = { form: 'NO_MATCH', matchedForm: '', matchedScripts: [] };
-  for (const subject of subjectForms) {
-    for (const candidate of recordForms) {
-      const match = matchNameForms(normaliseName(subject), normaliseName(candidate));
-      if (rank.indexOf(match.form) > rank.indexOf(strongest.form)) {
-        strongest = match;
-      }
-    }
-  }
-  return strongest;
+/**
+ * A publisher date in the resolver's shape.
+ *
+ * `RANGE` passes through unchanged and the resolver treats it as incomparable. A range is "some
+ * time between these dates", and narrowing it to its start would turn an approximation into a
+ * date of birth the publisher never stated — which, compared against a subject, would
+ * manufacture either a corroboration or a contradiction out of nothing.
+ */
+function toIdentityDate(date: IndexedSourceDate): IdentityDate {
+  return { value: date.value, precision: date.precision };
 }
 
-function identityFactors(
-  subject: SubjectVersion,
-  record: StoredIndexedSourceRecord,
-  match: NameMatch,
-): IdentityFactor[] {
-  const factors: IdentityFactor[] = [
-    {
-      kind: 'EXACT_COMMON_NAME',
-      strength: 'WEAK',
-      direction: 'CORROBORATING',
-      span: { start: 0, end: match.matchedForm.length },
-      detail: `Publisher name matched as ${match.form}: ${match.matchedForm}.`,
-    },
-  ];
-  const subjectDob = subject.dateOfBirth;
-  if (subjectDob !== null && subjectDob.value !== null && record.datesOfBirth.length > 0) {
-    const same = record.datesOfBirth.some((date) => datesAgree(subjectDob.value as string, date));
-    factors.push({
-      kind: same ? 'FULL_DOB' : 'DOB_DIFFERS_BEYOND_PRECISION',
-      strength: 'STRONG',
-      direction: same ? 'CORROBORATING' : 'CONTRADICTING',
-      span: { start: 0, end: record.primaryName.length },
-      detail: same
-        ? 'Subject date of birth agrees with the publisher record.'
-        : 'Subject date of birth conflicts with every date of birth in the publisher record.',
-    });
-  }
-  const subjectCountries = new Set(subject.countryContext.map((country) => country.toUpperCase()));
-  const recordCountries = [...record.countries, ...record.nationalities, ...record.citizenships];
-  if (recordCountries.some((country) => subjectCountries.has(country.toUpperCase()))) {
-    factors.push({
-      kind: 'COUNTRY_ONLY',
-      strength: 'WEAK',
-      direction: 'CORROBORATING',
-      span: { start: 0, end: record.primaryName.length },
-      detail: 'Subject country context overlaps publisher nationality/address data.',
-    });
-  }
-  return factors;
-}
-
-function datesAgree(subjectDate: string, sourceDate: IndexedSourceDate): boolean {
-  if (sourceDate.value === null) {
-    return false;
-  }
-  return sourceDate.precision === 'YEAR'
-    ? subjectDate.slice(0, 4) === sourceDate.value.slice(0, 4)
-    : subjectDate === sourceDate.value;
-}
-
-function toPreciseDate(
-  date: IndexedSourceDate | null,
-): { readonly value: string | null; readonly precision: 'DAY' | 'MONTH' | 'YEAR' | 'UNKNOWN' } {
-  if (date === null || date.value === null || date.precision === 'UNKNOWN' || date.precision === 'RANGE') {
+function toPreciseDate(date: IndexedSourceDate | null): {
+  readonly value: string | null;
+  readonly precision: 'DAY' | 'MONTH' | 'YEAR' | 'UNKNOWN';
+} {
+  if (
+    date === null ||
+    date.value === null ||
+    date.precision === 'UNKNOWN' ||
+    date.precision === 'RANGE'
+  ) {
     return { value: null, precision: 'UNKNOWN' };
   }
   return { value: date.value, precision: date.precision };

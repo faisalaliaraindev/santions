@@ -1,0 +1,63 @@
+{
+  "sourceId": "cftc-enforcement-press-releases",
+  "sourceName": "CFTC Enforcement Press Releases",
+  "publisher": "US Commodity Futures Trading Commission",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://www.cftc.gov/robots.txt",
+      "pathChecked": "/RSS/RSSENF/rssenf.xml",
+      "requestedAt": "2026-09-21T08:01:40.328Z",
+      "httpStatus": 200,
+      "wireBytes": 702,
+      "contentType": "text/plain",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "#\n# robots.txt\n#\n# This file is to prevent the crawling and indexing of certain parts\n# of your site by web crawlers and spiders run by sites like Yahoo!\n# and Google. By telling these \"robots\" where not to go on your site,\n# you save bandwidth and server resources.\n#\n# This file will be ignored unless it is at the root of your host:\n# Used:    http://example.com/robots.txt\n# Ignored: http://example.com/site/robots.txt\n#\n# For more information about the robots.txt standard, see:\n# http://www.robotstxt.org/robotstxt.html\n\nUser-agent: *\n# CSS, JS, Images\nAllow: /core/*.css$\nAllow: /core/*.css?\nAllow: /core/*.js$\nAllow: /core/*.js?\nAllow: /core/*.avif\nAllow: /core/*.gif\nAllow: /core/*.jpg\nAllow: /core/*.jpeg\nAllow: /core/*.png\nAllow: /core/*.svg\nAllow: /core/*.webp\nAllow: /profiles/*.css$\nAllow: /profiles/*.css?\nAllow: /profiles/*.js$\nAllow: /profiles/*.js?\nAllow: /profiles/*.avif\nAllow: /profiles/*.gif\nAllow: /profiles/*.jpg\nAllow: /profiles/*.jpeg\nAllow: /profiles/*.png\nAllow: /profiles/*.svg\nAllow: /profiles/*.webp\n# Directories\nDisallow: /core/\nDisallow: /profiles/\n# Files\nDisallow: /README.md\nDisallow: /composer/Metapackage/README.txt\nDisallow: /composer/Plugin/ProjectMessage/README.md\nDisallow: /composer/Plugin/Scaffold/README.md\nDisallow: /composer/Plugin/VendorHardening/README.txt\nDisallow: /composer/Template/README.txt\nDisallow: /modules/README.txt\nDisallow: /sites/README.txt\nDisallow: /themes/README.txt\n# Paths (clean URLs)\nDisallow: /admin/\nDisallow: /comment/reply/\nDisallow: /filter/tips\nDisallow: /node/add/\nDisallow: /search/\nDisallow: /search?\nDisallow: /user/register\nDisallow: /user/password\nDisallow: /user/login\nDisallow: /user/logout\nDisallow: /media/oembed\nDisallow: /*/media/oembed\n# Paths (no clean URLs)\nDisallow: /index.php/admin/\nDisallow: /index.php/comment/reply/\nDisallow: /index.php/filter/tips\nDisallow: /index.php/node/add/\nDisallow: /index.php/search/\nDisallow: /index.php/search?\nDisallow: /index.php/user/password\nDisallow: /index.php/user/register\nDisallow: /index.php/user/login\nDisallow: /index.php/user/logout\nDisallow: /index.php/media/oembed\nDisallow: /index.php/*/media/oembed\n"
+    },
+    "policyRobots": {
+      "url": "https://www.cftc.gov/robots.txt",
+      "pathChecked": "/RSS/index.htm",
+      "sameHostAsArtifact": true,
+      "verdict": "ALLOWED"
+    },
+    "terms": {
+      "url": "https://www.cftc.gov/RSS/index.htm",
+      "requestedAt": "2026-09-21T08:01:44.334Z",
+      "httpStatus": 200,
+      "wireBytes": 8974,
+      "contentType": "text/html; charset=utf-8",
+      "lastModified": "Mon, 21 Sep 2026 03:37:27 GMT",
+      "bodySha256": "b9772ad4eb0cc5b60ba1f7a15546ee55275d55ba1b82a5eff034aae150bdeda1",
+      "extractedTermsSentences": [],
+      "textLength": 2282
+    },
+    "endpoint": {
+      "url": "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",
+      "requestedAt": "2026-09-21T08:01:48.336Z",
+      "httpStatus": 200,
+      "wireBytes": 1200,
+      "decompressedBytes": 4715,
+      "contentType": "application/rss+xml; charset=utf-8",
+      "mediaType": "application/rss+xml",
+      "bodySha256": "12a735d7367f2ed93922e29f2a73dc55d9060e2aedcd2bd9f51258193a332d90",
+      "bodyPreview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<rss xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\" xmlns:foaf=\"http://xmlns.com/foaf/0.1/\" xmlns:og=\"http://ogp.me/ns#\" xmlns:rdfs=\"http://www.w3.org/2000/01/rdf-schema#\" xmlns:schema=\"http://schema.org/\" xmlns:sioc=\"http://rdfs.org/sioc/ns#\" xmlns:sioct=\"http://rdfs.org/sioc/types#\" xmlns:skos=\"http://ww",
+      "looksLikeHtmlErrorPage": false,
+      "credentialRequired": null,
+      "verified": true
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": true,
+    "activationSupported": true,
+    "blocker": null
+  }
+}

@@ -26,6 +26,8 @@
 
 import { z } from 'zod';
 
+import { FINDING_CATEGORIES } from '@erly/adverse-domain';
+
 import { findingCountsSchema } from './search.js';
 import { preciseDateSchema } from '../subjects/subject.js';
 
@@ -111,8 +113,22 @@ export const findingSchema = z
     /** Every rule that fired, in order. Rendered verbatim in the evidence detail view. */
     rationale: z.array(z.string()),
 
-    /** Null when the document reports no categorisable conduct. */
-    category: z.string().nullable(),
+    /**
+     * What kind of adverse signal this is, from a **closed** list.
+     *
+     * The seventeen FR-03 conduct categories plus the three designation categories — a sanctions
+     * listing, a debarment, a regulator's warning list. One enum rather than two fields, because
+     * an integrator's question ("what is adverse about this person?") is one question, and a
+     * caller wanting only designations filters on those three values.
+     *
+     * It was `z.string()` until 2026-09-21, which is how `SANCTIONS_DESIGNATION` reached the API
+     * from the indexed-source path without ever appearing in a schema: a value no generated
+     * client could switch on and no consumer could have known to expect. A free string in a
+     * contract is not a permissive contract, it is an absent one.
+     *
+     * Null when the document reports no categorisable conduct.
+     */
+    category: z.enum(FINDING_CATEGORIES).nullable(),
     proceduralStage: z.string(),
     partyRole: z.string(),
     /** The body that made the statement. Null when the text names none. */
@@ -311,6 +327,19 @@ export const findingsPageSchema = z
            * classified it.
            */
           failureClass: z.string().nullable().optional(),
+          /**
+           * For a locally indexed source: which snapshot answered, how fresh it is, and how many
+           * rows it holds.
+           *
+           * These are what let a caller tell the four outcomes apart without reading prose:
+           * searched and current, searched but stale (`freshness: 'STALE'`, outcome `PARTIAL`),
+           * no snapshot at all (`snapshotVersion: null`, outcome `FAILED`), and a refresh that
+           * failed while the last-known-good snapshot kept answering. Absent for a query-time
+           * source, which has no snapshot behind it.
+           */
+          snapshotVersion: z.string().nullable().optional(),
+          freshness: z.enum(['CURRENT', 'STALE', 'UNAVAILABLE']).nullable().optional(),
+          snapshotRowCount: z.number().int().nonnegative().nullable().optional(),
         })
         .strict(),
     ),

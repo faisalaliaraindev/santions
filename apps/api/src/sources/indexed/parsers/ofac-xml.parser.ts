@@ -41,7 +41,7 @@ export class OfacXmlParser implements IndexedArtifactParser {
       publisherVersion:
         publication === null
           ? null
-          : text(publication['Publish_Date']) ?? text(publication['Record_Count']),
+          : (text(publication['Publish_Date']) ?? text(publication['Record_Count'])),
     };
   }
 
@@ -62,22 +62,22 @@ export class OfacXmlParser implements IndexedArtifactParser {
     const datesOfBirth = records(asRecord(entry['dateOfBirthList'])?.['dateOfBirthItem'])
       .map((item) => parseDate(item['dateOfBirth']))
       .filter((date): date is IndexedSourceDate => date !== null);
-    const placesOfBirth = records(asRecord(entry['placeOfBirthList'])?.['placeOfBirthItem'])
-      .flatMap((item) => texts(item['placeOfBirth']));
+    const placesOfBirth = records(
+      asRecord(entry['placeOfBirthList'])?.['placeOfBirthItem'],
+    ).flatMap((item) => texts(item['placeOfBirth']));
 
     return {
       sourceId: input.sourceId,
       sourceRecordId,
-      recordType:
-        type.includes('INDIVIDUAL')
-          ? 'PERSON'
-          : type.includes('VESSEL')
-            ? 'VESSEL'
-            : type.includes('AIRCRAFT')
-              ? 'AIRCRAFT'
-              : type.includes('ENTITY')
-                ? 'ENTITY'
-                : 'OTHER',
+      recordType: type.includes('INDIVIDUAL')
+        ? 'PERSON'
+        : type.includes('VESSEL')
+          ? 'VESSEL'
+          : type.includes('AIRCRAFT')
+            ? 'AIRCRAFT'
+            : type.includes('ENTITY')
+              ? 'ENTITY'
+              : 'OTHER',
       primaryName,
       aliases: unique(aliases),
       originalScriptNames: [],
@@ -86,7 +86,9 @@ export class OfacXmlParser implements IndexedArtifactParser {
       nationalities: [],
       citizenships: [],
       countries: unique([
-        ...addresses.map((address) => address.country).filter((value): value is string => value !== null),
+        ...addresses
+          .map((address) => address.country)
+          .filter((value): value is string => value !== null),
         ...identifiers
           .map((identifier) => identifier.issuingCountry)
           .filter((value): value is string => value !== null),
@@ -112,7 +114,11 @@ export class OfacXmlParser implements IndexedArtifactParser {
 
 function readAddress(value: Record<string, unknown>): IndexedSourceAddress {
   return {
-    lines: unique([value['address1'], value['address2'], value['address3']].map(text).filter((v): v is string => v !== null)),
+    lines: unique(
+      [value['address1'], value['address2'], value['address3']]
+        .map(text)
+        .filter((v): v is string => v !== null),
+    ),
     city: text(value['city']),
     region: text(value['stateOrProvince']),
     postalCode: text(value['postalCode']),

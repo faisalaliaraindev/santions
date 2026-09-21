@@ -237,6 +237,7 @@ function gdeltVersion(ceiling: number | null): ActiveSourceVersion {
       approvedOn: '2026-09-18',
       decision: 'D18',
     },
+    robotsException: null,
     endpointUrl: GDELT_URL,
     endpointKind: 'QUERY_FEED',
     queryParam: 'query',

@@ -377,7 +377,7 @@ export class FetchGateService {
         version,
       );
     }
-    const robots = this.robotsPositionFor(version, false);
+    const robots = this.robotsPositionFor(version, false, true);
     if (robots === null) {
       return this.refuse(
         version.robotsPosition === 'EXCEPTION_APPROVED'
@@ -403,7 +403,8 @@ export class FetchGateService {
         sourceVersionId: version.versionId,
         licenceTermsVersion: version.licenceTermsVersion,
         robotsPosition: robots,
-        robotsExceptionApprovedBy: null,
+        robotsExceptionApprovedBy: version.robotsException?.approvedBy ?? null,
+        robotsExceptionDeliveryHosts: version.robotsException?.deliveryHosts ?? [],
         requestCeilingPerSecond: version.requestCeilingPerSecond,
         jurisdictionEnabled: true,
         languageEnabled: true,
@@ -563,7 +564,7 @@ export class FetchGateService {
       );
     }
 
-    const robots = this.robotsPositionFor(version, isFixture);
+    const robots = this.robotsPositionFor(version, isFixture, false);
     if (robots === null) {
       return version.robotsPosition === 'EXCEPTION_APPROVED'
         ? this.refuse(
@@ -602,8 +603,12 @@ export class FetchGateService {
         sourceVersionId: version.versionId,
         licenceTermsVersion: version.licenceTermsVersion,
         robotsPosition: robots,
-        // Always null while D6 is open: the only path that would set it is refused above.
+        // Always null and empty on this path, and deliberately so. D6 authorised an exception for
+        // *scheduled artifact download* — one known file, from a publisher's own named delivery
+        // host. It authorised nothing for query-time discovery, where the URLs are not known in
+        // advance, so an exception here would be an exception with no bounded scope.
         robotsExceptionApprovedBy: null,
+        robotsExceptionDeliveryHosts: [],
         requestCeilingPerSecond: version.requestCeilingPerSecond,
         jurisdictionEnabled: true,
         languageEnabled: true,
@@ -629,6 +634,16 @@ export class FetchGateService {
   private robotsPositionFor(
     version: ActiveSourceVersion,
     isFixture: boolean,
+    /**
+     * Whether a D6 robots exception may be used here.
+     *
+     * True only for the scheduled-artifact path. D6 authorised the exception for downloading one
+     * known bulk file from a publisher's own named delivery host; query-time discovery fetches
+     * URLs nobody listed in advance, so an exception there would have no bounded scope. Passing
+     * this explicitly, rather than reading the position and hoping the caller is the right one,
+     * keeps the two answers from drifting into each other.
+     */
+    exceptionUsable: boolean,
   ): FetchAuthorisation['robotsPosition'] | null {
     if (isFixture) {
       // Mock mode only; the live branch was refused above. There is no publisher behind a
@@ -636,7 +651,20 @@ export class FetchGateService {
       // about a robots.txt that does not exist.
       return 'FIXTURE_NOT_A_PUBLISHER';
     }
-    return version.robotsPosition === 'HONOURED' ? 'HONOURED' : null;
+    if (version.robotsPosition === 'HONOURED') {
+      return 'HONOURED';
+    }
+    // D6 (closed 2026-09-21): an exception is usable only when the version carries the complete,
+    // host-scoped record. `SourceVersionService.readRobotsException` returns null for a partial
+    // one, so a half-filled exception reads here as no exception at all and is refused below.
+    if (
+      exceptionUsable &&
+      version.robotsPosition === 'EXCEPTION_APPROVED' &&
+      version.robotsException !== null
+    ) {
+      return 'EXCEPTION_APPROVED';
+    }
+    return null;
   }
 
   private refuse(

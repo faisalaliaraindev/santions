@@ -57,6 +57,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   aggregateRun,
   assignBand,
+  assignClusters,
+  fingerprintText,
+  resolveIdentityEvidence,
   boundPlan,
   buildQueryPlan,
   classifyEvent,
@@ -64,15 +67,23 @@ import {
   gradeAttribution,
   gradeIdentity,
   labelTenure,
-  matchNameForms,
   normaliseName,
   renderNoMatchStatement,
   resolveEffectiveScope,
   unmeasuredLanguages,
   unreviewedLexiconNote,
   type AnchorCompany,
+  type AssignableCandidate,
+  type AuthorityTier,
+  type AxisAResult,
+  type AxisBResult,
+  type AxisCResult,
+  type ClusterCandidate,
   type ClusteredSource,
-  type IdentityFactor,
+  type DocumentIdentityEvidence,
+  type IdentityDate,
+  type IdentityName,
+  type SubjectIdentityEvidence,
   type PlannedQuery,
   type PreciseDate,
   type SourceCoverageOutcome,
@@ -142,6 +153,103 @@ export interface PipelineResult {
 interface SourcedLead {
   readonly lead: Lead;
   readonly query: PlannedQuery;
+}
+
+/**
+ * What `band` returns: the finding, plus everything the run-level clustering pass needs to
+ * re-band it without re-deriving it.
+ *
+ * Axis D is the only axis that cannot be settled from one document — independence is a property
+ * of the set of documents a run found about one event. So the first pass computes A, B and C
+ * once and carries them here, and `clusterFindings` supplies the real Axis D and re-runs
+ * `assignBand`. Recomputing A, B and C in the second pass would mean two places deciding the
+ * same thing, which is the shape of defect this whole session exists to remove.
+ */
+interface BandedFinding {
+  readonly finding: FindingRecord;
+  readonly axisA: AxisAResult;
+  readonly axisB: AxisBResult;
+  readonly axisC: AxisCResult;
+  readonly candidate: AssignableCandidate;
+  readonly tier: AuthorityTier;
+}
+
+/**
+ * `identityAttributes` kinds the extractor may use for a date of birth.
+ *
+ * Matched case-insensitively and permissively, because the port deliberately types `kind` as a
+ * free string: D7 is open and the model that eventually fills this is not chosen yet. An
+ * unrecognised kind is ignored rather than guessed at — a value this service cannot classify is
+ * not evidence it may use.
+ */
+const DOCUMENT_DOB_KINDS = ['DATE_OF_BIRTH', 'DOB', 'BIRTH_DATE', 'BIRTH_YEAR', 'YEAR_OF_BIRTH'];
+const DOCUMENT_COUNTRY_KINDS = ['COUNTRY', 'NATIONALITY', 'CITIZENSHIP'];
+const DOCUMENT_COMPANY_KINDS = ['COMPANY', 'EMPLOYER', 'ORGANISATION', 'ORGANIZATION'];
+const DOCUMENT_IDENTIFIER_KINDS = [
+  'PASSPORT',
+  'PASSPORT_NUMBER',
+  'NATIONAL_ID',
+  'GOVERNMENT_ID',
+  'TAX_ID',
+];
+
+/**
+ * The registry's `authorityTier` as the closed `AuthorityTier` union.
+ *
+ * The registry stores it as a plain number, so a value outside 1–5 is representable. It is
+ * clamped to 5 — lead-only, the weakest thing a document can be — rather than to a default that
+ * would let a misconfigured source support a finding. An out-of-range tier is a configuration
+ * fault, and a configuration fault must not be resolved in the source's favour.
+ */
+function clampTier(tier: number): AuthorityTier {
+  return tier === 1 || tier === 2 || tier === 3 || tier === 4 ? tier : 5;
+}
+
+function attributeKindMatches(kind: string, accepted: readonly string[]): boolean {
+  const folded = kind.trim().toUpperCase().replace(/[^A-Z]/gu, '_');
+  return accepted.includes(folded);
+}
+
+function identityAttributeValues(
+  attributes: readonly { readonly kind: string; readonly value: string }[],
+  accepted: readonly string[],
+): readonly string[] {
+  return attributes
+    .filter((attribute) => attributeKindMatches(attribute.kind, accepted))
+    .map((attribute) => attribute.value.trim())
+    .filter((value) => value.length > 0);
+}
+
+/**
+ * Dates of birth the document **states**, with the precision it stated them at.
+ *
+ * A bare four-digit year is YEAR precision, a full ISO date is DAY. Anything else is dropped:
+ * a value this service cannot parse is not turned into a date, because a misparsed date is
+ * worse than a missing one — it can manufacture a contradiction and discard a real person.
+ */
+function identityAttributeDates(
+  attributes: readonly { readonly kind: string; readonly value: string }[],
+): readonly IdentityDate[] {
+  const dates: IdentityDate[] = [];
+  for (const value of identityAttributeValues(attributes, DOCUMENT_DOB_KINDS)) {
+    if (/^\d{4}$/u.test(value)) {
+      dates.push({ value: `${value}-01-01`, precision: 'YEAR' });
+    } else if (/^\d{4}-\d{2}$/u.test(value)) {
+      dates.push({ value: `${value}-01`, precision: 'MONTH' });
+    } else if (/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+      dates.push({ value, precision: 'DAY' });
+    }
+  }
+  return dates;
+}
+
+function identityAttributeIdentifiers(
+  attributes: readonly { readonly kind: string; readonly value: string }[],
+): readonly { readonly type: string; readonly value: string }[] {
+  return attributes
+    .filter((attribute) => attributeKindMatches(attribute.kind, DOCUMENT_IDENTIFIER_KINDS))
+    .map((attribute) => ({ type: attribute.kind, value: attribute.value.trim() }))
+    .filter((identifier) => identifier.value.length > 0);
 }
 
 @Injectable()
@@ -354,8 +462,18 @@ export class SearchPipeline {
     // a missing extractor, an undeclared encoding, a rule-based extraction (D-048).
     warnings.push(...assessWarnings);
 
+    // ---- 7. Cluster (FR-10) ----------------------------------------------------------------
+    // Indexed and discovered findings are clustered together, then Axis D is recomputed per
+    // cluster and the discovery findings re-banded against it. Until this call existed, every
+    // document was its own independent corroboration.
+    const clustered = this.clusterFindings({
+      indexed: indexed.findings,
+      discovered: assessedFindings,
+    });
+    warnings.push(...clustered.warnings);
+
     return {
-      findings: [...indexed.findings, ...assessedFindings],
+      findings: clustered.findings,
       rejectedLeads: rejected,
       sourceOutcomes,
       plannedQueries: bounded.kept.length,
@@ -562,7 +680,7 @@ export class SearchPipeline {
     readonly tenantId: string;
     readonly now: Date;
   }): Promise<{
-    findings: FindingRecord[];
+    findings: BandedFinding[];
     rejected: RejectedLeadRecord[];
     accessOutcomes: SourceCoverageOutcome[];
     /** What a reader of the result has to be told about how these documents were read. */
@@ -570,7 +688,7 @@ export class SearchPipeline {
   }> {
     const fetcher = this.adapters.evidenceFetch;
     const extractor = this.adapters.extractionModel;
-    const findings: FindingRecord[] = [];
+    const findings: BandedFinding[] = [];
     const rejected: RejectedLeadRecord[] = [];
     const accessOutcomes: SourceCoverageOutcome[] = [];
     /** Deduplicated: a normalisation problem is reported once per run, not once per document. */
@@ -911,6 +1029,9 @@ export class SearchPipeline {
           document,
           text,
           normalised,
+          // The real tier of the source version the gate authorised this fetch against. `gate`
+          // is narrowed to the authorised variant here, so `sourceVersion` is non-null.
+          authorityTier: clampTier(gate.sourceVersion.authorityTier),
           subject: input.subject,
           graph: input.graph,
           searchId: input.searchId,
@@ -932,6 +1053,198 @@ export class SearchPipeline {
     }
 
     return { findings, rejected, accessOutcomes, warnings: [...warnings] };
+  }
+
+  /**
+   * FR-10, in the runtime path at last.
+   *
+   * # What was wrong
+   *
+   * `decideClustering` and `computeAuthority` were both implemented and both correct. Nothing
+   * called the first, and the second was called once per finding with a hardcoded one-element
+   * array. So every document in a run was its own independent corroboration: ten sites carrying
+   * one wire story were ten findings and an independence count of ten, which is exactly the
+   * inflation invariant I6 forbids.
+   *
+   * # What this does
+   *
+   * One pass over every finding the run produced — indexed-source records **and** discovery
+   * documents together, because a syndicated copy of an SEC press release is only recognisable
+   * as a copy if the press release is in the same comparison.
+   *
+   *  - Copies (identical document, identical canonical URL, or matching text fingerprint) are
+   *    **removed from the result** and reported as folded-in provenance. They do not appear
+   *    twice and they do not raise independence.
+   *  - Genuinely independent authority records — an SEC action, a DOJ prosecution, an FCA
+   *    warning, an OFAC designation — are **never** removed, even when they describe one event.
+   *    They cluster together and each contributes its own authority, which is what lets a
+   *    subject named by four regulators band higher than one named by one.
+   *  - Axis D is then recomputed per cluster, and discovery findings are re-banded against it.
+   *
+   * # Why indexed findings are re-counted but not re-banded
+   *
+   * `IndexedSourceSearchService` bands its own findings by a deliberately narrow rule that does
+   * not consult Axis D at all, and caps at SUPPORTED. Re-running `assignBand` over them here
+   * would mean this method deciding something that service already decided, from axis results it
+   * never produced. So their `independenceCount` is corrected — that figure was a hardcoded `1`
+   * and is now the real count — and their band is left to the service that owns it. The
+   * correction is stated in the rationale rather than applied silently.
+   */
+  private clusterFindings(input: {
+    readonly indexed: readonly FindingRecord[];
+    readonly discovered: readonly BandedFinding[];
+  }): { readonly findings: readonly FindingRecord[]; readonly warnings: readonly string[] } {
+    const candidates: AssignableCandidate[] = [];
+    const bandedByDocument = new Map<string, BandedFinding>();
+    const indexedByDocument = new Map<string, FindingRecord>();
+
+    // Indexed records first. The order is load-bearing: `assignClusters` recognises a copy
+    // against the first member of a cluster, and an authority record is the right thing for a
+    // press copy to be recognised against.
+    for (const finding of input.indexed) {
+      indexedByDocument.set(finding.document.documentId, finding);
+      candidates.push({
+        documentId: finding.document.documentId,
+        subjectId: `${finding.tenantId}:${finding.searchId}`,
+        companyId: finding.attribution.companyRef,
+        category: finding.category as ClusterCandidate['category'],
+        proceduralStage: finding.proceduralStage as ClusterCandidate['proceduralStage'],
+        eventDate: finding.document.eventDate.value,
+        canonicalUrl: finding.document.url,
+        // Indexed records carry the publisher's own row identity and a hash of the raw evidence.
+        // Two snapshots of one OFAC row are the same record, and that is what should collapse if
+        // the same row is somehow returned twice.
+        contentHash: finding.document.rawEvidenceHash ?? finding.document.documentId,
+        nearDuplicateKey: null,
+        originatingNewsroomId: finding.document.publisher,
+        // Every indexed source in the registry publishes its own listings and releases. An OFAC
+        // designation is not a copy of an SEC release about the same person.
+        isIndependentAuthority: true,
+        issuingAuthorityId: finding.namingAuthority ?? finding.document.publisher,
+        // A structured listing row is not running text; fingerprinting a name and a programme
+        // code would collide across unrelated people. No fingerprint, no syndication claim.
+        nearDuplicateFingerprint: null,
+      });
+    }
+
+    for (const banded of input.discovered) {
+      bandedByDocument.set(banded.finding.document.documentId, banded);
+      candidates.push(banded.candidate);
+    }
+
+    const assignment = assignClusters(candidates);
+    const warnings: string[] = [];
+    const findings: FindingRecord[] = [];
+    let suppressed = 0;
+
+    for (const cluster of assignment.clusters) {
+      // Axis D over the whole cluster, copies included: `computeAuthority` is what excludes them
+      // from the count, and it records why on `excludedFromCount` for the reviewer.
+      const sources: ClusteredSource[] = cluster.members.map((member): ClusteredSource => {
+        const banded = bandedByDocument.get(member.documentId);
+        const indexed = indexedByDocument.get(member.documentId);
+        const tier = banded?.tier ?? clampTier(indexed?.document.authorityTier ?? 5);
+        return {
+          documentId: member.documentId,
+          tier,
+          originatingNewsroomId:
+            banded?.candidate.originatingNewsroomId ??
+            indexed?.document.publisher ??
+            member.documentId,
+          issuingAuthorityId:
+            banded?.candidate.issuingAuthorityId ??
+            indexed?.namingAuthority ??
+            indexed?.document.publisher ??
+            null,
+          isSyndicatedCopy: member.isSuppressedCopy,
+        };
+      });
+      const axisD = computeAuthority(sources);
+
+      const clusterNote =
+        cluster.members.length === 1
+          ? null
+          : `FR-10 cluster ${cluster.clusterId}: ${String(cluster.members.length)} document(s) ` +
+            `about this event. Independent corroboration counted: ` +
+            `${String(axisD.independenceCount)} ` +
+            `(${String(axisD.distinctTier1Authorities.length)} issuing ` +
+            `${axisD.distinctTier1Authorities.length === 1 ? 'authority' : 'authorities'}, ` +
+            `${String(axisD.distinctNewsrooms.length)} newsroom(s)). ` +
+            `${String(axisD.excludedFromCount.length)} excluded as copies or non-independent ` +
+            `tiers.`;
+
+      for (const member of cluster.members) {
+        if (member.isSuppressedCopy) {
+          suppressed += 1;
+          continue;
+        }
+
+        const indexed = indexedByDocument.get(member.documentId);
+        if (indexed !== undefined) {
+          findings.push({
+            ...indexed,
+            axes: { ...indexed.axes, independenceCount: axisD.independenceCount },
+            rationale: [
+              ...indexed.rationale,
+              ...(clusterNote === null ? [] : [clusterNote]),
+              ...(cluster.members.length > 1
+                ? [
+                    'This band was assigned from the publisher record alone and was not raised ' +
+                      'by the corroboration above; the independence count is reported so a ' +
+                      'reviewer can see what else the run found about the same event.',
+                  ]
+                : []),
+            ],
+          });
+          continue;
+        }
+
+        const banded = bandedByDocument.get(member.documentId);
+        /* c8 ignore next 3 -- every candidate came from one of the two maps */
+        if (banded === undefined) {
+          continue;
+        }
+
+        // Re-band against the real, run-level Axis D. The first pass computed it over this
+        // document alone, which is a floor rather than an answer.
+        const rebanded = assignBand({
+          axisA: banded.axisA,
+          axisB: banded.axisB,
+          axisC: banded.axisC,
+          axisD,
+          rulesVersion: {
+            bandingRulesVersionId: 'banding-v1',
+            version: 1,
+            activatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        });
+
+        findings.push({
+          ...banded.finding,
+          band: rebanded.band,
+          // The tier stays the document's own. `rebanded.axes` reports the cluster's best tier,
+          // which is a property of the event; a reviewer looking at this finding needs to know
+          // what *this* source is.
+          axes: { ...rebanded.axes, authorityTier: banded.tier },
+          rationale: [
+            ...banded.finding.rationale,
+            ...(clusterNote === null ? [] : [clusterNote]),
+            ...rebanded.rationale.filter((line) => !banded.finding.rationale.includes(line)),
+          ],
+        });
+      }
+    }
+
+    if (suppressed > 0) {
+      warnings.push(
+        `${String(suppressed)} retrieved document(s) were recognised as copies of material ` +
+          `already counted — the same document under another URL, or the same text republished ` +
+          `elsewhere — and were folded into the finding they duplicate. They are retained as ` +
+          `provenance and do not count as independent corroboration (FR-10, I6).`,
+      );
+    }
+
+    return { findings, warnings };
   }
 
   /**
@@ -1006,6 +1319,12 @@ export class SearchPipeline {
    * Returns null when axis C says the event cannot support an adverse finding at all — an
    * exclusion matched, or the spans did not validate. That is a rejection with a reason, not a
    * finding with a low band.
+   *
+   * Axis D is computed here over **this document alone** and then recomputed for real once the
+   * run has clustered (`clusterFindings`). A single document cannot know how many independent
+   * reports of its event the run found; that is a property of the run, not of the document.
+   * What is computed here is the floor, and `bandedFinding` carries the axis results forward so
+   * the second pass does not have to re-derive them.
    */
   private band(input: {
     readonly assertion: {
@@ -1019,6 +1338,10 @@ export class SearchPipeline {
       readonly eventDate: PreciseDate;
       readonly publicationDate: PreciseDate;
       readonly updateDate: PreciseDate;
+      readonly identityAttributes: readonly {
+        readonly kind: string;
+        readonly value: string;
+      }[];
       readonly extractorVersion: string;
       readonly modelId: string | null;
       readonly promptVersion: string | null;
@@ -1029,37 +1352,97 @@ export class SearchPipeline {
     readonly text: string;
     /** The normalisation that produced `text`, so the finding can record how it was read. */
     readonly normalised: NormalisedDocument;
+    /**
+     * The authority tier of the **active approved version of this lead's source**, read from the
+     * registry by the fetch gate that authorised the request.
+     *
+     * Passed in rather than hardcoded. It was `2` in this file for every document from every
+     * source, which meant a tier-1 court document and a tier-5 forum post banded identically and
+     * `canSupportFinding: false` for tier 5 — the rule that stops a blog post becoming a finding
+     * — could never fire on this path.
+     */
+    readonly authorityTier: AuthorityTier;
     readonly subject: Awaited<ReturnType<SubjectsService['findVersion']>>;
     readonly graph: Awaited<ReturnType<AssociationGraphService['loadForSearch']>>;
     readonly searchId: string;
     readonly tenantId: string;
     readonly now: Date;
-  }): FindingRecord | null {
+  }): BandedFinding | null {
     const { assertion, lead, subject } = input;
 
-    // Axis A — is the person in this document the subject?
-    const nameMatch = matchNameForms(
-      normaliseName(subject.fullName),
-      normaliseName(assertion.subjectMentionSpans.length > 0 ? subject.fullName : ''),
-    );
-    const identityFactors: IdentityFactor[] = [
-      {
-        kind: 'RARE_FULL_NAME_PLUS_CITY',
-        strength: 'MODERATE',
-        direction: assertion.subjectMentionSpans.length > 0 ? 'CORROBORATING' : 'ABSENT',
-        span: assertion.subjectMentionSpans[0] ?? null,
-        detail:
-          assertion.subjectMentionSpans.length > 0
-            ? 'The document names the subject in a matched name form.'
-            : 'The document does not name the subject.',
-      },
-    ];
+    // ---- Axis A — is the person in this document the subject? ----------------------------
+    //
+    // What stood here until 2026-09-21:
+    //
+    //     matchNameForms(normaliseName(subject.fullName),
+    //                    normaliseName(spans.length > 0 ? subject.fullName : ''))
+    //
+    // The subject's name compared to **itself**, so any document with a mention span matched
+    // EXACT regardless of what it said; followed by one hardcoded MODERATE
+    // `RARE_FULL_NAME_PLUS_CITY` factor asserting a city check that never ran on either side.
+    // One moderate corroborating identifier is enough for Axis A `PARTIAL`, and `PARTIAL` is
+    // enough for `SUPPORTED` — so a document that merely contained the subject's name became a
+    // supported adverse finding, with a rationale describing evidence nobody had looked at.
+    //
+    // Now: the document's own text at the extractor's mention offsets is the document side, the
+    // subject record is the subject side, and the shared FR-08 resolver — the same one the
+    // indexed-source path uses — decides what was actually comparable.
+    const documentNames = assertion.subjectMentionSpans
+      .map((span): IdentityName | null => {
+        const text = input.text.slice(span.start, span.end);
+        return text.trim().length === 0 ? null : { text, role: 'PRIMARY', span };
+      })
+      .filter((name): name is IdentityName => name !== null);
+
+    const subjectEvidence: SubjectIdentityEvidence = {
+      names: [
+        { text: subject.fullName, role: 'PRIMARY' },
+        ...subject.aliases.map(
+          (alias): IdentityName => ({ text: alias.name, role: 'ALIAS', origin: alias.origin }),
+        ),
+      ],
+      datesOfBirth: subject.dateOfBirth === null ? [] : [subject.dateOfBirth],
+      countries: subject.countryContext,
+      // Companies from both the intake record and the resolved FR-02 graph. A graph edge is the
+      // stronger of the two, and the resolver treats a co-occurrence as MODERATE either way.
+      companyNames: [
+        ...subject.knownCompanies.map((company) => company.name ?? ''),
+        ...input.graph.edges.map((edge) => edge.companyName),
+      ].filter((name) => name.length > 0),
+      identifiers: [],
+    };
+
+    const documentEvidence: DocumentIdentityEvidence = {
+      names: documentNames,
+      // Everything below comes from `identityAttributes` — what the extractor says the text
+      // *states*, with no inference. The rule-based extractor returns none today, so on that
+      // adapter these are empty and no factor beyond the name can be asserted. That is the
+      // correct outcome and it is why a discovery finding lands AMBIGUOUS: there is genuinely
+      // nothing else in the document that this service has read.
+      datesOfBirth: identityAttributeDates(assertion.identityAttributes),
+      countries: identityAttributeValues(assertion.identityAttributes, DOCUMENT_COUNTRY_KINDS),
+      companyNames: [
+        ...identityAttributeValues(assertion.identityAttributes, DOCUMENT_COMPANY_KINDS),
+        // A company from the association graph named in this document's text is evidence the
+        // service did inspect: the string is present in the text it read.
+        ...input.graph.edges
+          .filter((edge) => input.text.includes(edge.companyName))
+          .map((edge) => edge.companyName),
+      ],
+      identifiers: identityAttributeIdentifiers(assertion.identityAttributes),
+      // FR-09: the document says the person it names is a different person of the same name.
+      distinguishesNamesake: assertion.partyRole === 'NAMESAKE_DISTINGUISHED',
+      fieldSpan: assertion.subjectMentionSpans[0] ?? null,
+    };
+
+    const resolved = resolveIdentityEvidence(subjectEvidence, documentEvidence);
+    const identityFactors = resolved.factors;
 
     const axisA = gradeIdentity({
-      nameMatch: nameMatch.form,
+      nameMatch: resolved.match.form,
       factors: identityFactors,
       frequencyPrior: subject.nameFrequencyPrior,
-      documentDistinguishesNamesake: assertion.partyRole === 'NAMESAKE_DISTINGUISHED',
+      documentDistinguishesNamesake: documentEvidence.distinguishesNamesake,
     });
 
     // Axis B — does the conduct attach to the person, or only to a company they are near?
@@ -1101,13 +1484,19 @@ export class SearchPipeline {
       return null;
     }
 
-    // Axis D — how much independent authority stands behind it?
+    // ---- Axis D — how much independent authority stands behind it? -------------------------
+    //
+    // A provisional computation over this document alone, using the **real** tier of its source
+    // version. `clusterFindings` recomputes it across the run once every document is in, which
+    // is the only level at which "two independent reports" can be established. Tier 5 is already
+    // decisive here, though: `assignBand` rule 4 makes a tier-5 document LEAD_ONLY whatever else
+    // is true, and with the tier hardcoded to 2 that rule could never fire.
     const clustered: ClusteredSource[] = [
       {
         documentId: input.document.documentId,
-        tier: 2,
+        tier: input.authorityTier,
         originatingNewsroomId: lead.publisherDomain,
-        issuingAuthorityId: assertion.namingAuthority,
+        issuingAuthorityId: input.authorityTier === 1 ? assertion.namingAuthority : null,
         isSyndicatedCopy: false,
       },
     ];
@@ -1125,13 +1514,22 @@ export class SearchPipeline {
       },
     });
 
-    return {
+    const finding: FindingRecord = {
       findingId: randomUUID(),
       tenantId: input.tenantId,
       searchId: input.searchId,
       band: banded.band,
       axes: banded.axes,
-      rationale: [...axisA.rationale, ...axisB.rationale, ...axisC.rationale, ...banded.rationale],
+      // The resolver's lines come first and describe **inspected evidence only**: every
+      // sentence in `resolved.rationale` corresponds to a comparison that ran. The axis
+      // rationales that follow explain what was concluded from them.
+      rationale: [
+        ...resolved.rationale,
+        ...axisA.rationale,
+        ...axisB.rationale,
+        ...axisC.rationale,
+        ...banded.rationale,
+      ],
       category: axisC.category,
       proceduralStage: axisC.proceduralStage,
       partyRole: axisC.partyRole,
@@ -1151,7 +1549,7 @@ export class SearchPipeline {
         title: lead.title,
         publisher: lead.publisher,
         sourceId: lead.provenance.sourceId,
-        authorityTier: 2,
+        authorityTier: input.authorityTier,
         language: lead.language,
         eventDate: assertion.eventDate,
         publicationDate: assertion.publicationDate,
@@ -1189,6 +1587,39 @@ export class SearchPipeline {
       modelId: assertion.modelId,
       promptVersion: assertion.promptVersion,
       createdAt: input.now,
+    };
+
+    return {
+      finding,
+      axisA,
+      axisB,
+      axisC,
+      candidate: {
+        documentId: input.document.documentId,
+        subjectId: subject.subjectId,
+        companyId: companyEdge?.companyRef ?? null,
+        category: axisC.category,
+        proceduralStage: axisC.proceduralStage,
+        eventDate: assertion.eventDate.value,
+        canonicalUrl: lead.url,
+        // The content hash the evidence store computed is not returned by `stageAndCommit`, so
+        // the document id stands in: it is already one-per-stored-document, which makes an exact
+        // re-fetch of the same URL in one run collapse and nothing else. Near-duplicate detection
+        // is what catches copies across publishers, and it is the provider layer's job.
+        contentHash: input.document.documentId,
+        // `Lead` carries no exact bucket key and no discovery adapter assigns one. Syndication
+        // is detected from the document text instead, by `nearDuplicateFingerprint` below.
+        nearDuplicateKey: null,
+        originatingNewsroomId: lead.publisherDomain,
+        // Tier 1 is "published by the body that issued it". Such a document is never folded away
+        // as a copy of somebody else's account of the same action.
+        isIndependentAuthority: input.authorityTier === 1,
+        issuingAuthorityId: input.authorityTier === 1 ? assertion.namingAuthority : null,
+        // Computed from the text this run actually read, and null when the document was too
+        // short to fingerprint honestly (`MIN_SHINGLES`). A null never merges anything.
+        nearDuplicateFingerprint: fingerprintText(input.text),
+      },
+      tier: input.authorityTier,
     };
   }
 

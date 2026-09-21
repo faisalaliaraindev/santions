@@ -13,7 +13,7 @@ force, it is stated as such and the code reflects that it is provisional.
 | D3        | Which categories are on by default                                                                                                     | Taxonomy admin                        | G5                                | **CLOSED 2026-09-11** — all seventeen (see D-009)                                                                                                                                                                                                  |
 | D4        | The exact boundary between adverse media and list matching for designations                                                            | Product + compliance                  | G7                                | Open                                                                                                                                                                                                                                               |
 | D5        | The reviewer capacity assumption that thresholds are set against                                                                       | Product + compliance                  | G7                                | Open                                                                                                                                                                                                                                               |
-| D6        | How robots exceptions for official sources are approved and recorded                                                                   | Source admin                          | G6                                | Open — **raised with specifics 2026-09-14**, in the direct path                                                                                                                                                                                    |
+| D6        | How robots exceptions for official sources are approved and recorded                                                                   | Source admin                          | G6                                | **CLOSED 2026-09-21** — Faisal Ali, Source admin. Host-scoped exception on the approved version; scheduled-artifact path only                                                                                                                       |
 | D7        | Which open-weight extraction model, benchmarked on the labelled set                                                                    | Engineering                           | G7                                | Open — **blocked, and not on the critical path for the first live run** (see below, 2026-09-15)                                                                                                                                                    |
 | D8        | Retention per source and jurisdiction for evidence text                                                                                | Compliance                            | G5                                | **CLOSED 2026-09-11** — configurable, 30-day default (see D-012)                                                                                                                                                                                   |
 | D9        | Whether numeric confidence figures are ever shown (default: no)                                                                        | Product                               | G7                                | Open — default no, enforced                                                                                                                                                                                                                        |
@@ -63,6 +63,40 @@ default. D-048 records the mitigations and states the cost — recall against re
 poor and unmeasured, and must never be reported as a measurement.
 
 ### D6 — How robots exceptions for official sources are approved and recorded
+
+> **CLOSED 2026-09-21 by Faisal Ali, Source admin.**
+>
+> **The decision.** An exception is a record on the approved source version,
+> `accessPolicy.robotsException`, carrying the approver's name and role, the date, the decision
+> reference, the scope in the approver's own words, and — the part that makes it an exception
+> rather than a smaller global setting — **`deliveryHosts`, the exact hosts it covers**. Bare
+> hostnames, never patterns: `*.amazonaws.com` is most of the internet.
+>
+> **What it permits.** A hop onto a named host may proceed without an established robots position,
+> on the **scheduled-artifact path only**. Nothing else. No crawling, no bucket listing, no
+> arbitrary object access, and no use at all on query-time discovery, where the URLs are not known
+> in advance and an exception would therefore have no bounded scope.
+>
+> **Why it was needed.** Four publishers serve their own bulk file from delivery infrastructure
+> whose `robots.txt` answers 403 rather than 404 — OFAC and the UN redirect their documented
+> address to a signed, one-hour object-store URL; the FCDO serves from a bucket directly. This
+> service reads an unreadable `robots.txt` as `UNKNOWN` and refuses, which is right in general and
+> wrong for that one shape: the redirect is issued by the publisher, to the publisher's own
+> delivery host, for one exact file.
+>
+> **How the three gaps below were closed.** (1) The approver now has somewhere to live —
+> `robotsException.approvedBy`, read by `SourceVersionService` and put on the authorisation.
+> (2) The per-jurisdiction concern is answered by scoping to **hosts** rather than to countries: a
+> host is a narrower and more checkable unit than a country list, and it is what the fetch
+> actually addresses. (3) It fails closed — `assertAuthorised` refuses an exception that names no
+> host, `readRobotsException` returns null for a partial record, and a hop to an unnamed host takes
+> the strict path and is refused even though the source carries an exception.
+>
+> Enforced in `HttpEvidenceFetchAdapter.robotsDecision` and `FetchGateService.robotsPositionFor`;
+> the four sources and their hosts are in
+> [`sources/indexed-source-onboarding.md`](./sources/indexed-source-onboarding.md) §6. The original
+> analysis is kept below because it is why the shape is what it is.
+
 
 **A seeded decision (D1–D10), raised with specifics at the start of Phase E, 2026-09-14.** It is
 due at **G6** and it is in the direct path rather than ahead of it: `HttpEvidenceFetchAdapter` is

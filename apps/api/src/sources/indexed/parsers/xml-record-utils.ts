@@ -27,7 +27,9 @@ export function asArray(value: unknown): readonly unknown[] {
 }
 
 export function records(value: unknown): readonly Record<string, unknown>[] {
-  return asArray(value).map(asRecord).filter((item): item is Record<string, unknown> => item !== null);
+  return asArray(value)
+    .map(asRecord)
+    .filter((item): item is Record<string, unknown> => item !== null);
 }
 
 export function text(value: unknown): string | null {
@@ -40,11 +42,19 @@ export function text(value: unknown): string | null {
 }
 
 export function texts(value: unknown): string[] {
-  return unique(asArray(value).map(text).filter((item): item is string => item !== null));
+  return unique(
+    asArray(value)
+      .map(text)
+      .filter((item): item is string => item !== null),
+  );
 }
 
 export function joinName(parts: readonly unknown[]): string | null {
-  const name = parts.map(text).filter((part): part is string => part !== null).join(' ').trim();
+  const name = parts
+    .map(text)
+    .filter((part): part is string => part !== null)
+    .join(' ')
+    .trim();
   return name === '' ? null : name;
 }
 

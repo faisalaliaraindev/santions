@@ -65,6 +65,7 @@ const NEWS_SOURCE: ActiveSourceVersion = {
     approvedOn: '2026-09-14',
     decision: 'D17',
   },
+  robotsException: null,
   endpointUrl: 'https://news-example.cr/feed.xml',
   endpointKind: 'FIXED_FEED',
   queryParam: null,

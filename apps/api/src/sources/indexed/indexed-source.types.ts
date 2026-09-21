@@ -1,5 +1,7 @@
 import type { ClientSession } from 'mongodb';
 
+import type { DesignationCategory, FindingCategory } from '@erly/adverse-domain';
+
 export const SCHEDULED_ARTIFACT_TRANSPORT = 'SCHEDULED_ARTIFACT_TRANSPORT';
 
 export type IndexedRecordType = 'PERSON' | 'ENTITY' | 'VESSEL' | 'AIRCRAFT' | 'OTHER';
@@ -7,7 +9,7 @@ export type IndexedRecordType = 'PERSON' | 'ENTITY' | 'VESSEL' | 'AIRCRAFT' | 'O
 export type IndexedRecordKind = 'AUTHORITY_LIST_ENTRY' | 'OFFICIAL_PUBLICATION';
 
 export interface IndexedFindingMetadata {
-  readonly category: string;
+  readonly category: FindingCategory;
   readonly proceduralStage: string;
   readonly partyRole: string;
   readonly stageEvidence: string | null;
@@ -44,6 +46,17 @@ export interface NormalizedSourceRecord {
   readonly sourceRecordId: string;
   /** Defaults to AUTHORITY_LIST_ENTRY for parsers written before scheduled publications. */
   readonly recordKind?: IndexedRecordKind;
+  /**
+   * What kind of listing an `AUTHORITY_LIST_ENTRY` is, from the parser that read it.
+   *
+   * On the record rather than derived from the source id, because the parser is the only thing
+   * that knows what it parsed: the same OFAC parser reads two lists, and the World Bank's list is
+   * a debarment rather than a sanctions designation. Deriving it from the id would put that
+   * knowledge in a `switch` somewhere downstream, which is the copy that goes stale when an
+   * eleventh source arrives. Defaults to `SANCTIONS_DESIGNATION` for the parsers written before
+   * the category enum closed.
+   */
+  readonly listingCategory?: DesignationCategory;
   readonly recordType: IndexedRecordType;
   readonly primaryName: string;
   readonly aliases: readonly string[];
@@ -108,11 +121,7 @@ export interface ScheduledArtifactTransport {
 }
 
 export type IndexedRefreshStatus =
-  | 'NEVER_REFRESHED'
-  | 'REFRESHING'
-  | 'SUCCEEDED'
-  | 'NOT_MODIFIED'
-  | 'FAILED';
+  'NEVER_REFRESHED' | 'REFRESHING' | 'SUCCEEDED' | 'NOT_MODIFIED' | 'FAILED';
 
 export interface IndexedSourceRefreshState {
   readonly sourceId: string;
@@ -137,6 +146,33 @@ export interface IndexedSourceRefreshState {
     readonly refreshId: string;
     readonly expiresAt: Date;
   } | null;
+  /**
+   * What the last snapshot prune did, so pruning is observable rather than inferred from a
+   * shrinking collection. Null until one has run.
+   */
+  readonly lastPrune?: IndexedSnapshotPruneSummary | null;
+}
+
+/**
+ * One bounded pass of snapshot pruning.
+ *
+ * `complete` says whether the pass finished the work or hit its own delete ceiling. A caller that
+ * needs "everything superseded is gone" must drain rather than call once — the same rule the
+ * retention sweeper, the outbox publisher and the FI-10 reconciler all follow, and for the same
+ * reason: an unbounded delete is how one large source starves everything else sharing the process.
+ */
+export interface IndexedSnapshotPruneSummary {
+  readonly sourceId: string;
+  readonly ranAt: Date;
+  /** The snapshot a search reads. Never pruned, whatever else is. */
+  readonly activeSnapshotVersion: string | null;
+  /** The one completed snapshot kept behind the active one, for rollback and for diffing. */
+  readonly retainedPreviousSnapshotVersion: string | null;
+  readonly snapshotsConsidered: number;
+  readonly snapshotsDeleted: number;
+  readonly recordsDeleted: number;
+  /** False when the pass stopped at its delete ceiling with work still outstanding. */
+  readonly complete: boolean;
 }
 
 export interface StoredIndexedSourceRecord extends NormalizedSourceRecord {

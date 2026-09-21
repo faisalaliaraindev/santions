@@ -53,13 +53,19 @@ export class UnscXmlParser implements IndexedArtifactParser {
     const sourceRecordId = requireText(entry['REFERENCE_NUMBER'], 'REFERENCE_NUMBER');
     const primaryName =
       recordType === 'PERSON'
-        ? joinName([entry['FIRST_NAME'], entry['SECOND_NAME'], entry['THIRD_NAME'], entry['FOURTH_NAME']])
+        ? joinName([
+            entry['FIRST_NAME'],
+            entry['SECOND_NAME'],
+            entry['THIRD_NAME'],
+            entry['FOURTH_NAME'],
+          ])
         : text(entry['FIRST_NAME']);
     if (primaryName === null) {
       throw new Error(`UN record ${sourceRecordId} has no primary name.`);
     }
-    const aliases = records(entry[recordType === 'PERSON' ? 'INDIVIDUAL_ALIAS' : 'ENTITY_ALIAS'])
-      .flatMap((alias) => texts(alias['ALIAS_NAME']));
+    const aliases = records(
+      entry[recordType === 'PERSON' ? 'INDIVIDUAL_ALIAS' : 'ENTITY_ALIAS'],
+    ).flatMap((alias) => texts(alias['ALIAS_NAME']));
     const originalScriptNames = texts(entry['NAME_ORIGINAL_SCRIPT']);
     const addresses = records(
       entry[recordType === 'PERSON' ? 'INDIVIDUAL_ADDRESS' : 'ENTITY_ADDRESS'],
@@ -75,11 +81,26 @@ export class UnscXmlParser implements IndexedArtifactParser {
       ),
     );
     const identifiers: IndexedSourceIdentifier[] = [
-      ...records(entry['INDIVIDUAL_DOCUMENT']).map((document) => ({
-        type: text(document['TYPE_OF_DOCUMENT']) ?? 'DOCUMENT',
-        value: requireText(document['NUMBER'], 'INDIVIDUAL_DOCUMENT.NUMBER'),
-        issuingCountry: text(document['ISSUING_COUNTRY']),
-      })),
+      // A document entry with no number is dropped, not fatal.
+      //
+      // The published list carries `<INDIVIDUAL_DOCUMENT>` entries that record a document *type*
+      // and issuing country with no number — "Passport, Afghanistan", with the number unknown or
+      // withheld. Requiring `NUMBER` failed the parse of the whole consolidated list over those
+      // entries, so the UN source could never produce a snapshot at all.
+      //
+      // Dropping is right rather than lenient: an identifier with no value cannot corroborate or
+      // contradict an identity, so keeping it as an empty string would put a factor into Axis A
+      // that matches everything. What is lost is nothing the matcher could have used.
+      ...records(entry['INDIVIDUAL_DOCUMENT'])
+        .map((document) => ({
+          type: text(document['TYPE_OF_DOCUMENT']) ?? 'DOCUMENT',
+          value: text(document['NUMBER']),
+          issuingCountry: text(document['ISSUING_COUNTRY']),
+        }))
+        .filter(
+          (identifier): identifier is IndexedSourceIdentifier =>
+            identifier.value !== null && identifier.value.trim() !== '',
+        ),
       ...texts(entry['UN_LIST_TYPE']).map((value) => ({
         type: 'UN_LIST_TYPE',
         value,
@@ -102,7 +123,9 @@ export class UnscXmlParser implements IndexedArtifactParser {
       placesOfBirth: unique(placesOfBirth),
       nationalities: records(entry['NATIONALITY']).flatMap((item) => texts(item['VALUE'])),
       citizenships: [],
-      countries: unique(addresses.map((item) => item.country).filter((value): value is string => value !== null)),
+      countries: unique(
+        addresses.map((item) => item.country).filter((value): value is string => value !== null),
+      ),
       addresses,
       identifiers,
       companyIdentifiers: [],
@@ -122,7 +145,9 @@ export class UnscXmlParser implements IndexedArtifactParser {
 
 function readAddress(value: Record<string, unknown>): IndexedSourceAddress {
   return {
-    lines: unique([value['STREET'], value['NOTE']].map(text).filter((item): item is string => item !== null)),
+    lines: unique(
+      [value['STREET'], value['NOTE']].map(text).filter((item): item is string => item !== null),
+    ),
     city: text(value['CITY']),
     region: text(value['STATE_PROVINCE']),
     postalCode: text(value['ZIP_CODE']),

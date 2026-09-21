@@ -19,9 +19,10 @@
     "test:evaluation": "vitest run --project evaluation",
     "test:integration": "vitest run --project integration",
     "test:security": "vitest run --project security",
-    "test:e2e:api": "vitest run --project e2e-api",
+    "test:e2e:api": "vitest run --project e2e-api --no-file-parallelism",
     "test:live": "vitest run --project live",
-    "test:e2e": "echo \"[pending G8] browser e2e suite not implemented \u2014 see tests/e2e/api-lifecycle.test.ts for the API-level one\" && exit 1",
+    "test:live:acceptance": "vitest run --project live-acceptance",
+    "test:e2e": "echo \"[pending G8] browser e2e suite not implemented — see tests/e2e/api-lifecycle.test.ts for the API-level one\" && exit 1",
     "test:load": "echo \"[pending G11] k6 load suite not implemented\" && exit 1",
     "verify:local": "node scripts/verify-local.mjs",
     "openapi:generate": "pnpm build && node scripts/generate-openapi.mjs",
@@ -42,7 +43,10 @@
     "dev:api": "node scripts/dev.mjs --only api",
     "dev:worker": "node scripts/dev.mjs --only worker",
     "dev:live": "node scripts/dev.mjs --live",
-    "bench:search-index": "pnpm build && node scripts/workload/search-index.mjs"
+    "bench:search-index": "pnpm build && node scripts/workload/search-index.mjs",
+    "indexed:first-contact": "pnpm build && node scripts/indexed-first-contact.mjs",
+    "source:onboard": "pnpm build && node scripts/source-onboard.mjs",
+    "source:restore": "node scripts/source-restore.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

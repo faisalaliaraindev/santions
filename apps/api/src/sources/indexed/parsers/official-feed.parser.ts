@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import type { FindingCategory } from '@erly/adverse-domain';
+
 import { decodeXml, parseFeed, type FeedItem } from '../../parse/xml.js';
 import type {
   IndexedArtifactParser,
@@ -13,7 +15,7 @@ export interface OfficialFeedParserOptions {
   readonly parserId: string;
   readonly parserVersion: string;
   readonly publisherUrl: string;
-  readonly category: string;
+  readonly category: FindingCategory;
   readonly defaultStage: string;
   readonly partyRole?: string;
   readonly includeItem?: (item: FeedItem) => boolean;

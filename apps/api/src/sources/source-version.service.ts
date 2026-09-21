@@ -46,6 +46,26 @@ export interface FirstContactApproval {
 }
 
 /**
+ * A named, host-scoped robots exception (FR-06, **D6**).
+ *
+ * The host list is the whole point: the exception permits a hop onto *this publisher's own named
+ * delivery hosts* without an established robots position, and permits nothing else. See the
+ * `robotsException` field on `sourceAccessPolicySchema` for why that shape exists.
+ */
+export interface RobotsException {
+  readonly approvedBy: string;
+  readonly role: string;
+  /** ISO 8601 date. */
+  readonly approvedOn: string;
+  /** The open decision recording this exception — `D6`. */
+  readonly decision: string;
+  /** What the exception permits, in the approver's own words. */
+  readonly scope: string;
+  /** Lower-cased bare hostnames. Never patterns. */
+  readonly deliveryHosts: readonly string[];
+}
+
+/**
  * What an approved source version says, as the fetch gate reads it.
  *
  * Every field here is one `source-content.ts` lists as load-bearing, and every one of them is
@@ -82,6 +102,13 @@ export interface ActiveSourceVersion {
    * publisher behind it.
    */
   readonly firstContactApproval: FirstContactApproval | null;
+  /**
+   * The named, host-scoped robots exception this version carries, or null (**D6**).
+   *
+   * Read strictly, like `firstContactApproval` and for the same reason: a half-filled exception
+   * the gate accepted would be a robots refusal overridden by a record nobody completed.
+   */
+  readonly robotsException: RobotsException | null;
   /**
    * The feed or endpoint this source is polled at, where its connector needs one.
    *
@@ -175,6 +202,7 @@ export class SourceVersionService implements SourceVersionReader {
       cascadeRung: numberOr(content['cascadeRung'], 0),
       authorityTier: numberOr(content['authorityTier'], 5),
       firstContactApproval: readFirstContactApproval(content['accessPolicy']),
+      robotsException: readRobotsException(content['accessPolicy']),
       endpointUrl: readEndpointUrl(content['accessPolicy']),
       endpointKind: readEndpointKind(content['accessPolicy']),
       queryParam: readQueryParam(content['accessPolicy']),
@@ -221,6 +249,42 @@ function readFirstContactApproval(value: unknown): FirstContactApproval | null {
     return null;
   }
   return { approvedBy, role, approvedOn, decision };
+}
+
+/**
+ * The robots exception, read strictly and **fail-closed**.
+ *
+ * Every field must be present, and `deliveryHosts` must name at least one host, or the answer is
+ * null and the strict robots path stands. An exception with no host list is not a narrow
+ * exception with an empty scope — it is an unbounded one, and reading it as "applies everywhere"
+ * is exactly the failure this record was shaped to prevent.
+ */
+function readRobotsException(value: unknown): RobotsException | null {
+  const policy = asRecord(value);
+  const exception = policy === null ? null : asRecord(policy['robotsException']);
+  if (exception === null) {
+    return null;
+  }
+
+  const approvedBy = stringOrNull(exception['approvedBy']);
+  const role = stringOrNull(exception['role']);
+  const approvedOn = stringOrNull(exception['approvedOn']);
+  const decision = stringOrNull(exception['decision']);
+  const scope = stringOrNull(exception['scope']);
+  const deliveryHosts = stringArray(exception['deliveryHosts'])
+    .map((host) => host.trim().toLowerCase())
+    .filter((host) => host !== '');
+  if (
+    approvedBy === null ||
+    role === null ||
+    approvedOn === null ||
+    decision === null ||
+    scope === null ||
+    deliveryHosts.length === 0
+  ) {
+    return null;
+  }
+  return { approvedBy, role, approvedOn, decision, scope, deliveryHosts };
 }
 
 function readEndpointUrl(value: unknown): string | null {

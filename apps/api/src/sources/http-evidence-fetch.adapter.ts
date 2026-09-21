@@ -376,22 +376,37 @@ export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
   /**
    * The robots gate for one hop. Returns an outcome when the fetch must not proceed, else null.
    *
-   * An approved exception skips the check and says so in the log — FR-06 requires the exception
-   * to be per source and per jurisdiction with a named approver, and `assertAuthorised` has
-   * already refused an unnamed one. **Open decision D6** decides how that name is recorded; until
-   * it closes nothing can supply one, so in practice this branch is unreachable and the strict
-   * path below is the only one taken.
+   * An approved exception skips the check **for the hosts it names, and only those** — FR-06
+   * requires the exception to be per source and per jurisdiction with a named approver, and
+   * `assertAuthorised` has already refused one that is unnamed or names no host.
+   *
+   * **Decision D6 closed on 2026-09-21** and decided the shape: the exception is a list of the
+   * publisher's own delivery hosts, recorded on the approved version. A publisher that serves its
+   * bulk file by redirecting its documented address to a signed, one-hour object-store URL — OFAC
+   * to AWS GovCloud S3, the UN to Azure Blob — has a delivery host that answers `robots.txt` with
+   * a 403, which reads as `UNKNOWN` and is refused below. That refusal is right in general and
+   * wrong for that one shape.
+   *
+   * What keeps this narrow is that the host is matched, not the source. A hop onto any other host
+   * takes the strict path and is refused even though the source carries an exception, so a
+   * publisher who repoints their redirect needs a newly approved version rather than merely a new
+   * `Location` header. That is the "fail closed if the redirect leaves the expected delivery
+   * infrastructure" half of the decision, and it is enforced here rather than promised in a doc.
    */
   private async robotsDecision(
     request: FetchRequest,
     url: URL,
     deadline: number,
   ): Promise<SourceOutcome<FetchResult> | null> {
-    if (request.authorisation.robotsPosition === 'EXCEPTION_APPROVED') {
+    if (
+      request.authorisation.robotsPosition === 'EXCEPTION_APPROVED' &&
+      request.authorisation.robotsExceptionDeliveryHosts.includes(url.host.toLowerCase())
+    ) {
       this.logger.log(
         `${url.host}: robots exception applied, approved by ` +
           `${request.authorisation.robotsExceptionApprovedBy ?? 'nobody'} under source version ` +
-          `${request.authorisation.sourceVersionId}.`,
+          `${request.authorisation.sourceVersionId}. The host is named in the exception's own ` +
+          `delivery-host list (D6); every other host on this fetch still takes the strict path.`,
       );
       return null;
     }

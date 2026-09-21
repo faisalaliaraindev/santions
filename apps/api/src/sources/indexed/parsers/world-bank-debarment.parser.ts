@@ -62,6 +62,10 @@ export class WorldBankDebarmentParser implements IndexedArtifactParser {
       sourceId,
       sourceRecordId,
       recordKind: 'AUTHORITY_LIST_ENTRY',
+      // A World Bank listing is a debarment from contracting, not a sanctions designation by a
+      // designating authority. They are different facts about a party and a reviewer reading
+      // "SANCTIONS_DESIGNATION" against this list would be reading something untrue.
+      listingCategory: 'DEBARMENT_EXCLUSION',
       recordType,
       primaryName: names[0] as string,
       aliases: names.slice(1),

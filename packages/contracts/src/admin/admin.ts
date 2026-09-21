@@ -302,6 +302,44 @@ export const sourceAccessPolicySchema = z
       })
       .strict()
       .nullable(),
+    /**
+     * A named, host-scoped robots exception (FR-06, **D6**).
+     *
+     * **Why a host list and not a boolean.** Several publishers serve their own bulk file by
+     * redirecting their documented address to a signed, short-lived object-store URL — OFAC to
+     * AWS GovCloud S3, the UN to Azure Blob Storage. Those delivery hosts answer `robots.txt`
+     * with a 403 rather than a 404, which this service reads as `UNKNOWN` and refuses, because
+     * an outage at a publisher must never become consent. That refusal is right in general and
+     * wrong for this one shape: the redirect is issued *by the publisher* to *the publisher's
+     * own* delivery infrastructure, for one exact file.
+     *
+     * So the exception is not "ignore robots for this source". It is "these named hosts are this
+     * publisher's own delivery infrastructure, and a hop onto one of them may proceed without an
+     * established robots position". Every other host — including one the publisher redirects to
+     * later — still goes through the strict path and is refused. That is what makes this fail
+     * closed: widening the exception requires a new approved version, not a redirect.
+     *
+     * Null for every source that needs no exception, which is almost all of them.
+     */
+    robotsException: z
+      .object({
+        approvedBy: z.string().min(1).max(200),
+        role: z.string().min(1).max(120),
+        /** ISO 8601 date. */
+        approvedOn: z.string().min(10).max(40),
+        /** The open decision recording this exception — `D6`. */
+        decision: z.string().min(1).max(40),
+        /** What the exception permits, in the approver's own words. Never a link. */
+        scope: z.string().min(1).max(1000),
+        /**
+         * The exact hosts the exception covers. Bare hostnames, never patterns: a wildcard here
+         * would be an exception nobody bounded, and `*.amazonaws.com` is most of the internet.
+         */
+        deliveryHosts: z.array(canonicalDomainSchema).min(1).max(10),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine((policy) => policy.endpointKind !== 'QUERY_FEED' || policy.queryParam !== null, {

@@ -268,10 +268,54 @@ snapshot, then searched in our own database. A search costs them **no publisher 
 are OFAC SDN and consolidated non-SDN, the UK Sanctions List, the UNSC and EU consolidated lists,
 the World Bank debarred-firms list, and the DOJ, CFTC, FTC and FCA feeds.
 
-**None of them is in the registry, and none has contacted anybody.** Each ships with no
-first-contact approval and no established robots position, so the fetch gate refuses a refresh
-before a socket is opened. Taking one live is the same lifecycle as any other source — evidence,
-a named approval, then propose → approve → activate through Postman folder 11.
+**Nine of the ten are ACTIVE and hold real snapshots** — 33,544 records as of 2026-09-21.
+`world-bank-debarred` is APPROVED and deliberately not active: its gateway needs
+`WORLD_BANK_SANCTIONS_API_KEY`, which this deployment does not hold.
+
+On a **clean** deployment none of them is in the registry, because no bootstrap seeds a real
+source — seeding one ACTIVE would be seeding around the approval lifecycle. Three commands put
+them there, and they are documented in full in
+[`docs/sources/indexed-source-onboarding.md`](./docs/sources/indexed-source-onboarding.md):
+
+```bash
+pnpm indexed:first-contact --yes-contact-publishers          # evidence: robots, terms, endpoint
+pnpm key:issue --tenant tenant-alpha --role source_admin --label proposer
+pnpm key:issue --tenant tenant-alpha --role source_admin --label approver
+SOURCE_PROPOSER_KEY=... SOURCE_APPROVER_KEY=... pnpm source:onboard --apply
+```
+
+`source:onboard` is a client of the public Admin API — it writes nothing to Mongo and does nothing
+a person with those two credentials could not do by hand. It refuses to run if the two keys are the
+same principal, or if `DISABLE_SOURCE_FOUR_EYES_FOR_TESTING` is set. Re-running it is safe: it
+compares content, so an identical ACTIVE version is left alone and a changed reviewed value
+produces a new version through the same four steps.
+
+### Filling a snapshot
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/admin/indexed-sources/ofac-sdn/refresh   -H "Authorization: ApiKey $APPROVER_KEY"   -H "X-Allow-Publisher-Contact: true"   -H "Content-Type: application/json" -d '{"force": true}'
+```
+
+Both the `source:approve` permission **and** the header are required. The header is not
+authentication; it exists so a publisher is never contacted by a request somebody sent to see what
+it returned.
+
+`HARD_BLOCK: the hourly free-tier budget of N call(s) is spent` is not a publisher refusing us — it
+is our own self-imposed cap, and a refresh costs two to three requests (robots, the artifact, and
+for some publishers the artifact again at a redirect). `pnpm source:health <sourceId> --reset
+--reason "..."` clears the local record without weakening the breaker.
+
+### Snapshot growth is bounded
+
+The active snapshot and one previous are kept; everything older is deleted in a bounded pass after
+each successful refresh. `lastPrune` on the operator view below shows what the last pass did. There
+is no unbounded delete anywhere in the request path.
+
+### Retention actions actually run
+
+`RetentionScheduler` is started by the **worker** (`worker-main.ts`), not the API, and drives
+`RetentionSweeper` every five minutes. Before 2026-09-21 the sweeper had no caller at all and
+retention actions were scheduled and never executed.
 
 ### What an operator looks at
 

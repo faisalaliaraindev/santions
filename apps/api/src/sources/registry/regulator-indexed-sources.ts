@@ -49,8 +49,10 @@ const COMMON = {
   countries: [] as string[],
   languages: ['en'],
   credentialsRef: null,
-  freeTierHourlyBudget: 2,
-  freeTierDailyBudget: 48,
+  // A refresh costs a robots.txt read plus the feed. Hourly against an hourly cadence leaves
+  // room for exactly one retry; daily covers 24 refreshes at two requests each with headroom.
+  freeTierHourlyBudget: 6,
+  freeTierDailyBudget: 96,
   stabilityClass: 'UNDOCUMENTED_VOLATILE',
   licenceExpiresAt: null,
   robotsPosition: 'NOT_ESTABLISHED',

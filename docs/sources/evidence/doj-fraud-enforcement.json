@@ -1,0 +1,63 @@
+{
+  "sourceId": "doj-fraud-enforcement",
+  "sourceName": "DOJ Fraud Enforcement News",
+  "publisher": "United States Department of Justice",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://www.justice.gov/robots.txt",
+      "pathChecked": "/news/rss?field_date=2026-04-01&field_topic%5B0%5D=34046&field_topic%5B1%5D=3926&field_topic%5B2%5D=3951&field_topic%5B3%5D=25351&field_topic%5B4%5D=54326&field_topic%5B5%5D=54331&field_topic%5B6%5D=40971&field_topic%5B7%5D=3936&require_all=0&search_api_language=en&show_public_archived=0&type%5B0%5D=blog_post&type%5B1%5D=image_gallery&type%5B2%5D=press_release&type%5B3%5D=youtube_video",
+      "requestedAt": "2026-09-21T08:01:31.263Z",
+      "httpStatus": 200,
+      "wireBytes": 895,
+      "contentType": "text/plain",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "#\n# robots.txt\n#\n# This file is to prevent the crawling and indexing of certain parts\n# of your site by web crawlers and spiders run by sites like Yahoo!\n# and Google. By telling these \"robots\" where not to go on your site,\n# you save bandwidth and server resources.\n#\n# This file will be ignored unless it is at the root of your host:\n# Used:    http://example.com/robots.txt\n# Ignored: http://example.com/site/robots.txt\n#\n# For more information about the robots.txt standard, see:\n# http://www.robotstxt.org/robotstxt.html\n\nUser-agent: *\n# CSS, JS, Images\nAllow: /core/*.css$\nAllow: /core/*.css?\nAllow: /core/*.js$\nAllow: /core/*.js?\nAllow: /core/*.gif\nAllow: /core/*.jpg\nAllow: /core/*.jpeg\nAllow: /core/*.png\nAllow: /core/*.svg\nAllow: /profiles/*.css$\nAllow: /profiles/*.css?\nAllow: /profiles/*.js$\nAllow: /profiles/*.js?\nAllow: /profiles/*.gif\nAllow: /profiles/*.jpg\nAllow: /profiles/*.jpeg\nAllow: /profiles/*.png\nAllow: /profiles/*.svg\n# Directories\nDisallow: /core/\nDisallow: /profiles/\n# Files\nDisallow: /README.md\nDisallow: /composer/Metapackage/README.txt\nDisallow: /composer/Plugin/ProjectMessage/README.md\nDisallow: /composer/Plugin/Scaffold/README.md\nDisallow: /composer/Plugin/VendorHardening/README.txt\nDisallow: /composer/Template/README.txt\nDisallow: /modules/README.txt\nDisallow: /sites/README.txt\nDisallow: /themes/README.txt\n# Paths (clean URLs)\nDisallow: /admin/\nDisallow: /comment/reply/\nDisallow: /filter/tips\nDisallow: /node/add/\nDisallow: /search/\nDisallow: /user/register\nDisallow: /user/password\nDisallow: /user/login\nDisallow: /user/logout\nDisallow: /media/oembed\nDisallow: /*/media/oembed\n# Paths (no clean URLs)\nDisallow: /index.php/admin/\nDisallow: /index.php/comment/reply/\nDisallow: /index.php/filter/tips\nDisallow: /index.php/node/add/\nDisallow: /index.php/search/\nDisallow: /index.php/user/password\nDisallow: /index.php/user/register\nDisallow: /index.php/user/login\nDisallow: /index.php/user/logout\nDisallow: /index.php/media/oembed\nDisallow: /index.php/*/media/oembed\n\n# Custom rules below\nCrawl-delay: 10\n# Paths from legacy origin\nDisallow: /Admin/\nDisallow: /cgi-bin/\nDisallow: /help/\nDisallow: /img/\nDisallow: /gif/\nDisallow: /ins/\nDisallow: /gopherdata/\nDisallow: /ojp/\nDisallow: /wusage/\nDisallow: /opa/pr/support/\nDisallow: /civil/frauds/\n# Facets\nDisallow: /*?f[*]=\nDisallow: /*&f[*]=\nDisallow: /*?f%5B*\nDisallow: /*&f%5B*\nAllow: /api/*?page=\nAllow: /api/*&page=\nAllow: /sitemap.xml?page=\nAllow: /sitemaps/*?page=\nAllow: /*/sitemap.xml\nAllow: /*/sitemap.xml?page=\nDisallow: /*?page=\nDisallow: /*&page=\n# Sitemap\nSitemap: https://www.justice.gov/sitemap.xml\n# Usasearch\nUser-agent: usasearch\nCrawl-delay: 2\n"
+    },
+    "policyRobots": {
+      "url": "https://www.justice.gov/robots.txt",
+      "pathChecked": "/fraud/fraud-enforcement-news",
+      "sameHostAsArtifact": true,
+      "verdict": "ALLOWED"
+    },
+    "terms": {
+      "url": "https://www.justice.gov/fraud/fraud-enforcement-news",
+      "requestedAt": "2026-09-21T08:01:35.271Z",
+      "httpStatus": 200,
+      "wireBytes": 18457,
+      "contentType": "text/html; charset=UTF-8",
+      "lastModified": "Mon, 21 Sep 2026 08:01:34 GMT",
+      "bodySha256": "9a9baf8aae6047a470b35e8d12f0363d092d3c6ed353c4f226f42f1f7f967e2d",
+      "extractedTermsSentences": [],
+      "textLength": 5634
+    },
+    "endpoint": {
+      "url": "https://www.justice.gov/news/rss?field_date=2026-04-01&field_topic%5B0%5D=34046&field_topic%5B1%5D=3926&field_topic%5B2%5D=3951&field_topic%5B3%5D=25351&field_topic%5B4%5D=54326&field_topic%5B5%5D=54331&field_topic%5B6%5D=40971&field_topic%5B7%5D=3936&require_all=0&search_api_language=en&show_public_archived=0&type%5B0%5D=blog_post&type%5B1%5D=image_gallery&type%5B2%5D=press_release&type%5B3%5D=youtube_video",
+      "requestedAt": "2026-09-21T08:01:39.282Z",
+      "httpStatus": 200,
+      "wireBytes": 5707,
+      "decompressedBytes": 20664,
+      "contentType": "application/rss+xml; charset=utf-8",
+      "mediaType": "application/rss+xml",
+      "bodySha256": "849ecdd99facfe294ae15134f045901f25dffc5e0fbcc7d3fb363a39aad88afe",
+      "bodyPreview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<rss xmlns:dc=\"http://purl.org/dc/elements/1.1/\" version=\"2.0\" xml:base=\"https://www.justice.gov/\">\n  <channel>\n    <title>Justice News</title>\n    <link>https://www.justice.gov/</link>\n    <description/>\n    <language>en</language>\n    \n    <item>\n  <title>Illegal Alien and Aerospace Manufacturer Employee Arrested on Indictment Charging Her with Fraud, False",
+      "looksLikeHtmlErrorPage": false,
+      "credentialRequired": null,
+      "verified": true
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": true,
+    "activationSupported": true,
+    "blocker": null
+  }
+}

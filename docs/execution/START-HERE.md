@@ -58,7 +58,9 @@ of previous sessions. It is deliberately short.
 > call on the tenant's own key. `tests/e2e/tenant-onboarding-e2e.test.ts` proves it: 16 passed.
 >
 > **A search needs the API _and_ the worker** (`pnpm dev` runs both). A stale worker completes a
-> run in ~130ms as `FAILED`, which looks exactly like a provisioning bug and is not one.
+> run in ~130ms as `FAILED`, which looks exactly like a provisioning bug and is not one. **As of
+> 2026-09-21 it can no longer steal an e2e suite's messages** — see "Queue isolation" below — so
+> you may leave `pnpm dev` running while the suites run.
 >
 > **Next: I5/I6** — mostly assembly. A tenant can already hold both key kinds; what is left is
 > the single response that hands over both with each secret shown once (I6), and a decision about
@@ -99,52 +101,108 @@ Run the mixed live test with Postman folder **15 — Mixed Live E2E: SEC + GDELT
 `mixedLiveConfirm = yes-contact-sec-and-gdelt`. The runbook is
 [`../sources/mixed-live-go-live.md`](../sources/mixed-live-go-live.md).
 
-### TEN INDEXED SOURCES EXIST IN CODE, NONE IS IN THE REGISTRY — added 2026-09-20
+### NINE INDEXED SOURCES ARE ACTIVE AND HOLD REAL LOCAL SNAPSHOTS — 2026-09-21
 
-A source can now be read in a **second** shape. The three live sources above are read at query
-time. An **indexed** source is downloaded whole on a schedule, parsed into a local snapshot, and
-searched in our own database — so it costs **no publisher request per search** and keeps
-answering while the publisher is down. Decisions **D-062** to **D-065**; the mechanism is in
+A source can be read in a **second** shape. A discovery source is read at query time. An
+**indexed** source is downloaded whole on a schedule, parsed into a local snapshot, and searched in
+our own database — so it costs **no publisher request per search** and keeps answering while the
+publisher is down. Decisions **D-062** to **D-065**; the mechanism is in
 [`../architecture.md`](../architecture.md) under "Indexed sources".
 
-| Source id                              | Connector           | Publisher                       |
-| :------------------------------------- | :------------------ | :------------------------------ |
-| `ofac-sdn`                              | `INDEXED_BULK_XML`  | US Treasury OFAC                |
-| `ofac-consolidated-non-sdn`             | `INDEXED_BULK_XML`  | US Treasury OFAC                |
-| `uk-sanctions-list`                     | `INDEXED_BULK_XML`  | FCDO                            |
-| `unsc-consolidated`                     | `INDEXED_BULK_XML`  | UN Security Council             |
-| `eu-consolidated-financial-sanctions`   | `INDEXED_BULK_XML`  | European Commission             |
-| `world-bank-debarred`                   | `INDEXED_BULK_JSON` | World Bank                      |
-| `doj-fraud-enforcement`                 | `INDEXED_RSS`       | US DOJ                          |
-| `cftc-enforcement-press-releases`       | `INDEXED_RSS`       | CFTC                            |
-| `ftc-consumer-protection-press-releases`| `INDEXED_RSS`       | FTC                             |
-| `fca-warnings`                          | `INDEXED_RSS`       | FCA                             |
+They were content builders in code only until 2026-09-21. They are now onboarded, ACTIVE, and
+populated from their real publishers:
 
-**NOTHING HAS CONTACTED ANY OF THESE PUBLISHERS.** Every proposal ships with
-`firstContactApproval: null` and `robotsPosition: NOT_ESTABLISHED`, and
-`apps/api/test/indexed-source-config.test.ts` fails if that stops being true. They are **content
-builders in code only** — no bootstrap seeds them, so `GET /v1/admin/sources` will not list one
-until a person proposes it. Taking one live is the same lifecycle as any other source: robots and
-terms evidence, a named first-contact approval, then propose → approve → activate through Postman
-folder 11. [`../sources/mixed-live-go-live.md`](../sources/mixed-live-go-live.md) is the runbook.
+| Source id                                | v   | State    | Rows   | Publisher                       |
+| :--------------------------------------- | :-- | :------- | -----: | :------------------------------ |
+| `ofac-sdn`                                | 2   | ACTIVE   | 19,393 | US Treasury OFAC                |
+| `uk-sanctions-list`                       | 2   | ACTIVE   |  6,340 | FCDO                            |
+| `eu-consolidated-financial-sanctions`     | 2   | ACTIVE   |  6,234 | European Commission             |
+| `unsc-consolidated`                       | 2   | ACTIVE   |  1,011 | UN Security Council             |
+| `ofac-consolidated-non-sdn`               | 2   | ACTIVE   |    481 | US Treasury OFAC                |
+| `ftc-consumer-protection-press-releases`  | 2   | ACTIVE   |     30 | US FTC                          |
+| `doj-fraud-enforcement`                   | 2   | ACTIVE   |     25 | US DOJ                          |
+| `fca-warnings`                            | 2   | ACTIVE   |     20 | UK FCA                          |
+| `cftc-enforcement-press-releases`         | 2   | ACTIVE   |     10 | US CFTC                         |
+| `world-bank-debarred`                     | 2   | APPROVED |      0 | World Bank — **blocked**        |
 
-Until then a forced refresh answers **`FAILED` with the gate's reason, before any socket opens**.
-That is the expected answer, not a broken build.
+**33,544 indexed records.** `world-bank-debarred` is deliberately not ACTIVE: its gateway needs
+`WORLD_BANK_SANCTIONS_API_KEY`, which this deployment does not hold, and `robots.txt` on
+`apigwext.worldbank.org` answers 403 from a WAF. Both are recorded on the version and on
+[`../sources/evidence/world-bank-debarred.json`](../sources/evidence/world-bank-debarred.json). A
+source stopped at APPROVED behind an evidenced blocker is the correct outcome, not a gap in the
+work.
+
+**How to reproduce this on a clean deployment** — the whole point, and previously undocumented:
+[`../sources/indexed-source-onboarding.md`](../sources/indexed-source-onboarding.md). Three acts:
+`pnpm indexed:first-contact` gathers evidence, `pnpm source:onboard --apply` drives
+propose → submit → approve → activate over the **real Admin API** with two distinct principals, and
+a controlled refresh fills the snapshot. Nothing writes to Mongo outside the repositories.
+
+**D6 closed** (2026-09-21, Faisal Ali, Source admin). Four publishers serve their bulk file from
+their own delivery host whose `robots.txt` answers 403, which this service reads as `UNKNOWN` and
+refuses. The exception is recorded on the version, **scoped to named delivery hosts**, and usable
+only on the scheduled-artifact path. A hop to any other host is still refused. See §6 of the
+onboarding document.
+
+### SEC DISCOVERY IS BACK ON — 2026-09-21
+
+**`sec-litigation-releases` (v5) and `sec-press-releases` (v1) are ACTIVE again.** They were
+SUSPENDED because the discovery identity matcher compared the subject's name **to itself** and
+could reach `CONFIRMED` on a name alone. That defect was fixed in the twenty-first session and the
+two sources were restored through the real lifecycle on 2026-09-21 — `RESTORE` is four-eyes and
+re-runs the SEC-05 rights gate, and `db.auditEvents.countDocuments({action:
+'source:four_eyes_bypassed_for_testing'})` is still **0**.
+
+**`gdelt-doc-v2` stays SUSPENDED**, deliberately. It is outside this milestone and its budget is
+not ours to spend; its daily spend is 0 and the acceptance run asserts that it stays that way.
+
+Restoring a suspended source has its own operator command, because onboarding is a different shape
+from restoring and a script with two modes is one nobody reads carefully before running:
+
+```
+SOURCE_APPROVER_KEY=erly_... pnpm source:restore --apply --source <id> --reason "..."
+pnpm source:restore                                  # plan only, lists what is SUSPENDED
+```
+
+The approver must not be the credential that **proposed** the version — four eyes is checked
+against `proposedBy`. Note also that **releasing a kill switch is four-eyes in its own right**: the
+principal who engaged it is refused, which is correct and is easy to discover the hard way by
+leaving a source switched off for every later run.
+
+**The combined acceptance run is the gate for all of this:**
+
+```
+COMBINED_LIVE_ACCEPTANCE=yes-contact-the-sec pnpm test:live:acceptance    # 11 passed
+```
+
+`tests/live/acceptance/combined-adverse-search.test.ts` — nine indexed sources from local
+snapshots plus both SEC feeds live, in one deployment, asserting zero publisher requests for
+indexed sources, the shared FR-08 resolver on the discovery path, AMBIGUOUS on a name alone, no
+`FULL_DOB`/STRONG from a year-only date, tier read from the source version, FR-10 clustering live
+in the runtime, independent authorities kept independent, indexed findings surviving a SEC failure,
+and no fixture id anywhere. Postman folder **17** runs the same claims over HTTP.
+
+One limitation is recorded rather than hidden: **copy *suppression* cannot be exercised in this
+deployment**, because FR-10 never suppresses a tier-1 issuing authority as a copy and every ACTIVE
+source here is one. The runtime asserts the half that protects a subject — a duplicate must not
+inflate the independence count — and the suppression path itself is proved over constructed
+candidates in `packages/domain/test/clustering/assign.test.ts`. The acceptance suite fails loudly
+the day a source below tier 1 is activated, so that reasoning cannot expire silently.
 
 Two things an operator uses:
 
-- `GET /v1/admin/indexed-sources` — usability, freshness, row count and last failure per source.
-  Needs `platform:read_health`, the same credential folder 8 uses.
+- `GET /v1/admin/indexed-sources` — usability, freshness, row count, parser version, last failure
+  and last snapshot prune per source. Needs `platform:read_health`.
 - `POST /v1/admin/indexed-sources/{sourceId}/refresh` — one refresh now. Needs `source:approve`
-  **and** the header `X-Allow-Publisher-Contact: true`. Postman folder **16** covers both, and
-  16.4 halts unless `indexedRefreshConfirm` is `yes-contact-the-publisher`.
+  **and** the header `X-Allow-Publisher-Contact: true`.
 
-`WORLD_BANK_SANCTIONS_API_KEY` is the one new environment variable. Blank leaves that source
-configured and mechanically unable to call the API, which is a safe state, not a broken one.
+Postman folder **16 — Global Indexed Sources E2E** is the acceptance test: 17 requests,
+136 assertions, including that a tenant search causes **zero** publisher downloads.
 
 A refresh **never** replaces a usable snapshot with a worse one (D-063), and a source with no
-snapshot is reported as a **coverage gap** at cascade rung 0 — never as a source that looked and
-found nothing.
+snapshot is reported as a **coverage gap** at rung 0 — never as a source that looked and found
+nothing. Old snapshots are now **pruned**: the active one and one previous are kept, everything
+older is deleted in a bounded pass, and `lastPrune` on the operator view shows it happening.
 
 ### A recorded ceiling is now enforced — 2026-09-18
 
@@ -281,7 +339,29 @@ room to do the work than to plan it. The phase briefs exist so you do not have t
 pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:invariants && pnpm test:evaluation
 ```
 
-Expected today (2026-09-16): clean, clean, **895 passed, 29 passed, 12 passed**.
+Expected today (2026-09-21): clean, clean, and **1101 passed across 66 files** for the three pure
+projects run together (`pnpm exec vitest run --project unit --project invariants --project
+evaluation`).
+
+### Queue isolation — added 2026-09-21, and it is not a flakiness workaround
+
+Two things used to cross between test runs, and both failures named the **victim** rather than the
+cause, which cost two sessions:
+
+1. **A long-running `pnpm dev` worker** polls `adverse-search-jobs` from `.env`, in whatever mode
+   and whatever build it booted with, and took messages from the e2e suites. Every suite in
+   `tests/e2e` now creates and polls **its own queue** — `tests/e2e/support/queues.ts` has the
+   whole account. Proven: `pnpm test:e2e:api` is 34/34 with a **live** `pnpm dev` worker running.
+2. **The shared outbox.** Per-suite queues stop a *consumer* crossing but not a *producer* one:
+   the three e2e suites share one database, so `OutboxPublisher.publishOnce` in one app claims
+   another app's `search.queued` row and posts it to **its own** queue. That is correct in
+   production — many API instances, one outbox, one queue — and impossible there, because no two
+   production instances hold different `JOBS_QUEUE_URL`s. The fix is `--no-file-parallelism` on
+   the `test:e2e:api` script, so only one publisher is ever live.
+
+**`fileParallelism: false` set on a vitest *project* is accepted silently and does nothing.** The
+flag lives in the `package.json` script. If it is ever dropped, the suites start crossing their own
+searches again; the only visible symptom is the summed test time exceeding the wall-clock duration.
 
 With the stack running (`pnpm local:up && pnpm local:bootstrap`), `pnpm test:integration` adds
 **215 integration** tests, `pnpm test:security` **181 security** tests, and `pnpm test:e2e:api`

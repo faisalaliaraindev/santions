@@ -88,6 +88,15 @@ export interface FetchAuthorisation {
   /** Set only when `robotsPosition` is `EXCEPTION_APPROVED`: who approved it (FR-06, D6). */
   readonly robotsExceptionApprovedBy: string | null;
   /**
+   * The exact hosts an `EXCEPTION_APPROVED` position covers. Empty for every other position.
+   *
+   * The exception is host-scoped rather than source-scoped so that it fails closed: a hop onto
+   * a host this list does not name goes through the strict robots path and is refused, even
+   * though the source carries an exception. A publisher who changes where their redirect points
+   * therefore needs a new approved version, not merely a new redirect.
+   */
+  readonly robotsExceptionDeliveryHosts: readonly string[];
+  /**
    * The ceiling the approved version records, in requests per second, or null when it records
    * none.
    *

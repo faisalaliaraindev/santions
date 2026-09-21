@@ -27,6 +27,7 @@ import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module.js';
 import { WorkerRuntime } from './jobs/worker-runtime.service.js';
+import { RetentionScheduler } from './storage/retention-scheduler.service.js';
 import { IndexedSourceScheduler } from './sources/indexed/indexed-source-scheduler.service.js';
 
 async function bootstrap(): Promise<void> {
@@ -41,10 +42,17 @@ async function bootstrap(): Promise<void> {
   // halving each one's useful batch.
   const runtime = app.get(WorkerRuntime);
   const indexedSources = app.get(IndexedSourceScheduler);
+  // C5's `RetentionSweeper` had no caller anywhere in the tree until 2026-09-21: retention
+  // actions were scheduled and never executed. It starts here, beside the indexed-source
+  // scheduler, because both are background obligations of the worker role rather than of the
+  // request path — and because starting it in `main.ts` as well would run one sweep loop per API
+  // replica over the same rows.
+  const retention = app.get(RetentionScheduler);
 
   try {
     runtime.start();
     indexedSources.start();
+    retention.start();
   } catch (error) {
     logger.error(error instanceof Error ? error.message : String(error));
     await app.close();
@@ -52,7 +60,10 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  logger.log('Worker started. Draining on SIGTERM.');
+  logger.log(
+    'Worker started: job consumer, indexed-source scheduler and retention sweeper. ' +
+      'Draining on SIGTERM.',
+  );
 }
 
 void bootstrap();

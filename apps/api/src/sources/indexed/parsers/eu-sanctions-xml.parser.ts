@@ -69,7 +69,11 @@ export class EuSanctionsXmlParser implements IndexedArtifactParser {
     return {
       sourceId: input.sourceId,
       sourceRecordId,
-      recordType: /person/i.test(subjectType) ? 'PERSON' : /enterprise|entity/i.test(subjectType) ? 'ENTITY' : 'OTHER',
+      recordType: /person/i.test(subjectType)
+        ? 'PERSON'
+        : /enterprise|entity/i.test(subjectType)
+          ? 'ENTITY'
+          : 'OTHER',
       primaryName,
       aliases: unique(aliases),
       originalScriptNames: unique(
@@ -92,10 +96,16 @@ export class EuSanctionsXmlParser implements IndexedArtifactParser {
           .filter((value): value is string => value !== null),
       ),
       citizenships: [],
-      countries: unique(addresses.map((address) => address.country).filter((value): value is string => value !== null)),
+      countries: unique(
+        addresses
+          .map((address) => address.country)
+          .filter((value): value is string => value !== null),
+      ),
       addresses,
       identifiers: identifications,
-      companyIdentifiers: identifications.filter((identifier) => /registration|tax/i.test(identifier.type)),
+      companyIdentifiers: identifications.filter((identifier) =>
+        /registration|tax/i.test(identifier.type),
+      ),
       listingDate: parseDate(attr(regulations[0] ?? {}, 'publicationDate')),
       programmes: unique(
         regulations
@@ -117,7 +127,9 @@ export class EuSanctionsXmlParser implements IndexedArtifactParser {
 function readAddress(address: Record<string, unknown>): IndexedSourceAddress {
   return {
     lines: unique(
-      [attr(address, 'street'), attr(address, 'place')].filter((value): value is string => value !== null),
+      [attr(address, 'street'), attr(address, 'place')].filter(
+        (value): value is string => value !== null,
+      ),
     ),
     city: attr(address, 'city'),
     region: attr(address, 'region'),

@@ -172,12 +172,23 @@ function endOfTag(source: string, start: number): number {
  *   anything numeric-looking into a number, so a headline that reads "2026" becomes the integer
  *   2026 and a GUID of digits stops comparing equal to the string it was stored as. Feed fields
  *   are text; nothing here wants a number.
- * - **`processEntities: true`**, deliberately, and it is safe only because of the gate above.
+ * - **`processEntities`**, deliberately enabled, and it is safe only because of the gate above.
  *   With no DTD the only entities a document can contain are the five XML predefines and
  *   numeric character references, each of which expands to exactly one character. Turning
  *   entity processing off instead would leave `&amp;` sitting in every title as literal text,
  *   which is a wrong title rather than a safe one. `htmlEntities` stays off: an HTML entity set
  *   is a much larger table and this is not HTML.
+ *
+ *   **`maxTotalExpansions` is raised, and that is not a weakened defence.** The library's
+ *   default refuses a document after 1,000 entity expansions, which is a proxy for a
+ *   billion-laughs attack — and billion laughs *requires a DTD*, which `parseXmlDocument`
+ *   refuses outright before the library ever sees the text. So the count-based limit defends
+ *   nothing here while rejecting real documents: the FTC's consumer-protection feed is 143KB of
+ *   ordinary press releases containing 1,016 `&amp;` and `&#39;` sequences, and it was refused
+ *   as malformed with a message about an attack that cannot occur. What still bounds the work is
+ *   `maxExpandedLength` — total expanded output, kept at the library's default — together with
+ *   the fetch budget that bounded the bytes before parsing started. A size bound is the honest
+ *   defence for an expansion attack; a count of single-character expansions is not.
  *
  * `removeNSPrefix` flattens `dc:date` and `atom:link` to `date` and `link`, so the extractors
  * below read one shape rather than one per publisher's namespace habits.
@@ -185,7 +196,14 @@ function endOfTag(source: string, start: number): number {
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
-  processEntities: true,
+  processEntities: {
+    enabled: true,
+    // Each of these expands to exactly one character (no DTD ⇒ no custom entities), so the count
+    // is really "how many ampersands does this publisher use". Bounded output, not bounded count.
+    maxTotalExpansions: 5_000_000,
+    maxEntityCount: 5_000_000,
+    maxExpandedLength: 256 * 1024 * 1024,
+  },
   htmlEntities: false,
   parseTagValue: false,
   parseAttributeValue: false,

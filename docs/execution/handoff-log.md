@@ -27,6 +27,644 @@ Say what you did about it.
 
 ---
 
+## 2026-09-21 (twenty-second) — Queue isolation, SEC discovery restored, and the combined acceptance run is green
+
+**The one-line state.** The e2e suites can no longer have their jobs stolen — by a `pnpm dev`
+worker or by each other; `sec-litigation-releases` and `sec-press-releases` are **ACTIVE** again
+through the real four-eyes lifecycle; `gdelt-doc-v2` is still **SUSPENDED** and was never
+contacted; and a new combined acceptance suite plus Postman folder 17 assert the nine claims of
+this milestone against a live deployment. Everything is green: lint, typecheck, 1101 pure, 411
+integration+security, **34/34 e2e**, **11/11 live acceptance**, **52/52 Postman assertions**.
+
+---
+
+### 1. The blocker the last entry left, and what it actually was
+
+The last session left `pnpm test:e2e:api` failing intermittently and attributed it to a stale
+`pnpm dev` stack holding pre-refactor code. That was **half right**, and the other half is the
+part worth reading.
+
+**Cause one — the dev worker.** A `pnpm dev` stack polls `adverse-search-jobs` from `.env`, in
+whatever mode and whatever build it booted with, for as long as somebody leaves it open. On
+2026-09-21 that was a **live** worker, and a live worker handed a fixture search refuses every
+source (T55) and returns zero findings. Stopping it was step one and it was necessary.
+
+**It was not sufficient.** With the dev stack stopped, the suites still crossed — and the symptom
+moved to a different file each run, which is what makes this class of bug expensive.
+
+**Cause two — the shared outbox, and this is the one nobody had found.** The three `tests/e2e`
+suites run against one database and therefore one `outboxEvents` collection.
+`OutboxPublisher.publishOnce` calls `findDue` and claims whatever is pending — it has **no
+deployment filter, and it is right not to have one**: in production many API instances publish
+from one outbox into one queue, which is exactly how horizontal scaling works. What cannot happen
+in production is several instances sharing an outbox while each holds a *different*
+`JOBS_QUEUE_URL`. Run the three files concurrently and that is precisely the arrangement: the
+indexed suite (a **live**-mode worker) picks up a mock suite's `search.queued` row and posts it to
+the indexed suite's queue, where its own live worker takes it, refuses every fixture source, and
+settles the run in ~600ms with zero findings.
+
+Both failure modes name the **victim**, never the thief:
+`expected 0 to be greater than 0` in `tenant-onboarding-e2e`, or a search that never leaves
+`QUEUED`. Neither says anything about the run that took the message.
+
+**Diagnosis that settled it:** running `tenant-onboarding-e2e.test.ts` alone passed 16/16, and the
+stolen run's record showed `discovery SKIPPED — no approved source sits on the FR-05 discovery
+ladder in this process` — which is correct for a live worker (`SourceAdapterSet` returns
+`newsDiscovery: []` in live mode) and impossible for the mock suite that submitted it.
+
+### 2. What was built for it
+
+**`tests/e2e/support/queues.ts`** — one queue per suite, created in `beforeAll`, plus its own dead
+letter queue. `indexed-adverse-search-e2e.test.ts` had done this privately; the module generalises
+it and the other two suites now use it rather than rediscovering the hazard.
+
+The generic `JOBS_QUEUE_URL` is **deliberately not consulted** as a fallback. A suite that reads it
+rejoins the shared queue the moment anything exports it — a shell that sourced `.env`, a CI job
+setting it for the integration suite — so each suite reads **its own** variable
+(`API_LIFECYCLE_E2E_QUEUE_URL`, `TENANT_ONBOARDING_E2E_QUEUE_URL`, `INDEXED_E2E_QUEUE_URL`) and an
+override has to name the suite it is overriding.
+
+**`--no-file-parallelism` on the `test:e2e:api` script** closes the outbox half. One publisher live
+at a time means the event and the queue belong to the same suite by construction.
+
+> **`fileParallelism: false` set on a vitest _project_ is accepted silently and does not take
+> effect.** The files still overlap. The only way to notice is that the summed test time exceeds
+> the wall-clock duration — 108s of tests inside a 72s run. That is why the flag is in
+> `package.json` and why `vitest.config.mts` carries a paragraph saying so. If it is ever dropped,
+> the suites start crossing their own searches again.
+
+Cost: ~145s serial against ~70s concurrent. Tests *within* a file still run in order, as before.
+
+**Proof, not assertion:** `pnpm test:e2e:api` was run **five consecutive times clean (34/34)**, and
+then once more **with a live `pnpm dev` worker running on the shared queue** — also 34/34.
+
+### 3. SEC discovery restored
+
+Both versions went SUSPENDED → ACTIVE over the **real Admin API**, with a credential distinct from
+the version's `proposedBy`:
+
+| Source | Version | Before | After |
+| :-- | :-- | :-- | :-- |
+| `sec-litigation-releases` | v5 | SUSPENDED | **ACTIVE** |
+| `sec-press-releases` | v1 | SUSPENDED | **ACTIVE** |
+| `gdelt-doc-v2` | v1 | SUSPENDED | **SUSPENDED**, daily spend 0 |
+
+`db.auditEvents.countDocuments({action: 'source:four_eyes_bypassed_for_testing'})` is still **0**.
+
+**`scripts/source-restore.mjs` (`pnpm source:restore`)** is new, and is a separate script from
+`source:onboard` on purpose. Onboarding walks a source *into* the registry and is content-driven;
+restoring acts on a version that already exists and was already approved. Folding the two together
+would mean either proposing a duplicate version of something already correct, or an onboarding
+script with two modes — and a script with two modes is one nobody reads carefully before running.
+
+**`RESTORE` is not a status flip**, and the lifecycle is right to make it three things at once:
+four eyes (checked against `proposedBy`), a mandatory reason recorded permanently in the version
+history, and the SEC-05 rights clearance re-evaluated — a licence that lapsed during the suspension
+must not be restored past. The restore reason recorded on both versions names the defect that was
+fixed, states that the publisher's position is unchanged, and says plainly that it was executed by
+an automated session using the approver credential rather than by a second human reviewer.
+
+### 4. The combined acceptance run
+
+**`tests/live/acceptance/combined-adverse-search.test.ts`**, its own vitest project
+(`live-acceptance`), armed by `COMBINED_LIVE_ACCEPTANCE=yes-contact-the-sec` — deliberately **not**
+`SEC_LIVE_E2E`, because arming one live suite must never arm another.
+
+```
+COMBINED_LIVE_ACCEPTANCE=yes-contact-the-sec pnpm test:live:acceptance     # 11 passed
+```
+
+Nine indexed sources from local snapshots and both SEC feeds live, in one deployment. What it
+proved, with the witness in each case:
+
+| Claim | Witness |
+| :-- | :-- |
+| Indexed sources issue **zero** publisher requests during a tenant search | `GET /v1/admin/indexed-sources` before and after: `lastAttemptAt`, `httpStatus`, `refreshStatus`, `activeSnapshotVersion` all unmoved, while the search returned findings |
+| SEC discovery grades through the shared FR-08 resolver | The live finding's only factor is `EXACT_COMMON_NAME`/WEAK with a real span and a detail naming both sides; **no** `RARE_FULL_NAME_PLUS_CITY` |
+| Name-only discovery stays AMBIGUOUS | `axes.identity = WEAK`, `band = AMBIGUOUS` on a real SEC litigation release |
+| Year-only DOB is never `FULL_DOB`/STRONG | Subject and OFAC row both at YEAR precision; the DOB factor is not `FULL_DOB` and not STRONG |
+| Authority tier comes from the source version | `document.authorityTier = 1` and `axes.authorityTier = 1` — the old hardcoded value was 2 |
+| FR-10 clustering is live in the runtime | Findings carry `FR-10 cluster cluster-2: 2 document(s) about this event` — a line emitted only for a cluster with more than one member |
+| A duplicate does not inflate corroboration | The injected duplicate joined the same cluster; `independenceCount` stayed **1**, note reads `counted: 1 (1 issuing authority` |
+| Independent authorities stay independent | OFAC and EU each kept their own finding for one cross-listed person; every cluster note reads `0 excluded as copies` |
+| Indexed findings survive a SEC failure | SEC kill switch engaged; the indexed finding survived, SEC reported by name with a reason, run not `NO_MATCHES_FOUND` and coverage not `COMPLETE` |
+| No fixture id anywhere | Every outcome and every finding checked against `/fixture|mock/i`; every finding `mode: LIVE` |
+
+**Real evidence, not a shape:** the graded SEC finding is `lr-26642` on `www.sec.gov`, `mode:
+LIVE`, subject `Ellen Polcari`, retrieved live during the run.
+
+### 5. Two things the acceptance run taught us that were not known before
+
+1. **Copy *suppression* cannot be exercised in this deployment, and that is by design.**
+   `assignClusters` never demotes an independent authority record to a copy — it re-reads
+   `DUPLICATE_DOCUMENT`/`SYNDICATED_COPY` as `SAME_EVENT`. Indexed records are all
+   `isIndependentAuthority: true`, discovered ones are so when `authorityTier === 1`, and **every
+   ACTIVE source here is tier 1**. So no suppressible copy can arise. The first draft of this suite
+   asserted "the duplicate collapses to one finding" and failed — correctly, against correct code.
+
+   The suite now asserts the half that actually protects a subject (a duplicate must not inflate
+   the independence count), states the limitation in its own header, and carries a test that
+   **fails the day a source below tier 1 is activated**, so the reasoning cannot expire silently.
+   Suppression itself stays proved over constructed candidates in
+   `packages/domain/test/clustering/assign.test.ts`.
+
+2. **Releasing a kill switch is four-eyes in its own right.** `the person who suspended a source
+   may not release it`. The first draft engaged and released with one credential; the release was
+   refused with 403, the test's `finally` did not assert it, and the switch stayed engaged on a
+   shared source record — so the *next* run failed at `engage` with `ALREADY_TERMINAL`, an error
+   about the test's own leftovers. The suite now uses two distinct `source_admin` principals,
+   asserts the release, and confirms `killSwitch` is null afterwards.
+
+   The rule is right: a source switched off because it was harming somebody should not be switched
+   back on by the one person who decided it was harmful.
+
+### 6. Postman — folder 17
+
+**`17 — Combined Live Acceptance: 9 indexed + 2 SEC discovery`**, 19 requests, armed by
+`caConfirm = yes-contact-sec-and-indexed` (not folder 14's `liveConfirm`, not folder 15's
+`mixedLiveConfirm`). Verified with newman against the running stack: **41 requests, 52 assertions,
+0 failures**. Unarmed it stops after one request and fails loudly, contacting nobody.
+
+It activates nothing and suspends nothing. 17.1 **fails if `gdelt-doc-v2` is ACTIVE**.
+
+**It uses two subjects, and that is the honest part.** The indexed lists and the SEC feeds are
+about different people — somebody on the OFAC SDN list is almost never a current SEC defendant. The
+first draft used one subject, passed, and graded **zero** SEC findings. So the SEC half now has its
+own subject (`caSecSubjectName`), and **17.18 fails rather than passing vacuously** when there is
+nothing to grade. Set it from `pnpm sec:live-smoke --yes-contact-the-sec`, which makes one counted
+request and prints the current entries.
+
+### 7. Verified — exact commands and figures
+
+```
+pnpm lint                                              clean
+pnpm typecheck                                         clean
+vitest --project unit --project invariants --project evaluation    66 files, 1101 passed
+vitest --project integration --project security                    22 files,  411 passed
+pnpm test:e2e:api                                      34 passed — 5 consecutive clean runs,
+                                                       plus one with a live `pnpm dev` worker up
+COMBINED_LIVE_ACCEPTANCE=yes-contact-the-sec pnpm test:live:acceptance    11 passed
+newman … --folder "17 - Combined Live Acceptance…"     41 requests, 52 assertions, 0 failures
+```
+
+SEC budget after everything: daily spend 30, breaker CLOSED, kill switch not engaged. GDELT daily
+spend 0. No `-acceptance-copy` rows left in `indexedSourceRecords`; no four-eyes bypass events.
+
+### 8. NOT done
+
+- **`pnpm dev` still polls the shared `adverse-search-jobs` queue.** The isolation was built on the
+  **test** side, which is where the user asked for it and where it belongs — the dev stack is
+  behaving correctly for a dev stack. A future session may still want `pnpm dev` to take its own
+  queue so two developers on one LocalStack do not consume each other's work.
+- **Folder 15 (SEC + GDELT) was not re-run**, because GDELT stays suspended by instruction.
+- **F3, the eight FR-07 validation rules, is still unwritten** — `grep validateAssertion` still
+  returns nothing. It remains the next thing Phase F owes.
+- **Subject-side identifiers are still always empty** and **discovery-side DOB/country/identifiers
+  still come only from `identityAttributes`**, which the rule-based extractor returns empty. So a
+  discovery finding still carries the name and nothing else, and lands AMBIGUOUS. Unchanged from
+  the twenty-first entry, and still the honest outcome rather than a gap.
+
+### 9. Next session should
+
+1. Re-run the health check. If `pnpm test:e2e:api` is anything but 34/34, read §2 before assuming
+   the pipeline broke — check whether `--no-file-parallelism` is still on the script.
+2. Decide on GDELT: folder 15 and `gdelt-doc-v2` are ready to restore with
+   `pnpm source:restore --apply --source gdelt-doc-v2`, and D18 already covers first contact. It
+   was left suspended by instruction, not by a blocker.
+3. Then **F3** — the eight FR-07 validation rules.
+
+### 10. Decisions touched
+
+None closed. **D6, D17, D18 unaffected.** The restore re-ran the SEC-05 rights clearance and
+passed on the publisher's existing position; no new rights position was recorded and no
+first-contact approval was created or copied.
+
+---
+
+## 2026-09-21 (twenty-first) — The discovery identity matcher is fixed and FR-10 clustering is in the runtime path
+
+**The one-line state.** The subject-name-to-itself comparison is gone, the fabricated
+`RARE_FULL_NAME_PLUS_CITY` factor is gone, the hardcoded `authorityTier: 2` is gone, both the
+indexed and discovery paths now grade identity through **one** shared FR-08 resolver, and FR-10
+clustering has a real runtime caller for the first time. Typecheck, lint, unit, invariants,
+evaluation, integration and security are all green (1101 + 411). **The SEC sources were NOT
+re-activated and no live search was run** — see §6.
+
+---
+
+### 1. What was wrong, and what replaced it
+
+`pipeline/search-pipeline.service.ts` built its own Axis A input inline:
+
+```ts
+matchNameForms(normaliseName(subject.fullName),
+               normaliseName(spans.length > 0 ? subject.fullName : ''))
+```
+
+The subject's name compared to **itself** — so any document carrying a mention span matched
+`EXACT` whatever it said — followed by one hardcoded MODERATE `RARE_FULL_NAME_PLUS_CITY` factor
+asserting a city check that ran on neither side. One moderate identifier is Axis A `PARTIAL`, and
+`PARTIAL` is enough for `SUPPORTED`. A document that merely contained the subject's name became a
+supported adverse finding, with a rationale describing evidence nobody had looked at.
+
+Replaced by **`packages/domain/src/identity/evidence.ts`** — `resolveIdentityEvidence(subject,
+document)`. Two structurally distinct input types, so the defect is no longer expressible: there
+is no path through the module where the same string reaches both sides unless the document
+genuinely contains it. It asserts a factor **only when both sides had a value and they were
+compared** — absence produces no factor at all, not an `ABSENT` placeholder.
+
+What it evaluates: exact/variant name, aliases (with origin), original-script names,
+transliteration (via the existing port), DOB, year-only DOB, country/nationality,
+company/association evidence, identifiers.
+
+`RARE_FULL_NAME_PLUS_CITY` is **deliberately not implemented**. `subjectVersionSchema` carries
+`countryContext` and no city, so there is no subject-side city to compare. A branch that can never
+be true is how a fabricated factor comes back — the next reader assumes the check runs and stops
+looking. The file says so explicitly.
+
+Both callers now project into it: `indexed-source-search.service.ts` lost its private copy of the
+factor logic (correct but duplicated — two implementations of one rule is how the wrong one
+survives), and the discovery path builds its document side from **`text.slice(span.start,
+span.end)`**, the document's own bytes at the extractor's offsets.
+
+### 2. Two real defects found while doing it
+
+1. **A year-only DOB agreement was asserted as `FULL_DOB`/STRONG.** `datesAgree` compared years
+   when the *publisher* declared YEAR precision and then labelled the result a full date-of-birth
+   agreement. OFAC publishes year-only dates for many listings (`Abu ABBAS`, `1948-01-01`,
+   precision YEAR). So **any namesake born in the same year as a listed person reached
+   `CORROBORATED` identity.** Now compared at the coarser of the two declared precisions: a year
+   agreement is `DOB_YEAR_MONTH`/MODERATE, only a day-precision agreement is `FULL_DOB`/STRONG.
+   The band for the OFAC case is still `SUPPORTED`, so nothing stops reaching a reviewer — the
+   finding just no longer claims the full dates agree when only the years do.
+2. **The subject's own DOB precision was ignored.** `datesAgree` took the subject date as a raw
+   string and only consulted the *source* precision, so a subject declared at YEAR precision was
+   compared as if it were a full date.
+
+Also fixed: the indexed publication path matched subject names into feed text with a bare
+`indexOf`, which puts "Ana" inside "Santana". Now word-bounded, matching what the discovery
+extractor has always done.
+
+### 3. Authority tier
+
+`authorityTier: 2` was hardcoded at two points on the discovery path, so a tier-1 court document
+and a tier-5 forum post banded identically and `assignBand` rule 4 (tier 5 ⇒ LEAD_ONLY) could
+never fire. The tier now comes from `gate.sourceVersion.authorityTier` — the active approved
+version the fetch gate authorised the request against — through `clampTier`, which maps an
+out-of-range registry value to **5** rather than a permissive default: a configuration fault must
+not resolve in the source's favour.
+
+### 4. FR-10 clustering, wired
+
+`decideClustering` and `computeAuthority` were both correct and `decideClustering` had **no
+caller**; `computeAuthority` was called per finding with a hardcoded one-element array. Every
+document in a run was its own independent corroboration.
+
+- **`packages/domain/src/clustering/assign.ts`** — `assignClusters`, a run-level greedy
+  assignment over the pairwise rules.
+- **`packages/domain/src/clustering/near-duplicate.ts`** — SimHash over 5-word shingles.
+  `ClusterCandidate.nearDuplicateKey` had been documented since the rules were written as
+  "assigned by the provider layer" and **no provider ever assigned one**, so the
+  `MERGE_SYNDICATION_FAMILY` branch was unreachable in production.
+- **`SearchPipeline.clusterFindings`** — step 7 of `execute()`, over indexed **and** discovery
+  findings together, because a syndicated copy of an SEC release is only recognisable as a copy
+  if the release is in the same comparison.
+
+The distinction that matters: **copies collapse, independent authorities cluster.** A copy
+(identical document, identical canonical URL, or matching fingerprint) is removed from the result
+and excluded from the independence count. An SEC action, DOJ prosecution, FCA warning and OFAC
+designation about one event **each keep their own finding and each contribute their own
+authority** — guarded by `isIndependentAuthority`, and asserted with a shared `contentHash` so the
+strongest possible duplicate signal still does not fold an authority record away.
+
+**The near-duplicate threshold is measured, not assumed.** The conventional 3-of-64 is for long
+documents and rejected genuine syndication outright. Measured at real news-item length:
+
+| pair | distance |
+| :-- | --: |
+| one story, syndicated with a new headline | 6 |
+| one story, heavier edit plus house note | 9 |
+| **different** action, identical publisher boilerplate | 21 |
+| unrelated stories | 34 |
+
+Threshold **12**, in the gap with margin both ways. All four figures are pinned as tests, so a
+change to the hash, shingle width or token rules fails rather than silently moving the boundary
+between "copy" and "independent report".
+
+Indexed findings are **re-counted but not re-banded**: `IndexedSourceSearchService` bands by its
+own narrow rule that never consults Axis D, so re-running `assignBand` there would mean this
+method deciding something that service owns, from axis results it never produced. Their
+`independenceCount` (a hardcoded `1`) is corrected and the correction is stated in the rationale.
+
+### 5. Verified — exact commands
+
+```
+pnpm typecheck            clean
+pnpm lint                 clean
+pnpm test:unit + invariants + evaluation   66 files, 1101 passed   (was 66/1056 → +45 new)
+pnpm test:integration + security           22 files,  411 passed
+pnpm test:e2e:api         34 tests — see §7, blocked by a stale dev worker, not by code
+```
+
+New tests: `packages/domain/test/identity/evidence.test.ts` (25) and
+`packages/domain/test/clustering/assign.test.ts` (20). They assert **bands**, not only factor
+lists — a correct-looking factor list with a wrong band is exactly what shipped before.
+
+### 6. NOT done
+
+- **SEC was not re-activated.** `sec-litigation-releases` (v5) and `sec-press-releases` (v1) are
+  still SUSPENDED, `gdelt-doc-v2` still SUSPENDED. No live search was run, so none of the live
+  acceptance claims in the brief are proved.
+- **No Postman work.** Folder 16 is untouched and still passing as of the twentieth entry; no new
+  live acceptance flow was written.
+- **Subject-side identifiers are always empty.** `subjectVersionSchema` has no identifier field,
+  so `GOVERNMENT_OR_PASSPORT_ID` can never fire in production today. The resolver supports and
+  tests it so the grading is right the day the schema gains one.
+- **Document-side DOB/country/identifiers on the discovery path come only from
+  `identityAttributes`,** and `RuleBasedExtractionAdapter` returns `[]` for it. So a discovery
+  finding today has the name and nothing else — which is why it lands AMBIGUOUS. That is the
+  honest outcome, not a gap to paper over: prose is not mined for a birth year, because a
+  four-digit number near a name is not a date of birth.
+
+### 7. The blocker the next session hits first
+
+`pnpm test:e2e:api` fails **intermittently**, and not because of any code in this entry. A
+**`pnpm dev` stack is running** (`apps/api/dist/main.js`, `apps/api/dist/worker-main.js`, started
+13:21) holding **pre-refactor compiled code in memory**, in **LIVE mode** from `.env`
+(`ADVERSE_SEARCH_MODE=live`), polling the **shared** `adverse-search-jobs` queue. It steals
+messages from the mock-mode e2e suites; a live worker handed a fixture search refuses every source
+and returns zero findings. Symptoms seen, all explained by this:
+
+- `api-lifecycle` and `tenant-onboarding` fail with `expected 0 to be greater than 0`, and which
+  one fails changes run to run;
+- the run record shows `discovery SKIPPED — no approved source sits on the FR-05 discovery
+  ladder`, which is correct for a **live** worker and wrong for the mock suite that submitted it;
+- a finding came back carrying `'Publisher name matched as EXACT: …'`, a rationale string this
+  session **deleted** — proof the code that produced it was the in-memory stale build.
+
+Proved not to be this session's work by bypassing `clusterFindings` entirely and re-running: still
+zero findings.
+
+**First action next session: stop the `pnpm dev` stack (or restart it so it loads current code),
+then re-run `pnpm test:e2e:api`.** The suite header of `indexed-adverse-search-e2e.test.ts`
+already documents the shared-queue hazard; this is that hazard, with a long-running process rather
+than a second suite as the other consumer. Worth considering giving `pnpm dev` its own queue for
+the same reason the indexed e2e suite has one.
+
+### 8. Next session should
+
+1. Restart or stop `pnpm dev`; re-run `pnpm test:e2e:api` and confirm 34/34.
+2. Then re-activate `sec-litigation-releases` and `sec-press-releases` through the four-eyes
+   lifecycle (`pnpm source:onboard`), keeping `gdelt-doc-v2` suspended.
+3. Run a real live search over the two SEC discovery sources plus the nine indexed sources and
+   prove the six claims in the brief's §6.
+4. Only then the Postman live acceptance flow, and only after that re-evaluate GDELT.
+
+### 9. Decisions touched
+
+None closed. **D7 unaffected** — the resolver takes the transliteration port as a parameter and
+the discovery path passes none, so no model or ICU dependency was introduced.
+
+---
+
+## 2026-09-21 (twentieth) — The indexed adverse-search engine is real: nine sources ACTIVE, 33,544 records, searched locally, contacting nobody
+
+**The one-line state.** Nine of the ten indexed sources are ACTIVE with real snapshots from their
+real publishers; a tenant search answers from those snapshots and makes **zero** publisher
+requests; snapshot growth is bounded; the retention sweeper runs; and Postman folder 16 proves all
+of it in 135 assertions. The tenth source (`world-bank-debarred`) is APPROVED behind an evidenced
+credential blocker, on purpose.
+
+**Two decisions were taken by Faisal Ali (Source admin) during the session, and everything below
+rests on them.** **D19** authorised first contact with nine publishers this project had never
+called — read robots, read terms, verify the configured endpoint, one controlled initial refresh.
+**D6** (open since the plan was written) was closed: a robots exception is a host-scoped record on
+the approved version, usable only on the scheduled-artifact path.
+
+---
+
+### 1. What is now true at runtime
+
+| Source id | v | State | Rows | Snapshot |
+| :-- | :-- | :-- | --: | :-- |
+| `ofac-sdn` | 2 | ACTIVE | 19,393 | `ofac-sdn:30c2a70887d694f7242254e9` |
+| `uk-sanctions-list` | 2 | ACTIVE | 6,340 | `uk-sanctions-list:ca9f5e90f94b12a6994865a5` |
+| `eu-consolidated-financial-sanctions` | 2 | ACTIVE | 6,234 | `eu-consolidated-financial-sanctions:0c83e632fea7709d9c75bdd1` |
+| `unsc-consolidated` | 2 | ACTIVE | 1,011 | `unsc-consolidated:72c1897b5b3a55bfc01310a0` |
+| `ofac-consolidated-non-sdn` | 2 | ACTIVE | 481 | `ofac-consolidated-non-sdn:1344d77c708ae327d9021e91` |
+| `ftc-consumer-protection-press-releases` | 2 | ACTIVE | 30 | `...:99fab514507b5dc3bc3ad0e6` |
+| `doj-fraud-enforcement` | 2 | ACTIVE | 25 | `...:849ecdd99facfe294ae15134` |
+| `fca-warnings` | 2 | ACTIVE | 20 | `...:1de56810b21fb126e7251f2f` |
+| `cftc-enforcement-press-releases` | 2 | ACTIVE | 10 | `...:12a735d7367f2ed93922e29f` |
+| `world-bank-debarred` | 2 | **APPROVED** | 0 | none — blocked |
+
+All ten reached v2: v1 was proposed and approved with the values as shipped, then real refreshes
+disproved three of those values (see §4) and the corrections went through the lifecycle again.
+Every version was proposed by `api-key:3944ab75080b3ebc` and approved by
+`api-key:92206fac8c98f816` — two genuinely distinct principals.
+**`DISABLE_SOURCE_FOUR_EYES_FOR_TESTING` is now `false` in `.env`** and
+`db.auditEvents.countDocuments({action: 'source:four_eyes_bypassed_for_testing'})` is still `0`.
+
+**Discovery is SUSPENDED.** `sec-litigation-releases` (v5), `sec-press-releases` (v1) and
+`gdelt-doc-v2` (v1) were ACTIVE from earlier sessions and were suspended through the lifecycle,
+with the reason recorded on the version: the discovery matcher at
+`pipeline/search-pipeline.service.ts:1036` compares the subject's name **to itself** and can reach
+`CONFIRMED` on a name alone. **Do not re-activate them before that is fixed.**
+
+### 2. The repeatable path — this is the deliverable, not the data
+
+`docs/sources/indexed-source-onboarding.md` is the document to read. Two new scripts:
+
+- **`pnpm indexed:first-contact`** — one generalised evidence gatherer for all ten, four reads per
+  source with a 4s per-host floor, writing `docs/sources/evidence/<sourceId>.json`. Records **no
+  approval**.
+- **`pnpm source:onboard`** — drives propose → SUBMIT → APPROVE → activate over the **public Admin
+  API** with two distinct keys. Writes nothing to Mongo. **Idempotent by content**: an identical
+  ACTIVE version is left alone, a half-finished one resumes from where it stopped, a changed
+  reviewed value produces a new version. Refuses identical principals and refuses to run under the
+  four-eyes bypass. A source whose evidence does not support activation stops at `APPROVED` with
+  the blocker on the approval reason — there is no override flag.
+
+### 3. D6, and why four sources needed it
+
+OFAC (both lists) and the UN redirect their documented address to a **signed, one-hour
+object-store URL**; the FCDO serves from a bucket directly. Those delivery hosts answer
+`robots.txt` with **403**, which this service reads as `UNKNOWN` and refuses — correctly in
+general, wrongly for a redirect the publisher itself issues to its own infrastructure for one
+exact file.
+
+The exception is `accessPolicy.robotsException` on the approved version, carrying approver, role,
+date, decision, scope **and `deliveryHosts`**. It is matched **per host, not per source**: a hop to
+any unnamed host takes the strict path and is refused even though the source carries an exception.
+`assertAuthorised` refuses an exception naming no host; `readRobotsException` returns null for a
+partial record; and `FetchGateService.robotsPositionFor` is told explicitly whether the caller is
+the scheduled-artifact path, so query-time discovery can never use one.
+
+### 4. Defects found by actually running it
+
+Every one of these was invisible until a real publisher answered.
+
+1. **`sourceRecordId`, `sourceSnapshotVersion`, `parserVersion` and `rawEvidenceHash` were dropped
+   by the read path.** Stored on the finding, present in the contract, and simply never added to
+   the field-by-field `document` mapper in `searches.service.ts`. Every indexed finding reached
+   the API with `sourceRecordId: undefined`, so a reviewer had no way back to the publisher's row.
+   **This is the one that would have failed an audit.**
+2. **An exact name match could be crowded out of candidate retrieval.** `repository.search` ran
+   one `$or` of name-key and token clauses under one `limit(250)`, filled in natural collection
+   order. "Abu ABBAS" matched hundreds of records on tokens and its own exact SDN entry fell
+   outside the cap — subject on the list, row in the index, **nothing returned**. Now two bounded
+   queries, exact first.
+3. **The UK list could never parse.** Its `<Names>` block sometimes opens with an empty
+   `<Name><NameType>Primary Name</NameType></Name>`; the parser selected by label, got the empty
+   carrier, and threw — failing the whole 21MB artifact over one publisher-side artefact.
+4. **The UN list could never parse.** `INDIVIDUAL_DOCUMENT` entries carry a document type with no
+   number; `requireText` made that fatal. Such an identifier is now dropped, which loses nothing a
+   matcher could use.
+5. **The FTC feed was refused as malformed.** fast-xml-parser's default `maxTotalExpansions: 1000`
+   is a billion-laughs proxy — and billion laughs needs a DTD, which `parseXmlDocument` refuses
+   before the library sees the text. 1,016 ordinary `&amp;` sequences tripped it. Raised, with the
+   reasoning; `maxExpandedLength` still bounds the work.
+6. **Free-tier budgets made a refresh impossible.** A refresh is not one request: robots, the
+   artifact, and for some publishers the artifact again at the redirect. Budgets of 1–2/hour meant
+   `HARD_BLOCK` before the first snapshot. Raised to 6/hour with daily figures matched to cadence.
+7. **A row floor above the real list size.** `ofac-consolidated-non-sdn` was floored at 1,000
+   against a list of **481**, so every correct parse was refused. Now 300, from measurement.
+8. **The reviewed refresh policy was duplicated** in `app.module.ts` as call arguments. Correcting
+   the floor on the version did nothing because the scheduler read its own copy — and the failure
+   message said "the reviewed minimum" while quoting a number nobody had reviewed. Schedules now
+   read `INDEXED_SOURCE_REFRESH_POLICIES`, derived from the registry templates.
+9. **The EU endpoint was simply wrong.** The bare path answers `403`. The Commission's own
+   open-data catalogue publishes a tokenised download URL; verified (HTTP 200, `application/xml`,
+   6,234 entities) and corrected in the registry.
+
+### 5. Storage and retention — both audit gaps closed
+
+- **`IndexedSourceRepository.pruneSupersededSnapshots`.** Keeps the active snapshot and one
+  previous; deletes older ones in bounded pages with a per-pass ceiling, reporting
+  `complete: false` when it yields. The active snapshot is excluded **by version, not by
+  ordering**. Called after every successful commit, outside the transaction, and never fails a
+  refresh. The summary is written to the state record and surfaces as `lastPrune` on
+  `GET /v1/admin/indexed-sources`.
+- **`RetentionScheduler`** (new) drives `RetentionSweeper`, started by `worker-main.ts` beside
+  `IndexedSourceScheduler`. Worker role only, one loop per process, drains up to 20 batches per
+  tick, clean shutdown. `sweepOnce` had **no caller anywhere** before this.
+
+### 6. The contract defect the audit flagged
+
+`SANCTIONS_DESIGNATION` was emitted as a **free string**, and `category` was `z.string()` in the
+contract — so no generated client could switch on it. Fixed as a closed enum rather than a second
+product: `DESIGNATION_CATEGORIES` (`SANCTIONS_DESIGNATION`, `DEBARMENT_EXCLUSION`,
+`REGULATORY_WARNING_LIST`) sits beside the seventeen FR-03 conduct categories, and
+`FINDING_CATEGORIES` is their union. They are deliberately **not** three more `ADVERSE_CATEGORIES`:
+those exist to be recognised in running text, carry lexicon terms in every enabled language, and
+`activation.ts` refuses a taxonomy leaving one without terms. A designation is matched by name
+against a list we already hold. Parsers now declare `listingCategory`, so the World Bank list is
+`DEBARMENT_EXCLUSION` and the FCA warning list is `REGULATORY_WARNING_LIST` (it was
+`CONSUMER_HARM_MISSELLING`, which asserted a mis-selling finding the FCA has not made).
+
+`SourceCoverageOutcome` also gained `snapshotVersion`, `freshness` and `snapshotRowCount`, so
+"searched and current", "searched but stale", "no snapshot" and "refresh failed" are four
+distinguishable states for a program, not four shades of English prose.
+
+### 6b. Last-known-good, proved against the running system
+
+Not asserted from the code path — driven. `cftc-enforcement-press-releases` held a real snapshot
+(10 records, `...:12a735d7367f2ed93922e29f`). The kill switch was engaged on it as a **controlled
+injected failure** (no publisher response was faked), then a refresh was forced:
+
+```
+kind FAILED
+  snapshot retained: cftc-enforcement-press-releases:12a735d7367f2ed93922e29f
+  rows 10 | status FAILED | freshness CURRENT
+  reason HARD_BLOCK: Suspended by api-key:92206... No request was made to this source.
+```
+
+A tenant search then ran against it and still answered from the snapshot:
+
+```
+CFTC outcome: PARTIAL | snapshot ...:12a735d7367f2ed93922e29f | fresh CURRENT | rows 10
+  detail: Searched last-known-good snapshot ... (10 records). Latest refresh status: FAILED; ...
+findingsState CONFIRMED_MATCHES_FOUND | coverage INCOMPLETE
+  SUPPORTED | ofac-sdn | rec 2674 | snap ofac-sdn:30c2... | parser ofac-legacy-xml-1
+```
+
+So: the failure is recorded, the snapshot keeps answering, the outcome degrades to `PARTIAL` and
+names why, coverage is `INCOMPLETE` rather than clean, and **another source's finding is
+untouched**. The kill switch was then released — by the *other* principal, because release is
+four-eyed too — and the next refresh returned `NOT_MODIFIED`, restoring health.
+
+### 7. Verified — exact commands and counts
+
+```
+pnpm typecheck            clean
+pnpm lint                 clean
+pnpm format:check         FAILS — 61 files, pre-existing (measured on the tree with this
+                          session's changes stashed). Files touched here were formatted.
+pnpm test:unit            62 files, 1013 passed
+pnpm test:invariants       1 file,    31 passed
+pnpm test:evaluation       1 file,    12 passed
+pnpm test:integration     14 files,  230 passed   (was 13/215)
+pnpm test:security         8 files,  181 passed
+pnpm test:e2e:api          3 files,   33 passed   (was 2/10)
+                          ---------------------
+                          total     1500 passed, 0 failed
+```
+
+Postman folder 16, against the running stack: **16 requests, 135 assertions, 0 failures, 2.4s**
+(a second run showed 17/136 — 16.14 re-polls until the search settles, so the request count varies
+by one).
+
+Three suites were **fixed, not weakened**, and each fix is a real defect:
+
+- `tests/e2e/api-lifecycle.test.ts` never set `FIXTURE_SERVER_URL`, so its fixture discovery found
+  nothing. Its sibling's header has named this file as missing it since it was written.
+- Both pre-existing e2e suites asserted `execution === 'SUCCEEDED'`, which encoded an assumption
+  about the *environment* — that the registry holds only fixtures. `expectPipelineRan` now accepts
+  `PARTIAL` **only** when every degraded source is an indexed one with no snapshot, and still
+  refuses `FAILED`. That is strictly stronger than what it replaced.
+- `tenant-onboarding` cleared the SIGNUP attempt bucket but not LOGIN, so a second run inside the
+  window failed with a 429 about nothing under test. Both buckets, loopback only.
+- `local-stack.test.ts` shelled out to the bootstrap inheriting `ADVERSE_SEARCH_MODE`, so an
+  idempotence test began failing with a message about seeding once the stack went live. It now
+  passes `mock` explicitly.
+
+**A live-mode e2e suite must not share the job queue with mock-mode ones.** A live worker handed a
+fixture search refuses every source and returns zero findings, failing the *other* suite.
+`indexed-adverse-search-e2e.test.ts` creates and uses `adverse-search-jobs-indexed-e2e`. This cost
+an hour to find; do not undo it.
+
+### 8. Left half-done / not done
+
+- **`world-bank-debarred` is APPROVED, not ACTIVE.** Needs `WORLD_BANK_SANCTIONS_API_KEY` **and**
+  a robots position — `apigwext.worldbank.org/robots.txt` answers 403 from a WAF, so even with a
+  key the gate refuses it. Both facts are on the version and in the evidence file.
+- **`pnpm format:check` is red** (61 files, pre-existing). Not touched: reformatting 60 unrelated
+  files would bury this session's diff. Worth a dedicated commit.
+- **The discovery matcher is still broken.** Unchanged by instruction. The three discovery sources
+  are suspended so it cannot reach a customer.
+- **FR-10 clustering still has no runtime caller**, and `authorityTier` is still hardcoded on the
+  discovery path. Both are audit findings 2 and 3 from the nineteenth entry, both on the discovery
+  path, both out of scope here.
+- **Budget spend is still not atomic** (audit finding 6). Untouched.
+
+### 9. Next session should
+
+Fix the **discovery identity matcher** — `pipeline/search-pipeline.service.ts:1036` — using
+`indexed-source-search.service.ts:270-330` as the template, which does it correctly. Then
+re-activate `sec-litigation-releases`, `sec-press-releases` and `gdelt-doc-v2` through the
+lifecycle, and only then let folder 15 back into acceptance. Nothing about the indexed path needs
+to change for that.
+
+### 10. Decisions touched
+
+**D6 — CLOSED** (2026-09-21, Faisal Ali, Source admin). Host-scoped robots exception on the
+approved version; scheduled-artifact path only. Recorded in `docs/open-decisions.md`.
+**D19 — new** (2026-09-21, Faisal Ali, Source admin). First contact with nine indexed publishers,
+scoped to robots, terms, endpoint verification, one controlled refresh, and recording the result.
+Recorded on every one of the ten versions as `accessPolicy.firstContactApproval`.
+
+---
+
 ## 2026-09-21 (nineteenth) — Audit only: architecture/product audit of the adverse-search product
 
 **Did.** No production code changed, no docs rewritten, no source activated, nothing contacted.

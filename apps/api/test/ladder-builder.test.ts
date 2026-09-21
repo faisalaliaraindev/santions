@@ -51,6 +51,7 @@ const SEC_VERSION_DOCUMENT = {
         approvedOn: '2026-09-15',
         decision: 'D17',
       },
+      robotsException: null,
     },
   },
 };
@@ -202,6 +203,7 @@ describe('the gate still stands in front of the connector', () => {
         accessPolicy: {
           ...SEC_VERSION_DOCUMENT.content.accessPolicy,
           firstContactApproval: null,
+          robotsException: null,
         },
       },
     };
@@ -221,6 +223,7 @@ describe('the gate still stands in front of the connector', () => {
       cascadeRung: 1,
       authorityTier: 1,
       firstContactApproval: null,
+      robotsException: null,
       endpointUrl: 'https://www.sec.gov/enforcement-litigation/litigation-releases/rss',
       endpointKind: 'FIXED_FEED',
       queryParam: null,

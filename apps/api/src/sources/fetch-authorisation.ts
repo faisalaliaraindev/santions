@@ -55,10 +55,16 @@ export function assertAuthorised(request: FetchRequest): void {
   }
   if (a.robotsPosition === 'EXCEPTION_APPROVED' && a.robotsExceptionApprovedBy === null) {
     // FR-06: the exception process is "approved by a named person — never a global setting".
-    // An unattributed exception is a global setting wearing a record's clothes. Open decision
-    // D6 decides how the name is recorded; until it closes, nothing can supply one, so an
-    // `EXCEPTION_APPROVED` source is refused here rather than fetched on an unnamed exception.
+    // An unattributed exception is a global setting wearing a record's clothes. D6 closed on
+    // 2026-09-21 and decided how the name is recorded — on the approved version, beside the
+    // hosts it covers — so this now refuses a real malformed record rather than every record.
     failures.push('robots exception approved by nobody');
+  }
+  if (a.robotsPosition === 'EXCEPTION_APPROVED' && a.robotsExceptionDeliveryHosts.length === 0) {
+    // D6: an exception naming no host is not a narrow exception with an empty scope, it is an
+    // unbounded one. Refusing here is what makes "fail closed if the redirect leaves the expected
+    // delivery infrastructure" true even if a later change forgets to populate the list.
+    failures.push('robots exception names no delivery host');
   }
   if (failures.length > 0) {
     throw new Error(

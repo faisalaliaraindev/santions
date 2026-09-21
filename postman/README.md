@@ -207,20 +207,41 @@ debarred-firms list, and the DOJ, CFTC, FTC and FCA feeds — and **none of them
 registry**: every one ships with no first-contact approval and no established robots position, so
 nothing in the folder can reach a publisher until somebody walks that source through folder 11.
 
-16.1–16.3 are safe to run any time and contact nobody: the state listing, and the two refusals
-(no `X-Allow-Publisher-Contact: true` header → 400; a tenant key without `source:approve` → 403).
-16.4 halts the folder unless `indexedRefreshConfirm` is exactly `yes-contact-the-publisher`,
-because 16.5 downloads a publisher's entire dataset — tens of megabytes for OFAC SDN. Running 16.5
-against a source with no ACTIVE version is still safe: the gate refuses it before a socket opens,
-and that refusal is the assertion.
+**Folder 16 is the primary acceptance test for the locally indexed adverse-search engine.** It is
+seventeen requests and 136 assertions, and it proves, in order: health and readiness;
+authentication; that all ten indexed sources exist in the registry with real governance and reached
+the state their evidence supports; refresh status, snapshot usability and row counts; a controlled
+publisher refresh **only when explicitly armed**; a real tenant created through public signup; a
+real subject; a LIVE adverse search polled to terminal; findings carrying full local-index
+provenance; coverage semantics that distinguish searched, stale, absent and failed; no fixture
+source ids; and finally that the tenant search itself caused **zero publisher downloads**.
+
+Everything except 16.6 contacts nobody. That is the claim under test: an indexed source is
+downloaded on a schedule and searched locally, so a customer's search costs it no publisher
+request at all. 16.5 halts before 16.6 unless `indexedRefreshConfirm` is exactly
+`yes-contact-the-publisher`, because 16.6 downloads a publisher's entire dataset — tens of
+megabytes for OFAC SDN. Leave it unset and the rest of the folder still runs.
 
 ```bash
-pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json   -e postman/local.ready.postman_environment.json   --folder "16 - Admin: indexed sources (local snapshots)"
+pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json   -e postman/local.postman_environment.json   --folder "16 - Global Indexed Sources E2E"   --env-var "baseUrl=http://127.0.0.1:3000"   --env-var "operatorKey=$OPERATOR_KEY"   --env-var "approverKey=$APPROVER_KEY"   --env-var "apiKey=$ANALYST_KEY"
 ```
 
-Read `snapshotUsable` in 16.1 before anything else. `false` means that source has never produced a
+It needs a populated stack. If 16.4 reports no usable snapshots, the sources have not been
+onboarded yet — see
+[`../docs/sources/indexed-source-onboarding.md`](../docs/sources/indexed-source-onboarding.md),
+which is three commands.
+
+Read `snapshotUsable` in 16.4 before anything else. `false` means that source has never produced a
 snapshot, so a search reports it as a **coverage gap**, not as a source that looked and found
 nothing.
+
+`ixSubjectName` and `ixSubjectDob` choose who 16.12 screens. Point them at someone actually on one
+of the indexed lists and the run demonstrates a real `SUPPORTED` finding with full provenance;
+point them at anyone else and it demonstrates that `NO_MATCHES_FOUND` is reported honestly against
+a snapshot that was really searched. Both are valid runs.
+
+**Folder 15 is live discovery and is a different thing.** Do not add indexed-source assertions to
+it.
 
 ### No single key runs the whole collection, by design
 

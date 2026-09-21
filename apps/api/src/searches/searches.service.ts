@@ -743,6 +743,16 @@ export class SearchesService {
         detail: outcome.detail,
         truncation: outcome.truncation,
         failureClass: outcome.failureClass ?? null,
+        // Present only for an indexed source. `?? null` rather than omitted, so a client can tell
+        // "this source has no snapshot" from "this source is not the kind that has one" by
+        // whether the key is there at all.
+        ...(outcome.snapshotVersion === undefined && outcome.freshness === undefined
+          ? {}
+          : {
+              snapshotVersion: outcome.snapshotVersion ?? null,
+              freshness: outcome.freshness ?? null,
+              snapshotRowCount: outcome.snapshotRowCount ?? null,
+            }),
       })),
       unmeasuredLanguages: [...unmeasured],
       sinceSuspendedSources: Object.entries(suspensionNotes).map(([sourceId, note]) => ({
@@ -950,6 +960,23 @@ function toFindingWire(record: FindingRecord, suspensionNotes: Record<string, st
       cascadeRung: record.document.cascadeRung,
       mode: record.document.mode,
       sourceSuspendedSince: suspensionNotes[record.document.sourceId] ?? null,
+      // Indexed-source provenance. Stored on the finding since the indexed path was built, in
+      // the contract since then, and **dropped here** — this mapper builds `document` field by
+      // field, and these four were never added to it. So every finding from a local snapshot
+      // arrived with `sourceRecordId: undefined`, and a reviewer had no way back to the
+      // publisher's own row. Optional because a discovery finding has no snapshot behind it.
+      ...(record.document.sourceRecordId === undefined
+        ? {}
+        : { sourceRecordId: record.document.sourceRecordId }),
+      ...(record.document.sourceSnapshotVersion === undefined
+        ? {}
+        : { sourceSnapshotVersion: record.document.sourceSnapshotVersion }),
+      ...(record.document.parserVersion === undefined
+        ? {}
+        : { parserVersion: record.document.parserVersion }),
+      ...(record.document.rawEvidenceHash === undefined
+        ? {}
+        : { rawEvidenceHash: record.document.rawEvidenceHash }),
     },
     subjectMentionSpans: record.subjectMentionSpans.map((span) => ({
       start: span.start,

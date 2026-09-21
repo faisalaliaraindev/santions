@@ -24,7 +24,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { EvidenceBand, PreciseDate } from '@erly/adverse-domain';
+import type { EvidenceBand, FindingCategory, PreciseDate } from '@erly/adverse-domain';
 
 export interface FindingRecord {
   readonly findingId: string;
@@ -40,7 +40,7 @@ export interface FindingRecord {
     readonly independenceCount: number;
   };
   readonly rationale: readonly string[];
-  readonly category: string | null;
+  readonly category: FindingCategory | null;
   readonly proceduralStage: string;
   readonly partyRole: string;
   readonly namingAuthority: string | null;
