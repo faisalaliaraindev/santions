@@ -1089,7 +1089,13 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         tx: TaxonomyService,
         sh: SourceHealthService,
         config: AppConfig,
-      ) => new SearchesService(db, e, s, t, a, o, i, st, ag, fs2, tx, sh, config.mode),
+        ladder: LadderBuilder,
+        indexed: IndexedSourceSearchService,
+      ) =>
+        new SearchesService(db, e, s, t, a, o, i, st, ag, fs2, tx, sh, config.mode, async () => [
+          ...(await ladder.sourceIds()),
+          ...(await indexed.sourceIds()),
+        ]),
       inject: [
         MONGO_DB,
         EntitlementsService,
@@ -1104,6 +1110,8 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         TaxonomyService,
         SourceHealthService,
         APP_CONFIG,
+        LadderBuilder,
+        IndexedSourceSearchService,
       ],
     },
     {

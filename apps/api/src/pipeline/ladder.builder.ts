@@ -207,6 +207,11 @@ export class LadderBuilder {
    * entry — `CascadeService` turns that absence into a recorded `NO_SOURCE` gap rather than
    * skipping it silently.
    */
+  /** The ids of every source this process would put on the ladder right now. */
+  async sourceIds(): Promise<readonly string[]> {
+    return [...new Set((await this.build()).map((entry) => entry.sourceId))];
+  }
+
   async build(): Promise<readonly LadderEntry[]> {
     const approved = await this.approvedSources();
     const entries: LadderEntry[] = [];

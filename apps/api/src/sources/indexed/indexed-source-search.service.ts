@@ -15,6 +15,7 @@ import {
 import type { SubjectVersion } from '@erly/adverse-contracts';
 
 import type { FindingRecord } from '../../pipeline/findings.service.js';
+import { excludedBySourceFilter } from '../source-filter.js';
 import type { SourceVersionReader } from '../source-version.service.js';
 import { IndexedSourceRepository } from './indexed-source.repository.js';
 import type { IndexedSourceDate, StoredIndexedSourceRecord } from './indexed-source.types.js';
@@ -32,15 +33,29 @@ export class IndexedSourceSearchService {
     private readonly configuredSourceIds: readonly string[] = [],
   ) {}
 
+  /** The ids of every indexed source this process searches, snapshot or not. */
+  async sourceIds(): Promise<readonly string[]> {
+    const states = await this.repository.listStates(
+      this.configuredSourceIds.length === 0 ? undefined : this.configuredSourceIds,
+    );
+    return states.map((state) => state.sourceId);
+  }
+
   async search(input: {
     readonly tenantId: string;
     readonly searchId: string;
     readonly subject: SubjectVersion;
     readonly now: Date;
+    /** Restrict to these source ids; null/absent searches every configured source. */
+    readonly onlySourceIds?: readonly string[] | null | undefined;
   }): Promise<IndexedSearchResult> {
-    const states = await this.repository.listStates(
+    const all = await this.repository.listStates(
       this.configuredSourceIds.length === 0 ? undefined : this.configuredSourceIds,
     );
+    const filter = input.onlySourceIds ?? null;
+    const states = filter === null ? all : all.filter((state) => filter.includes(state.sourceId));
+    const excludedStates =
+      filter === null ? [] : all.filter((state) => !filter.includes(state.sourceId));
     const usable = states.filter((state) => state.activeSnapshotVersion !== null);
     const nameForms = [input.subject.fullName, ...input.subject.aliases.map((alias) => alias.name)];
     const candidates = await this.repository.search({
@@ -50,7 +65,7 @@ export class IndexedSourceSearchService {
 
     const versions = new Map(
       await Promise.all(
-        states.map(
+        all.map(
           async (state) =>
             [state.sourceId, await this.versions.loadActive(state.sourceId)] as const,
         ),
@@ -64,46 +79,58 @@ export class IndexedSourceSearchService {
       counts.set(finding.document.sourceId, (counts.get(finding.document.sourceId) ?? 0) + 1);
     }
 
+    // Left out by the request's `sources` filter: reported, never dropped (see the helper).
+    const excludedOutcomes = excludedStates.map((state) =>
+      excludedBySourceFilter(
+        state.sourceId,
+        versions.get(state.sourceId)?.sourceName ?? state.sourceId,
+        0,
+      ),
+    );
+
     return {
       findings,
-      sourceOutcomes: states.map((state): SourceCoverageOutcome => {
-        const version = versions.get(state.sourceId) ?? null;
-        const sourceName = version?.sourceName ?? state.sourceId;
-        if (state.activeSnapshotVersion === null) {
+      sourceOutcomes: [
+        ...states.map((state): SourceCoverageOutcome => {
+          const version = versions.get(state.sourceId) ?? null;
+          const sourceName = version?.sourceName ?? state.sourceId;
+          if (state.activeSnapshotVersion === null) {
+            return {
+              sourceId: state.sourceId,
+              sourceName,
+              cascadeRung: 0,
+              outcome: 'FAILED',
+              detail:
+                state.failureReason ??
+                'No usable local snapshot exists. This source contributed no no-match evidence.',
+              queriesAffected: 1,
+              truncation: null,
+              snapshotVersion: null,
+              freshness: state.freshness,
+              snapshotRowCount: null,
+            };
+          }
+          const degraded = state.refreshStatus === 'FAILED' || state.freshness === 'STALE';
           return {
             sourceId: state.sourceId,
             sourceName,
             cascadeRung: 0,
-            outcome: 'FAILED',
-            detail:
-              state.failureReason ??
-              'No usable local snapshot exists. This source contributed no no-match evidence.',
+            outcome: degraded ? 'PARTIAL' : 'COMPLETED',
+            detail: degraded
+              ? `Searched last-known-good snapshot ${state.activeSnapshotVersion} ` +
+                `(${String(state.rowCount)} records). Latest refresh status: ${state.refreshStatus}; ` +
+                `${state.failureReason ?? `freshness ${state.freshness}`}.`
+              : `Searched local snapshot ${state.activeSnapshotVersion} ` +
+                `(${String(state.rowCount)} records) and found ${String(counts.get(state.sourceId) ?? 0)} match(es).`,
             queriesAffected: 1,
             truncation: null,
-            snapshotVersion: null,
+            snapshotVersion: state.activeSnapshotVersion,
             freshness: state.freshness,
-            snapshotRowCount: null,
+            snapshotRowCount: state.rowCount,
           };
-        }
-        const degraded = state.refreshStatus === 'FAILED' || state.freshness === 'STALE';
-        return {
-          sourceId: state.sourceId,
-          sourceName,
-          cascadeRung: 0,
-          outcome: degraded ? 'PARTIAL' : 'COMPLETED',
-          detail: degraded
-            ? `Searched last-known-good snapshot ${state.activeSnapshotVersion} ` +
-              `(${String(state.rowCount)} records). Latest refresh status: ${state.refreshStatus}; ` +
-              `${state.failureReason ?? `freshness ${state.freshness}`}.`
-            : `Searched local snapshot ${state.activeSnapshotVersion} ` +
-              `(${String(state.rowCount)} records) and found ${String(counts.get(state.sourceId) ?? 0)} match(es).`,
-          queriesAffected: 1,
-          truncation: null,
-          snapshotVersion: state.activeSnapshotVersion,
-          freshness: state.freshness,
-          snapshotRowCount: state.rowCount,
-        };
-      }),
+        }),
+        ...excludedOutcomes,
+      ],
     };
   }
 
@@ -279,9 +306,11 @@ function subjectIdentityEvidence(subject: SubjectVersion): SubjectIdentityEviden
   return {
     names: [
       { text: subject.fullName, role: 'PRIMARY' },
-      ...subject.aliases.map(
-        (alias): IdentityName => ({ text: alias.name, role: 'ALIAS', origin: alias.origin }),
-      ),
+      ...subject.aliases.map((alias): IdentityName => ({
+        text: alias.name,
+        role: 'ALIAS',
+        origin: alias.origin,
+      })),
     ],
     datesOfBirth: subject.dateOfBirth === null ? [] : [subject.dateOfBirth],
     countries: subject.countryContext,
@@ -324,9 +353,10 @@ function documentIdentityEvidence(
     : [
         { text: record.primaryName, role: 'PRIMARY' },
         ...record.aliases.map((alias): IdentityName => ({ text: alias, role: 'ALIAS' })),
-        ...record.originalScriptNames.map(
-          (name): IdentityName => ({ text: name, role: 'ORIGINAL_SCRIPT' }),
-        ),
+        ...record.originalScriptNames.map((name): IdentityName => ({
+          text: name,
+          role: 'ORIGINAL_SCRIPT',
+        })),
       ];
 
   // A publication's prose is not parsed for a date of birth or a nationality: a four-digit
@@ -387,11 +417,7 @@ function boundedOccurrences(
       const end = at + target.length;
       const before = at === 0 ? '' : (text[at - 1] ?? '');
       const after = text[end] ?? '';
-      if (
-        !WORD_CHARACTER.test(before) &&
-        !WORD_CHARACTER.test(after) &&
-        !seen.has(at)
-      ) {
+      if (!WORD_CHARACTER.test(before) && !WORD_CHARACTER.test(after) && !seen.has(at)) {
         seen.add(at);
         // The slice, not the needle: what the publisher actually wrote at this offset.
         found.push({ text: text.slice(at, end), role: 'PRIMARY', span: { start: at, end } });

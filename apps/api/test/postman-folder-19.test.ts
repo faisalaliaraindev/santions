@@ -141,9 +141,10 @@ const ARMED = {
 // ---------------------------------------------------------------------------------------------
 
 describe('Folder 19 structure', () => {
-  it('exists, under its exact name, as the last folder', () => {
+  it('exists, under its exact name, directly after folder 18', () => {
     expect(folder).toBeDefined();
-    expect(COLLECTION.item.at(-1)?.name).toBe(FOLDER_NAME);
+    const index = COLLECTION.item.findIndex((item) => item.name === FOLDER_NAME);
+    expect(COLLECTION.item[index - 1]?.name.startsWith('18 - ')).toBe(true);
   });
 
   it('runs the acceptance steps in order', () => {

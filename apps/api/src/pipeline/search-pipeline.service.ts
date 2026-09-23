@@ -103,7 +103,7 @@ import {
   NORMALISER_VERSION,
   type NormalisedDocument,
 } from './normalise-document.js';
-import { CascadeService } from './cascade.service.js';
+import { CascadeService, type LadderEntry } from './cascade.service.js';
 import { LadderBuilder } from './ladder.builder.js';
 import { TaxonomyService } from '../admin/taxonomy.service.js';
 import {
@@ -120,6 +120,7 @@ import type { Lead } from '../sources/lead.js';
 import { hasData } from '../sources/source-adapter.js';
 import { SourceHealthService } from '../sources/source-health.service.js';
 import { IndexedSourceSearchService } from '../sources/indexed/indexed-source-search.service.js';
+import { excludedBySourceFilter } from '../sources/source-filter.js';
 import type { SourceAdapterSet } from '../sources/sources.registry.js';
 import {
   type DiscoveryRequestLog,
@@ -334,6 +335,11 @@ export class SearchPipeline {
     readonly policyVersion: number;
     /** Local-diagnostic engines granted to this run. Empty or absent on every normal run. */
     readonly diagnosticEngines?: readonly string[] | undefined;
+    /**
+     * Source ids this run is restricted to, or null/absent to ask every source (the normal case).
+     * Every source left out is still reported, as `SKIPPED` — see `excludedBySourceFilter`.
+     */
+    readonly sourceFilter?: readonly string[] | null | undefined;
     readonly now: Date;
     /** Extends the lease between stages. Returns false when the work has been taken over. */
     readonly heartbeat: () => Promise<boolean>;
@@ -360,6 +366,7 @@ export class SearchPipeline {
             searchId: input.searchId,
             subject,
             now: input.now,
+            onlySourceIds: input.sourceFilter ?? null,
           });
     sourceOutcomes.push(...indexed.sourceOutcomes);
 
@@ -459,13 +466,41 @@ export class SearchPipeline {
     }
 
     // ---- 3. Discovery ----------------------------------------------------------------------
-    const { leads, rungReached, discoveryOutcomes } = await this.discover(bounded.kept, {
-      ...input,
-      // The loaded, pinned taxonomy rather than the version number the caller passed: a live
-      // connector authorises against the taxonomy object, not against an integer.
-      taxonomy,
-    });
+    const { leads, rungReached, discoveryOutcomes, ladderSourceIds } = await this.discover(
+      bounded.kept,
+      {
+        ...input,
+        // The loaded, pinned taxonomy rather than the version number the caller passed: a live
+        // connector authorises against the taxonomy object, not against an integer.
+        taxonomy,
+      },
+    );
     sourceOutcomes.push(...discoveryOutcomes);
+
+    // A filter naming a source this deployment does not have is reported, not dropped: a typo
+    // in `sources` must read as "that source was not asked", never as "that source found nothing".
+    if (input.sourceFilter != null) {
+      const known = new Set([
+        ...indexed.sourceOutcomes.map((outcome) => outcome.sourceId),
+        ...ladderSourceIds,
+      ]);
+      for (const sourceId of new Set(input.sourceFilter)) {
+        if (!known.has(sourceId)) {
+          sourceOutcomes.push({
+            sourceId,
+            sourceName: sourceId,
+            cascadeRung: 0,
+            outcome: 'SKIPPED',
+            detail:
+              `The request named "${sourceId}" in sources, but no indexed or discovery source ` +
+              `with that id is available in this deployment, so nothing was asked. This is not ` +
+              `evidence that nothing exists.`,
+            queriesAffected: 0,
+            truncation: null,
+          });
+        }
+      }
+    }
 
     if (!(await input.heartbeat())) {
       return this.abandoned(warnings, sourceOutcomes, unmeasured);
@@ -622,11 +657,14 @@ export class SearchPipeline {
       readonly languages: readonly string[];
       readonly taxonomy: TaxonomyVersion;
       readonly diagnosticEngines?: readonly string[] | undefined;
+      readonly sourceFilter?: readonly string[] | null | undefined;
     },
   ): Promise<{
     leads: readonly SourcedLead[];
     rungReached: number | null;
     discoveryOutcomes: readonly SourceCoverageOutcome[];
+    /** Every source on the ladder before any filter, so the caller can name unknown ids. */
+    ladderSourceIds: readonly string[];
   }> {
     // A ladder that cannot be built is a configuration or registry fault, and it must not take
     // the run's other stages down with it: `execute` has already recorded the association graph's
@@ -642,6 +680,7 @@ export class SearchPipeline {
       return {
         leads: [],
         rungReached: null,
+        ladderSourceIds: [],
         discoveryOutcomes: [
           {
             sourceId: 'discovery',
@@ -660,12 +699,42 @@ export class SearchPipeline {
       };
     }
 
+    // A source filter narrows the ladder, and every entry it removes is reported by name. When
+    // it removes all of them, discovery is not attempted at all — no query is spent on a run
+    // that asked only for indexed sources — and the outcomes say exactly that.
+    const ladderSourceIds = [...new Set(ladder.map((entry) => entry.sourceId))];
+    const filter = input.sourceFilter ?? null;
+    const excludedOutcomes: SourceCoverageOutcome[] = [];
+    if (filter !== null) {
+      const excluded = new Map<string, LadderEntry>();
+      for (const entry of ladder) {
+        if (!filter.includes(entry.sourceId) && !excluded.has(entry.sourceId)) {
+          excluded.set(entry.sourceId, entry);
+        }
+      }
+      excludedOutcomes.push(
+        ...[...excluded.values()].map((entry) =>
+          excludedBySourceFilter(entry.sourceId, entry.sourceName, entry.rung),
+        ),
+      );
+      ladder = ladder.filter((entry) => filter.includes(entry.sourceId));
+      if (ladder.length === 0 && ladderSourceIds.length > 0) {
+        return {
+          leads: [],
+          rungReached: null,
+          discoveryOutcomes: excludedOutcomes,
+          ladderSourceIds,
+        };
+      }
+    }
+
     if (ladder.length === 0) {
       // Nothing is approved at any rung. Reported once, plainly, rather than as eight identical
       // gaps — and never as an empty result, because nothing was searched.
       return {
         leads: [],
         rungReached: null,
+        ladderSourceIds,
         discoveryOutcomes: [
           {
             sourceId: 'discovery',
@@ -740,9 +809,12 @@ export class SearchPipeline {
     // and its FR-06 class, counted by `aggregateRun` as a source that answered *and* as a gap.
     //
     // That is what keeps this run's SEC finding and still reports the GDELT rate-limit.
-    const discoveryOutcomes = mergeSourceCoverageOutcomes(cascadeCoverageOutcomes(attempts));
+    const discoveryOutcomes = [
+      ...mergeSourceCoverageOutcomes(cascadeCoverageOutcomes(attempts)),
+      ...excludedOutcomes,
+    ];
 
-    return { leads: [...byUrl.values()], rungReached, discoveryOutcomes };
+    return { leads: [...byUrl.values()], rungReached, discoveryOutcomes, ladderSourceIds };
   }
 
   /**

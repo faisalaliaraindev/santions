@@ -39,7 +39,7 @@
 import { z } from 'zod';
 
 import { findingsPageSchema } from './findings.js';
-import { findingCountsSchema, searchSummarySchema } from './search.js';
+import { findingCountsSchema, searchSourceIdSchema, searchSummarySchema } from './search.js';
 import { aliasSchema, preciseDateSchema, screeningPurposeSchema } from '../subjects/subject.js';
 
 const REGIONAL_PSEUDO_CODES = ['EU', 'EC', 'UK', 'AF', 'AS', 'NA', 'SA', 'OC', 'AN', 'ZZ', 'XX'];
@@ -99,6 +99,14 @@ export const screenRequestSchema = z
 
     /** Historical directorships require an approved historical scope (FR-02). */
     includeFormerDirectorships: z.boolean().default(false),
+
+    /**
+     * Restrict this screening to these source ids. Omit to ask every source — the normal case.
+     *
+     * Exists so one endpoint serves both the full screening and a single-source test. Sources
+     * left out are reported `SKIPPED`, so a filtered result is `INCOMPLETE` and says why.
+     */
+    sources: z.array(searchSourceIdSchema).min(1).max(50).optional(),
 
     /** Recorded so an integrator can correlate. Not a lookup instruction (section 4.1). */
     externalCaseRef: z.string().max(200).optional(),

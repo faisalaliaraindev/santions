@@ -70,6 +70,8 @@ export class ScreenService {
     readonly principal: Principal;
     readonly request: ScreenRequest;
     readonly now: Date;
+    /** Granted local-diagnostic engines, decided by the controller. Null on every normal call. */
+    readonly diagnosticEngines?: readonly string[] | null | undefined;
   }): Promise<ScreenResult> {
     const startedAt = Date.now();
     const tenantId = input.principal.tenantId;
@@ -86,6 +88,7 @@ export class ScreenService {
       principal: input.principal,
       data: this.toCreateSearch(input.request),
       now: input.now,
+      diagnosticEngines: input.diagnosticEngines ?? null,
     });
 
     const stageKey = `search:execute:${created.searchId}`;
@@ -233,6 +236,7 @@ export class ScreenService {
         languages: request.languages,
         includeFormerDirectorships: request.includeFormerDirectorships,
         fromDate: null,
+        ...(request.sources === undefined ? {} : { sources: request.sources }),
       },
       environment: request.environment,
     };

@@ -33,13 +33,10 @@ import { ApiException } from '../common/api-exception.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';
 import { validate } from '../common/zod-validation.pipe.js';
 import type { AppConfig } from '../config/config.js';
-import {
-  decideLocalDiagnostic,
-  LOCAL_DIAGNOSTIC_HEADER,
-} from '../sources/searxng/local-diagnostic.js';
 import { APP_CONFIG } from '../tokens.js';
 import { requireTenant } from '../subjects/subjects.controller.js';
 import { IdempotencyService } from './idempotency.service.js';
+import { diagnosticEnginesFor } from './local-diagnostic-request.js';
 import { SearchesService } from './searches.service.js';
 
 const CREATE_SEARCH_OPERATION = 'POST /v1/searches';
@@ -72,34 +69,12 @@ export class SearchesController {
     const tenantId = requireTenant(principal);
     const now = new Date();
 
-    // The local Google diagnostic — every condition is in `local-diagnostic.ts`. Decided here,
-    // before anything is written, and refused loudly rather than ignored: a developer who asked
-    // for Google and silently got a normal search would read Google's absence as its answer.
-    const diagnostic = decideLocalDiagnostic(this.config.localGoogleDiagnostic, {
+    // The local Google diagnostic. Decided before anything is written; see the helper.
+    const diagnosticEngines = diagnosticEnginesFor(this.config, {
       tenantId,
-      header: req.headers[LOCAL_DIAGNOSTIC_HEADER],
-      // The raw Host header rather than `req.hostname`, which a trusted proxy setting would let
-      // X-Forwarded-Host replace. The socket address is likewise the socket's, never `req.ip`.
-      hostname: hostnameOf(req.headers.host),
-      remoteAddress: req.socket.remoteAddress,
+      req,
+      environment: body.environment,
     });
-    if (diagnostic.kind === 'REFUSED') {
-      throw new ApiException(
-        'FORBIDDEN',
-        'The local discovery diagnostic is not available for this request.',
-        {
-          internalDetail: `tenant=${tenantId} localDiagnosticRefused: ${diagnostic.reason}`,
-        },
-      );
-    }
-    if (diagnostic.kind === 'GRANTED' && body.environment !== 'live') {
-      throw new ApiException(
-        'VALIDATION_FAILED',
-        'The local discovery diagnostic applies only to a live search.',
-        { details: [{ path: 'environment', message: 'must be live' }] },
-      );
-    }
-    const diagnosticEngines = diagnostic.kind === 'GRANTED' ? diagnostic.engines : null;
 
     // Without a key there is no duplicate protection, so the simple path runs unguarded and
     // the client owns the consequences. With a key, exactly one run is committed (T22).
@@ -290,18 +265,6 @@ export function parseIfMatch(header: string | undefined): number {
 }
 
 /** The hostname of a Host header, without its port. Handles a bracketed IPv6 literal. */
-function hostnameOf(host: string | undefined): string | undefined {
-  if (host === undefined) {
-    return undefined;
-  }
-  const trimmed = host.trim();
-  if (trimmed.startsWith('[')) {
-    const end = trimmed.indexOf(']');
-    return end === -1 ? undefined : trimmed.slice(1, end);
-  }
-  return trimmed.split(':')[0];
-}
-
 function accepted(search: SearchSummary): {
   searchId: string;
   statusUrl: string;

@@ -27,6 +27,14 @@ const searchCountryCodeSchema = z
       '(FR-05) — coverage, rights and source permissions are all recorded per country.',
   });
 
+/** A registry source id, e.g. `ofac-sdn` or `searxng-adverse-media`. Shape only; not a lookup. */
+export const searchSourceIdSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9-]{0,99}$/,
+    'Must be a source id: lowercase letters, digits and hyphens.',
+  );
+
 export const createSearchSchema = z
   .object({
     /**
@@ -73,6 +81,15 @@ export const createSearchSchema = z
         includeFormerDirectorships: z.boolean().default(false),
         /** Earliest event date to search for. Null means the source archive horizon. */
         fromDate: z.string().date().nullable().default(null),
+        /**
+         * Restrict the run to these source ids. Omit to ask every source this deployment has.
+         *
+         * For testing one source through the same endpoint as all of them. Every source left
+         * out is still reported, as `SKIPPED` with the filter named, so a filtered run can never
+         * read as a complete one: its coverage is `INCOMPLETE` by construction. An id that
+         * matches no source here is reported the same way rather than dropped.
+         */
+        sources: z.array(searchSourceIdSchema).min(1).max(50).optional(),
       })
       .strict(),
 

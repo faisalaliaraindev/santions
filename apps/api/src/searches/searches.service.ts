@@ -134,8 +134,46 @@ export class SearchesService {
     private readonly taxonomies: TaxonomyService,
     private readonly sourceHealth: SourceHealthService,
     private readonly mode: 'mock' | 'live',
+    /**
+     * Every source id a run in this deployment can ask — the discovery ladder plus the indexed
+     * sources. Checks `requestedScope.sources` at the door. Null skips the check (unit wiring);
+     * the pipeline still reports an unknown id as `SKIPPED` rather than dropping it.
+     */
+    private readonly searchableSourceIds: (() => Promise<readonly string[]>) | null = null,
   ) {
     this.searches = db.collection<SearchRecord>('searchRuns');
+  }
+
+  /**
+   * A `sources` filter must name sources that exist here, checked before anything is written.
+   *
+   * Refused rather than run: a run restricted to a source this deployment cannot ask would ask
+   * no screening source at all, and would then answer from whatever else ran (the association
+   * graph) — a result about nothing, with a state that reads like a result about the subject.
+   */
+  private async assertKnownSources(sources: readonly string[] | undefined): Promise<void> {
+    if (sources === undefined || this.searchableSourceIds === null) {
+      return;
+    }
+    const available = new Set(await this.searchableSourceIds());
+    const unknown = [...new Set(sources)].filter((sourceId) => !available.has(sourceId));
+    if (unknown.length === 0) {
+      return;
+    }
+    throw new ApiException(
+      'VALIDATION_FAILED',
+      'requestedScope.sources names a source this deployment cannot search.',
+      {
+        details: [
+          {
+            path: 'requestedScope.sources',
+            message:
+              `Unknown source id(s): ${unknown.join(', ')}. ` +
+              `Searchable here: ${[...available].sort().join(', ')}.`,
+          },
+        ],
+      },
+    );
   }
 
   async ensureIndexes(): Promise<void> {
@@ -177,6 +215,8 @@ export class SearchesService {
       capability: ADVERSE_MEDIA,
       environment: data.environment,
     });
+
+    await this.assertKnownSources(data.requestedScope.sources);
 
     const subject = {
       ref: data.subjectRef ?? null,

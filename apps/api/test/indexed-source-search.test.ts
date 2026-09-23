@@ -109,7 +109,10 @@ function service(refreshState: IndexedSourceRefreshState, candidate: StoredIndex
       }),
     ),
   };
-  return { search: new IndexedSourceSearchService(repository as never, versions as never), repository };
+  return {
+    search: new IndexedSourceSearchService(repository as never, versions as never),
+    repository,
+  };
 }
 
 describe('local indexed-source tenant search', () => {
@@ -162,5 +165,60 @@ describe('local indexed-source tenant search', () => {
     expect(result.sourceOutcomes[0]?.outcome).toBe('PARTIAL');
     expect(result.sourceOutcomes[0]?.detail).toContain('last-known-good snapshot');
     expect(h.repository.search).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('local indexed-source search restricted by a source filter', () => {
+  function twoSources() {
+    const repository = {
+      listStates: vi.fn(() =>
+        Promise.resolve([
+          state(),
+          state({ sourceId: 'uk-sanctions-list', activeSnapshotVersion: 'uk:snapshot' }),
+        ]),
+      ),
+      search: vi.fn(() => Promise.resolve([record(null)])),
+    };
+    const versions = { loadActive: vi.fn(() => Promise.resolve(null)) };
+    return {
+      search: new IndexedSourceSearchService(repository as never, versions as never),
+      repository,
+    };
+  }
+
+  it('searches only the named source and reports the other as SKIPPED, never absent', async () => {
+    const h = twoSources();
+    const result = await h.search.search({
+      tenantId: 'tenant-1',
+      searchId: 'search-1',
+      subject: subject(null),
+      now: NOW,
+      onlySourceIds: ['ofac-sdn'],
+    });
+
+    expect(h.repository.search).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceIds: ['ofac-sdn'] }),
+    );
+    const bySource = Object.fromEntries(
+      result.sourceOutcomes.map((outcome) => [outcome.sourceId, outcome]),
+    );
+    expect(bySource['ofac-sdn']?.outcome).toBe('COMPLETED');
+    expect(bySource['uk-sanctions-list']?.outcome).toBe('SKIPPED');
+    expect(bySource['uk-sanctions-list']?.detail).toMatch(/not evidence that nothing exists/);
+  });
+
+  it('searches every source when no filter is given', async () => {
+    const h = twoSources();
+    const result = await h.search.search({
+      tenantId: 'tenant-1',
+      searchId: 'search-1',
+      subject: subject(null),
+      now: NOW,
+    });
+
+    expect(h.repository.search).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceIds: ['ofac-sdn', 'uk-sanctions-list'] }),
+    );
+    expect(result.sourceOutcomes.every((outcome) => outcome.outcome === 'COMPLETED')).toBe(true);
   });
 });

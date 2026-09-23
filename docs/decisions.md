@@ -2499,3 +2499,37 @@ Three consequences:
 
 **What it costs.** Ten working connectors that cannot fetch anything until people do governance
 work. That is the cost being bought, not one being paid by accident.
+
+## D-066 — One endpoint for every source, and a source filter that can never read as a full screening
+
+**Date:** 2026-09-23 · **Owner:** Faisal Ali · **Status:** closed
+
+Asked for: "everything running from one endpoint", with testing of all sources at once and of
+each source on its own. `POST /v1/screen` already ran every source in one call through the
+worker's own job handler (D-061). Two things kept it from being *the* endpoint:
+
+1. **It could not reach Google.** The local diagnostic header was read only by
+   `POST /v1/searches`. Both routes now decide it through one helper,
+   `searches/local-diagnostic-request.ts`, so they cannot drift. Nothing about D20 moves.
+2. **It could not test one source.** `requestedScope.sources` (and `sources` on the screen body)
+   now restricts a run to named source ids, on both routes.
+
+The rules, each of which exists to stop a filtered run passing for a complete one:
+
+- **A source left out is reported, never dropped** — `SKIPPED`, naming the filter
+  (`sources/source-filter.ts`). `aggregateRun` already reads a skip as a coverage gap, so a
+  single-source run is `coverage: INCOMPLETE` and `execution: PARTIAL` by construction. No
+  invariant or aggregation rule changed.
+- **An unknown id is refused at the door with `400`**, before anything is written, and the refusal
+  lists the ids that are searchable. The first version reported it as `SKIPPED` inside the run,
+  and a test showed why that is wrong: with no screening source asked, the association graph's
+  own outcome still counts as "something answered", and the run came back `NO_MATCHES_FOUND` —
+  a result about nothing that reads like a result about the subject. The searchable set is the
+  discovery ladder plus the configured indexed sources, which the API and worker share (same
+  image, same database, D-016). The in-run `SKIPPED` stays as the second line, for a source
+  retired between acceptance and execution.
+- **The association graph is not a source you filter.** It runs on every run and is not a
+  screening source.
+
+**What it costs.** One extra registry read per request that names `sources`; none for the normal
+unfiltered request.

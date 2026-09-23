@@ -70,6 +70,7 @@ let searches: SearchesService;
 let handler: SearchJobHandler;
 let findings: FindingsService;
 let sourceHealth: SourceHealthService;
+let ladder: LadderBuilder;
 
 const TENANT = `t-pipe-${randomUUID()}`;
 
@@ -150,7 +151,7 @@ function contextFor(searchId: string): JobContext {
 }
 
 /** Create a search for the fixture subject and run it to completion. */
-async function runSearchFor(fullName: string): Promise<string> {
+async function runSearchFor(fullName: string, sources?: readonly string[]): Promise<string> {
   const created = await searches.create({
     principal: PRINCIPAL,
     data: {
@@ -170,6 +171,7 @@ async function runSearchFor(fullName: string): Promise<string> {
         languages: ['es'],
         includeFormerDirectorships: false,
         fromDate: null,
+        ...(sources === undefined ? {} : { sources: [...sources] }),
       },
     },
     now: new Date(),
@@ -213,6 +215,9 @@ beforeAll(async () => {
     'mock',
   );
 
+  // Built before the searches service, which checks `requestedScope.sources` against it.
+  ladder = new LadderBuilder(db, adapters, null);
+
   searches = new SearchesService(
     db,
     new EntitlementsService(db),
@@ -227,6 +232,7 @@ beforeAll(async () => {
     taxonomies,
     sourceHealth,
     'mock',
+    async () => ladder.sourceIds(),
   );
 
   const pipeline = new SearchPipeline(
@@ -256,7 +262,7 @@ beforeAll(async () => {
     // The FR-05 ladder, built from the same seeded registry the fetch gate reads. So this suite
     // walks the rungs the fixtures are actually approved at — and reports the rungs nothing is
     // approved for as unsearched, which is what the bootstrap really leaves behind.
-    new LadderBuilder(db, adapters, null),
+    ladder,
     new CascadeService(sourceHealth),
   );
 
@@ -405,6 +411,51 @@ describe('an accepted search becomes a result', () => {
 
     // A redelivery that got past the fence must not make a reviewer see the same article twice.
     expect(second.findings.length).toBe(first.findings.length);
+  }, 60_000);
+});
+
+describe('one endpoint, one source at a time (requestedScope.sources)', () => {
+  const FILTER_DETAIL = /restricted the run to named sources/;
+
+  it('asks only the named source and reports every other one as SKIPPED, by name', async () => {
+    const full = await searches.findingsFor({
+      tenantId: TENANT,
+      searchId: await runSearchFor(SHARED_NAME),
+    });
+    // Ladder sources only. The association graph's register also reports an outcome, but it is
+    // not a screening source and is not something `sources` selects.
+    const onLadder = new Set(await ladder.sourceIds());
+    const discovery = full.sourceOutcomes.filter(
+      (o) => onLadder.has(o.sourceId) && (o.outcome === 'COMPLETED' || o.outcome === 'PARTIAL'),
+    );
+    expect(discovery.length).toBeGreaterThan(0);
+    const chosen = discovery[0]!.sourceId;
+
+    const searchId = await runSearchFor(SHARED_NAME, [chosen]);
+    const run = await searches.findById(TENANT, searchId);
+    const page = await searches.findingsFor({ tenantId: TENANT, searchId });
+    const bySource = new Map(page.sourceOutcomes.map((o) => [o.sourceId, o]));
+
+    expect(bySource.get(chosen)?.detail ?? '').not.toMatch(FILTER_DETAIL);
+    // Every other discovery source the full run asked is still on the result — as a skip.
+    for (const other of discovery.filter((o) => o.sourceId !== chosen)) {
+      expect(bySource.get(other.sourceId)?.outcome).toBe('SKIPPED');
+      expect(bySource.get(other.sourceId)?.detail).toMatch(FILTER_DETAIL);
+    }
+    // A single-source run can never read as a full screening.
+    if (discovery.length > 1) {
+      expect(run.coverage).toBe('INCOMPLETE');
+      expect(run.execution).not.toBe('SUCCEEDED');
+    }
+  }, 120_000);
+
+  it('refuses an id that matches no source, before anything is written', async () => {
+    const before = await db.collection('searchRuns').countDocuments({ tenantId: TENANT });
+    await expect(runSearchFor(SHARED_NAME, ['no-such-source'])).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+    });
+    // Not run and reported as nothing found: not run at all.
+    expect(await db.collection('searchRuns').countDocuments({ tenantId: TENANT })).toBe(before);
   }, 60_000);
 });
 

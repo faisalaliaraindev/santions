@@ -2059,7 +2059,13 @@
               },
               "categories": { "type": "array", "items": { "type": "string" }, "maxItems": 30 },
               "includeFormerDirectorships": { "type": "boolean", "default": false },
-              "fromDate": { "type": "string", "format": "date", "nullable": true, "default": null }
+              "fromDate": { "type": "string", "format": "date", "nullable": true, "default": null },
+              "sources": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,99}$" },
+                "minItems": 1,
+                "maxItems": 50
+              }
             },
             "required": ["jurisdictions", "languages"],
             "additionalProperties": false
@@ -2210,6 +2216,14 @@
             "default": ["en"]
           },
           "includeFormerDirectorships": { "type": "boolean", "default": false },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateSearchRequest/properties/requestedScope/properties/sources/items"
+            },
+            "minItems": 1,
+            "maxItems": 50
+          },
           "externalCaseRef": { "type": "string", "maxLength": 200 },
           "environment": { "type": "string", "enum": ["sandbox", "live"], "default": "sandbox" }
         },

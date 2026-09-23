@@ -1,4 +1,5 @@
-import { Body, Controller, Inject, Post } from '@nestjs/common';
+import { Body, Controller, Inject, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
 
 import {
   screenRequestSchema,
@@ -10,11 +11,18 @@ import type { Principal } from '@erly/adverse-domain';
 import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';
 import { validate } from '../common/zod-validation.pipe.js';
+import type { AppConfig } from '../config/config.js';
+import { requireTenant } from '../subjects/subjects.controller.js';
+import { APP_CONFIG } from '../tokens.js';
+import { diagnosticEnginesFor } from './local-diagnostic-request.js';
 import { ScreenService } from './screen.service.js';
 
 @Controller({ path: 'screen', version: '1' })
 export class ScreenController {
-  constructor(@Inject(ScreenService) private readonly screens: ScreenService) {}
+  constructor(
+    @Inject(ScreenService) private readonly screens: ScreenService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+  ) {}
 
   @Post()
   @RequirePermission('search:create')
@@ -22,7 +30,15 @@ export class ScreenController {
   async screen(
     @CurrentPrincipal() principal: Principal,
     @Body(validate(screenRequestSchema)) body: ScreenRequest,
+    @Req() req: Request,
   ): Promise<ScreenResult> {
-    return this.screens.screen({ principal, request: body, now: new Date() });
+    // The same local Google diagnostic `POST /v1/searches` honours, decided the same way, so
+    // this one endpoint can run every source — Google included, locally — and not most of them.
+    const diagnosticEngines = diagnosticEnginesFor(this.config, {
+      tenantId: requireTenant(principal),
+      req,
+      environment: body.environment,
+    });
+    return this.screens.screen({ principal, request: body, now: new Date(), diagnosticEngines });
   }
 }

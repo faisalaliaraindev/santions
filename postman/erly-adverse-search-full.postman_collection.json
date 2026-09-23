@@ -9231,6 +9231,388 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "20 - One Endpoint: POST /v1/screen (all sources, then each source)",
+      "description": "Everything through ONE endpoint: POST /v1/screen takes a name and returns the finished result in the same response. No subject call, no polling, no worker needed (it runs the same job handler inside the API process).\n\n20.0 asks the API which sources it can search. 20.1 screens against ALL of them in one call. 20.2 then screens once per source, looping by itself in the Collection Runner, and checks that each run asked only that source. 20.3 screens one source you name. 20.4 adds Google through the local diagnostic (optional, needs zquenceApiKey).\n\nArm it: screenConfirm = yes-run-one-endpoint. With screenEnvironment = live, 20.1 and 20.2 contact the live sources (SEC, SearXNG engines, Wikinews). Use screenEnvironment = sandbox for fixtures only.\n\nFull walkthrough: docs/testing/live-test-sequence.md.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Folder 20 guard. Runs before every request in this folder.",
+              "const baseUrl = String(pm.environment.get('baseUrl') || pm.collectionVariables.get('baseUrl') || '');",
+              "const problems = [];",
+              "if (!/^https?:\\/\\/(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?\\/?$/i.test(baseUrl)) { problems.push('baseUrl must be a local API, it is: ' + baseUrl); }",
+              "if (pm.environment.get('screenConfirm') !== 'yes-run-one-endpoint') { problems.push('set screenConfirm = yes-run-one-endpoint'); }",
+              "if (!pm.environment.get('screenName')) { pm.environment.set('screenName', 'Bernard Madoff'); }",
+              "if (!pm.environment.get('screenEnvironment')) { pm.environment.set('screenEnvironment', 'live'); }",
+              "if (problems.length > 0) {",
+              "  postman.setNextRequest(null);",
+              "  throw new Error('Folder 20 is not armed - nothing was sent. ' + problems.join('; '));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "20.0 Which sources can this deployment search?",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('an unknown id is refused with 400, before anything runs', () => pm.expect(pm.response.code).to.eql(400));",
+                  "const text = pm.response.text();",
+                  "const m = /Searchable here: ([^.\"]*)\\./.exec(text);",
+                  "pm.test('the refusal lists the searchable source ids', () => pm.expect(m, text).to.not.eql(null));",
+                  "const ids = m ? m[1].split(', ').filter((s) => s.length > 0) : [];",
+                  "console.log('Searchable sources (' + ids.length + '): ' + ids.join(', '));",
+                  "pm.environment.set('screenSourceIds', JSON.stringify(ids));",
+                  "pm.environment.unset('screenQueue');",
+                  "pm.test('at least one source is searchable', () => pm.expect(ids.length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/screen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "screen"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{screenName}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"jurisdictions\": [\"US\"],\n  \"languages\": [\"en\"],\n  \"environment\": \"{{screenEnvironment}}\",\n  \"sources\": [\"list-searchable-sources\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "20.1 ALL sources, one call",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('screened in one call', () => pm.expect(pm.response.code, pm.response.text()).to.eql(201));",
+                  "if (pm.response.code !== 201) { return; }",
+                  "const b = pm.response.json();",
+                  "const outcomes = (b.result && b.result.sourceOutcomes) || [];",
+                  "console.log('execution=' + b.execution + ' findings=' + b.findingsState + ' coverage=' + b.coverage + ' elapsedMs=' + b.elapsedMs + ' searchId=' + b.searchId);",
+                  "for (const o of outcomes) { console.log('  ' + o.sourceId + ' rung=' + o.cascadeRung + ' ' + o.outcome + (o.failureClass ? '/' + o.failureClass : '') + ' - ' + (o.detail || '')); }",
+                  "const engines = (b.result && b.result.searxngDiscovery && b.result.searxngDiscovery.perEngine) || [];",
+                  "for (const e of engines) { console.log('  engine ' + e.engine + ' ' + e.outcome + ' results=' + e.resultsReturned + ' ' + e.durationMs + 'ms'); }",
+                  "const ids = JSON.parse(pm.environment.get('screenSourceIds') || '[]');",
+                  "pm.test('the run did not fail outright', () => pm.expect(b.execution).to.not.eql('FAILED'));",
+                  "pm.test('every searchable source reports an outcome', function () {",
+                  "  const seen = new Set(outcomes.map((o) => o.sourceId));",
+                  "  pm.expect(ids.filter((id) => !seen.has(id)), 'sources with no outcome').to.eql([]);",
+                  "});",
+                  "pm.test('no source was left out by a filter', function () {",
+                  "  pm.expect(outcomes.filter((o) => /restricted the run to named sources/.test(o.detail || '')).map((o) => o.sourceId)).to.eql([]);",
+                  "});",
+                  "pm.test('the three result dimensions are present', function () {",
+                  "  pm.expect(b.execution).to.be.a('string'); pm.expect(b.findingsState).to.be.a('string'); pm.expect(b.coverage).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/screen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "screen"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{screenName}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"jurisdictions\": [\"US\"],\n  \"languages\": [\"en\"],\n  \"environment\": \"{{screenEnvironment}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "20.2 EACH source, one at a time (loops itself)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let queue = JSON.parse(pm.environment.get('screenQueue') || 'null');",
+                  "if (!Array.isArray(queue) || queue.length === 0) { queue = JSON.parse(pm.environment.get('screenSourceIds') || '[]'); }",
+                  "if (queue.length === 0) { throw new Error('Run 20.0 first: no source list.'); }",
+                  "pm.environment.set('screenQueue', JSON.stringify(queue));",
+                  "pm.environment.set('screenCurrentSource', queue[0]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const current = pm.environment.get('screenCurrentSource');",
+                  "const queue = JSON.parse(pm.environment.get('screenQueue') || '[]').slice(1);",
+                  "if (queue.length > 0) { pm.environment.set('screenQueue', JSON.stringify(queue)); postman.setNextRequest(pm.info.requestName); }",
+                  "else { pm.environment.unset('screenQueue'); }",
+                  "console.log('=== ' + current + ' ===');",
+                  "pm.test(current + ': screened in one call', () => pm.expect(pm.response.code, pm.response.text()).to.eql(201));",
+                  "if (pm.response.code !== 201) { return; }",
+                  "const b = pm.response.json();",
+                  "const outcomes = (b.result && b.result.sourceOutcomes) || [];",
+                  "console.log('execution=' + b.execution + ' findings=' + b.findingsState + ' coverage=' + b.coverage + ' elapsedMs=' + b.elapsedMs + ' searchId=' + b.searchId);",
+                  "for (const o of outcomes) { console.log('  ' + o.sourceId + ' rung=' + o.cascadeRung + ' ' + o.outcome + (o.failureClass ? '/' + o.failureClass : '') + ' - ' + (o.detail || '')); }",
+                  "const engines = (b.result && b.result.searxngDiscovery && b.result.searxngDiscovery.perEngine) || [];",
+                  "for (const e of engines) { console.log('  engine ' + e.engine + ' ' + e.outcome + ' results=' + e.resultsReturned + ' ' + e.durationMs + 'ms'); }",
+                  "const mine = outcomes.find((o) => o.sourceId === current);",
+                  "pm.test(current + ': reports an outcome', () => pm.expect(mine, 'no outcome for ' + current).to.be.an('object'));",
+                  "pm.test(current + ': was asked (not skipped by the filter)', () => pm.expect((mine && mine.detail) || '').to.not.match(new RegExp('restricted the run to named sources')));",
+                  "const ids = JSON.parse(pm.environment.get('screenSourceIds') || '[]');",
+                  "pm.test(current + ': every other source is SKIPPED, by name', function () {",
+                  "  for (const id of ids.filter((x) => x !== current)) {",
+                  "    const o = outcomes.find((x) => x.sourceId === id);",
+                  "    pm.expect(o && o.outcome, id).to.eql('SKIPPED');",
+                  "  }",
+                  "});",
+                  "pm.test(current + ': one source is never a full screening (coverage INCOMPLETE)', () => pm.expect(b.coverage).to.eql('INCOMPLETE'));",
+                  "pm.test(current + ': answered (COMPLETED or PARTIAL)', () => pm.expect(['COMPLETED', 'PARTIAL'], (mine && mine.detail) || '').to.include(mine && mine.outcome));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/screen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "screen"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{screenName}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"jurisdictions\": [\"US\"],\n  \"languages\": [\"en\"],\n  \"environment\": \"{{screenEnvironment}}\",\n  \"sources\": [\"{{screenCurrentSource}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "20.3 ONE source you name (set screenSource)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('screenSource')) { pm.environment.set('screenSource', 'ofac-sdn'); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const current = pm.environment.get('screenSource');",
+                  "pm.test('screened in one call', () => pm.expect(pm.response.code, pm.response.text()).to.eql(201));",
+                  "if (pm.response.code !== 201) { return; }",
+                  "const b = pm.response.json();",
+                  "const outcomes = (b.result && b.result.sourceOutcomes) || [];",
+                  "console.log('execution=' + b.execution + ' findings=' + b.findingsState + ' coverage=' + b.coverage + ' elapsedMs=' + b.elapsedMs + ' searchId=' + b.searchId);",
+                  "for (const o of outcomes) { console.log('  ' + o.sourceId + ' rung=' + o.cascadeRung + ' ' + o.outcome + (o.failureClass ? '/' + o.failureClass : '') + ' - ' + (o.detail || '')); }",
+                  "const engines = (b.result && b.result.searxngDiscovery && b.result.searxngDiscovery.perEngine) || [];",
+                  "for (const e of engines) { console.log('  engine ' + e.engine + ' ' + e.outcome + ' results=' + e.resultsReturned + ' ' + e.durationMs + 'ms'); }",
+                  "const mine = outcomes.find((o) => o.sourceId === current);",
+                  "pm.test(current + ' reports an outcome', () => pm.expect(mine).to.be.an('object'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/screen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "screen"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{screenName}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"jurisdictions\": [\"US\"],\n  \"languages\": [\"en\"],\n  \"environment\": \"{{screenEnvironment}}\",\n  \"sources\": [\"{{screenSource}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "20.4 ALL sources + Google (local diagnostic, optional)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const key = String(pm.environment.get('zquenceApiKey') || '').trim();",
+                  "if (key === '' || /CHANGE ME|<|>/i.test(key)) {",
+                  "  console.log('20.4 skipped: set zquenceApiKey (and start the API with the Google variables) to run it.');",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('screened in one call', () => pm.expect(pm.response.code, pm.response.code === 403 ? 'diagnostic refused: start the API with ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true and GOOGLE_DIAGNOSTIC_TENANT_ID = your tenant' : pm.response.text()).to.eql(201));",
+                  "if (pm.response.code !== 201) { return; }",
+                  "const b = pm.response.json();",
+                  "const outcomes = (b.result && b.result.sourceOutcomes) || [];",
+                  "console.log('execution=' + b.execution + ' findings=' + b.findingsState + ' coverage=' + b.coverage + ' elapsedMs=' + b.elapsedMs + ' searchId=' + b.searchId);",
+                  "for (const o of outcomes) { console.log('  ' + o.sourceId + ' rung=' + o.cascadeRung + ' ' + o.outcome + (o.failureClass ? '/' + o.failureClass : '') + ' - ' + (o.detail || '')); }",
+                  "const engines = (b.result && b.result.searxngDiscovery && b.result.searxngDiscovery.perEngine) || [];",
+                  "for (const e of engines) { console.log('  engine ' + e.engine + ' ' + e.outcome + ' results=' + e.resultsReturned + ' ' + e.durationMs + 'ms'); }",
+                  "const g = engines.find((e) => e.engine === 'GOOGLE_NEWS');",
+                  "pm.test('Google was attempted for this request only', function () {",
+                  "  pm.expect(g, 'no GOOGLE_NEWS row').to.be.an('object');",
+                  "  pm.expect(g.attempted).to.be.true;",
+                  "  pm.expect(g.diagnosticOverride).to.be.true;",
+                  "  pm.expect(g.governanceStatus).to.eql('REFUSED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Local-Discovery-Diagnostic",
+                "value": "GOOGLE_NEWS",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/screen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "screen"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{screenName}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\",\n  \"jurisdictions\": [\"US\"],\n  \"languages\": [\"en\"],\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ]
 }

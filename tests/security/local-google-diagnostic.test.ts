@@ -249,3 +249,85 @@ describe('X-Local-Discovery-Diagnostic at the HTTP door', () => {
     expect(await settingsCount()).toBe(settingsBefore);
   });
 });
+
+/**
+ * `POST /v1/screen` is the one endpoint that runs everything — every source in one call, or one
+ * source at a time with `sources`. It must decide the diagnostic header exactly as
+ * `POST /v1/searches` does, and it must refuse a source filter that names nothing searchable.
+ */
+describe('POST /v1/screen — the single endpoint', () => {
+  const screenBody = (extra: Record<string, unknown> = {}) => ({
+    fullName: 'Diagnostic Subject',
+    purpose: 'CUSTOMER_ONBOARDING',
+    environment: 'sandbox',
+    ...extra,
+  });
+
+  it('refuses the diagnostic header for the wrong tenant, and writes nothing', async () => {
+    const bearer = await token(OTHER_TENANT);
+    const runsBefore = await runCount(OTHER_TENANT);
+    const response = await request(flagged.getHttpServer())
+      .post('/v1/screen')
+      .set('Authorization', `Bearer ${bearer}`)
+      .set('X-Local-Discovery-Diagnostic', 'GOOGLE_NEWS')
+      .send(screenBody());
+    expect(response.status).toBe(403);
+    expect(await runCount(OTHER_TENANT)).toBe(runsBefore);
+  });
+
+  it('refuses the diagnostic header on a non-live screening', async () => {
+    const bearer = await token(DIAGNOSTIC_TENANT);
+    const response = await request(flagged.getHttpServer())
+      .post('/v1/screen')
+      .set('Authorization', `Bearer ${bearer}`)
+      .set('X-Local-Discovery-Diagnostic', 'GOOGLE_NEWS')
+      .send(screenBody());
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('refuses an unknown source id, names what is searchable, and writes nothing', async () => {
+    const bearer = await token(DIAGNOSTIC_TENANT);
+    const runsBefore = await runCount(DIAGNOSTIC_TENANT);
+    const response = await request(unflagged.getHttpServer())
+      .post('/v1/screen')
+      .set('Authorization', `Bearer ${bearer}`)
+      .send(screenBody({ sources: ['no-such-source'] }));
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('VALIDATION_FAILED');
+    expect(JSON.stringify(response.body)).toMatch(/Searchable here: /);
+    expect(await runCount(DIAGNOSTIC_TENANT)).toBe(runsBefore);
+  });
+
+  it('runs one source through the same endpoint and reports the rest as SKIPPED', async () => {
+    const bearer = await token(DIAGNOSTIC_TENANT);
+    // The refusal names the searchable ids, which is how a tester finds them.
+    const probe = await request(unflagged.getHttpServer())
+      .post('/v1/screen')
+      .set('Authorization', `Bearer ${bearer}`)
+      .send(screenBody({ sources: ['no-such-source'] }));
+    const listed = /Searchable here: ([^.]*)\./.exec(JSON.stringify(probe.body))?.[1] ?? '';
+    const searchable = listed.split(', ').filter((id) => id.length > 0);
+    expect(searchable.length).toBeGreaterThan(1);
+    const chosen = searchable[0]!;
+
+    const response = await request(unflagged.getHttpServer())
+      .post('/v1/screen')
+      .set('Authorization', `Bearer ${bearer}`)
+      .send(screenBody({ sources: [chosen] }));
+    expect(response.status).toBe(201);
+
+    const outcomes = response.body.result.sourceOutcomes as {
+      sourceId: string;
+      outcome: string;
+      detail: string | null;
+    }[];
+    const bySource = new Map(outcomes.map((o) => [o.sourceId, o]));
+    expect(bySource.get(chosen)?.detail ?? '').not.toMatch(/restricted the run to named sources/);
+    for (const other of searchable.slice(1)) {
+      expect(bySource.get(other)?.outcome).toBe('SKIPPED');
+    }
+    // One source is never a full screening.
+    expect(response.body.coverage).toBe('INCOMPLETE');
+  }, 120_000);
+});

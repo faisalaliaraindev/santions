@@ -46,6 +46,8 @@ interface SearchRunShape {
   readonly requestedScope: {
     readonly jurisdictions: readonly string[];
     readonly languages: readonly string[];
+    /** Present only on a run restricted to named sources. */
+    readonly sources?: readonly string[] | undefined;
   };
   readonly pinnedVersions: {
     readonly taxonomyVersion: number;
@@ -118,6 +120,7 @@ export class SearchJobHandler implements JobHandler {
       // Read from the persisted run, like the scope. The connector re-checks this process's
       // environment before it honours any of it.
       diagnosticEngines: run.localDiscoveryDiagnostic?.engines ?? [],
+      sourceFilter: run.requestedScope.sources ?? null,
       now,
       heartbeat: context.heartbeat,
     });

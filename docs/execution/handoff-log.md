@@ -27,6 +27,66 @@ Say what you did about it.
 
 ---
 
+## 2026-09-23 (thirtieth) — one endpoint for everything: `POST /v1/screen`, all sources or each source
+
+**Asked:** "everything running from one endpoint; stop everything; update the document with
+one-point testing and each-source testing."
+
+**Did:**
+
+- `POST /v1/screen` is now the single endpoint. It already ran every source in one call; it now
+  also honours `X-Local-Discovery-Diagnostic` (Google, local only), through a helper shared with
+  `POST /v1/searches` — `apps/api/src/searches/local-diagnostic-request.ts`. The searches
+  controller lost its copy.
+- New optional **`sources`** (screen body) / **`requestedScope.sources`** (searches): restrict a run
+  to named source ids. Contract in `packages/contracts/src/searches/{search,screen}.ts`; OpenAPI
+  regenerated. Plumbed run → `search-job.handler.ts` → `SearchPipeline.execute({ sourceFilter })`
+  → ladder filter in `discover()` and `onlySourceIds` in `IndexedSourceSearchService.search`.
+- Every source left out is reported `SKIPPED` with the filter named (`sources/source-filter.ts`),
+  so a single-source run is `INCOMPLETE` by construction. **Unknown ids → 400 at the door**, listing
+  the searchable ids (`SearchesService.assertKnownSources`, fed by `LadderBuilder.sourceIds()` +
+  `IndexedSourceSearchService.sourceIds()` in `app.module.ts`). Recorded as **D-066**.
+- Postman **Folder 20 — One Endpoint** (5 requests): 20.0 lists searchable sources, 20.1 all sources
+  in one call, 20.2 each source (loops itself), 20.3 one named source, 20.4 all + Google (skipped
+  unless `zquenceApiKey` is set). Armed by `screenConfirm = yes-run-one-endpoint`. Variables added
+  to `local.postman_environment.json` (and the git-ignored `.ready` one). Collection diff purely
+  additive.
+- `docs/testing/live-test-sequence.md` rewritten around the one endpoint: start, one-endpoint
+  testing, a per-source table with what a pass looks like, the older folders as optional, stop.
+
+**Verified:** typecheck clean, lint clean; unit+invariants+evaluation **1255 passed (76 files)**;
+integration **240/240**; security **190/190** (9 files); e2e-api **34/34**. New tests: 2 unit in
+`indexed-source-search.test.ts`, 2 integration in `pipeline.test.ts`, 4 HTTP in
+`tests/security/local-google-diagnostic.test.ts` (`/v1/screen` block), 7 in
+`apps/api/test/postman-folder-20.test.ts`. Folder 20 run with newman against a **mock-mode API only,
+no worker**, `screenEnvironment=sandbox`: **15 requests, 82 assertions, 1 failure**. The failure is
+correct: `world-bank-debarred` has no snapshot (known blocker), so its single-source test is red.
+
+**Not run:** Folder 20 in LIVE mode, and 20.4 (Google). Nothing live was contacted this session.
+The user runs it per the doc.
+
+**Found:**
+
+1. The first version reported an unknown source id as `SKIPPED` in the run. The integration test
+   showed that run returning `NO_MATCHES_FOUND`, because the association-graph outcome counts as
+   "something answered". Fixed by refusing at the door (D-066). **This is still possible at
+   run time** if a named source is retired between acceptance and execution. It is narrow and
+   reported, but not closed.
+2. `tests/integration/search-index.test.ts` (Meilisearch "not indexed until searchable") failed once
+   in the full suite and passed 17/17 twice alone and 240/240 on the re-run. Timing.
+3. In the mock run, `ofac-sdn` reported `PARTIAL` — "Latest refresh status: FAILED; HARD_BLOCK:
+   circuit breaker half-open". It searched the last good snapshot, which is correct behaviour, but
+   the refresh breaker on the local DB is half-open. Not investigated.
+4. Folder 19's test asserted it was the **last** folder; changed to "directly after 18".
+
+**Stopped:** no `dev.mjs`/`main.js`/`worker-main.js` node process; `pnpm local:down` run — no
+`erly-adverse-search-*` container. Volumes kept. `postgresDB` (not this project) left running.
+
+**Next session should:** if the user reports a Folder 20 LIVE result, start from the per-source
+table in `docs/testing/live-test-sequence.md` Part 3. Otherwise nothing is queued.
+
+**Decisions touched:** D-066 added. D20 unchanged (Google still REFUSED, default off).
+
 ## 2026-09-23 (twenty-ninth) — Zquence tenant Google acceptance flow (local diagnostic only)
 
 **Did:** a request-scoped, local-only override that lets the real local Zquence LIVE tenant run

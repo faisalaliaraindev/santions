@@ -79,6 +79,15 @@ of previous sessions. It is deliberately short.
 >   leaves the shared SEC budget unprotected, which is why the fixed-feed fix below is now a
 >   prerequisite for handing out live keys rather than an optimisation.
 
+### ONE ENDPOINT FOR EVERYTHING — 2026-09-23
+
+**`POST /v1/screen` runs every source in one call, or one source with `"sources": ["<id>"]`.**
+Result in the same response, no polling, no worker needed (it runs inside the API). Sources left
+out are `SKIPPED`, so a single-source run is always `INCOMPLETE`; an unknown id is a `400` listing
+the searchable ids (D-066). Google works through it with the local diagnostic header.
+Test it with Postman **Folder 20**; the walkthrough is
+[`../testing/live-test-sequence.md`](../testing/live-test-sequence.md).
+
 ### THREE LIVE SOURCES ACTIVE — reached 2026-09-18
 
 Two publishers, three sources, all `ACTIVE` in the registry and all reachable:
