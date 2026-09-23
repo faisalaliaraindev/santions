@@ -1,0 +1,111 @@
+{
+  "sourceId": "google-news-rss-en-us",
+  "gatheredAt": "2026-09-22",
+  "method": "DESK_RESEARCH_ONLY",
+  "endpointContacted": false,
+  "methodNote": [
+    "Every other file in this directory was produced by `pnpm indexed:first-contact`, which makes four",
+    "real requests per source and records the wire response. THIS FILE WAS NOT. No request was made to",
+    "news.google.com by this project, at any time, and none should be.",
+    "",
+    "The reason is the finding itself. Act one of the onboarding procedure exists to gather what the",
+    "person taking the first-contact approval needs in order to take it. Here the publisher's own",
+    "published terms answer the question before the endpoint is reached, and they answer it with a",
+    "prohibition on automated access. Loading the feed to 'check' would be performing the exact act the",
+    "terms forbid, and would do so in order to decide whether the terms forbid it. So the evidence stops",
+    "at the terms, deliberately, and this file records no httpStatus, no wireBytes and no body hash for",
+    "the endpoint, because none was observed.",
+    "",
+    "A future reader must not treat the absence of those fields as an incomplete evidence run to be",
+    "finished. It is the finding."
+  ],
+  "steps": {
+    "terms": {
+      "url": "https://www.google.com/intl/en_us/terms_google_news.html",
+      "documentTitle": "Google News Terms of Use",
+      "lastUpdatedOnDocument": "2006-01-17",
+      "retrievedVia": "desk research, 2026-09-22",
+      "verdict": "PROHIBITS_THIS_USE",
+      "quotedClauses": [
+        {
+          "topic": "personal, non-commercial use only",
+          "quote": "You may only display the content of the Service for your own personal use (i.e., non-commercial use)"
+        },
+        {
+          "topic": "commercial exploitation",
+          "quote": "you may not use the Service to sell a product or service; use the Service to increase traffic to your Web site for commercial reasons, such as advertising sales"
+        },
+        {
+          "topic": "automated access",
+          "quote": "use any robot, spider, other device or manual process to monitor or copy any content from the Service"
+        },
+        {
+          "topic": "redistribution and reformatting",
+          "quote": "may not otherwise copy, reproduce, alter, modify, create derivative works, or publicly display any content"
+        },
+        {
+          "topic": "redistribution and reformatting",
+          "quote": "take the results from the Service and reformat and display them"
+        }
+      ]
+    },
+    "endpointShape": {
+      "url": "https://news.google.com/rss/search",
+      "requested": false,
+      "verdict": "CANNOT_SATISFY_PROVENANCE_REQUIREMENT",
+      "finding": [
+        "Independently of the licence question, the feed cannot meet this service's provenance",
+        "requirement. Since late 2024 a Google News RSS <item><link> is not the publisher's article URL.",
+        "It is a Google-hosted redirect of the form https://news.google.com/rss/articles/CBMi<token>?oc=5.",
+        "",
+        "There are exactly two ways to recover the publisher's article URL from that token, and this",
+        "service may use neither:",
+        "  1. Follow the redirect — another automated request to news.google.com, which is the prohibited act.",
+        "  2. Decode the token locally — base64 yields a protobuf carrying Google's own internal article",
+        "     identifier rather than a URL, and resolving it requires a signature that cannot be computed",
+        "     offline. Reverse-engineering it is scraping Google by another name.",
+        "",
+        "The feed's <source url=\"...\"> element does carry the publisher's DOMAIN (e.g. reuters.com), but a",
+        "domain is not an article. FR-09 provenance requires the exact document a finding came from, and a",
+        "finding that names a domain and cannot name the document is a finding a reviewer cannot check."
+      ]
+    },
+    "robots": {
+      "url": "https://news.google.com/robots.txt",
+      "requested": false,
+      "verdict": "NOT_READ",
+      "note": [
+        "Deliberately not fetched. robots.txt governs crawling; it cannot grant what the Terms of Use",
+        "withhold, so reading it could not change the outcome. Recording it as NOT_READ rather than",
+        "NOT_ESTABLISHED keeps the distinction honest: nobody looked, and nobody needed to."
+      ]
+    }
+  },
+  "conclusion": {
+    "commercialUseDefensible": false,
+    "recommendedLifecycleState": "PROPOSED",
+    "doNotActivate": true,
+    "decision": "D20",
+    "summary": [
+      "Google News RSS has no defensible commercial access basis for this service. The Google News Terms",
+      "of Use restrict the service to personal, non-commercial display, and separately prohibit using any",
+      "robot or automated process to monitor or copy content. This is a commercial B2B screening product.",
+      "Both clauses are squarely engaged.",
+      "",
+      "The terms are dated 2006 and Google publishes no documentation for the /rss/search endpoint at all.",
+      "That combination is not a loophole — an undocumented endpoint carries no separate grant, so the",
+      "general terms are the only terms there are, and they say no."
+    ],
+    "legitimateAlternative": {
+      "product": "Google Programmable Search Engine / Custom Search JSON API",
+      "why": [
+        "Documented, contractually licensed, and sold for commercial use — the three things the RSS feed",
+        "lacks. It returns publisher URLs directly, so the provenance defect above does not arise.",
+        "",
+        "It is paid beyond a free daily allowance, which makes it a commercial decision rather than an",
+        "engineering one, and it is therefore out of scope for a project whose stated constraint is free",
+        "and open-source sources only. Recorded here so the next reader does not re-derive it."
+      ]
+    }
+  }
+}

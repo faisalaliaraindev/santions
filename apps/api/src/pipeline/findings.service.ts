@@ -67,6 +67,27 @@ export interface FindingRecord {
     readonly retrievalDate: PreciseDate;
     readonly cascadeRung: number;
     readonly mode: 'MOCK' | 'LIVE';
+    /**
+     * How a metasearch layer found this document, when one did (FR-09).
+     *
+     * Absent for everything else, and the absence is the point: an SEC litigation release is not
+     * "discovered by" anything, and a field present on every finding would read as though it
+     * were. Where it IS present it answers the question a reviewer asks of a media finding —
+     * how did you come to be looking at this article? — without letting the answer be mistaken
+     * for the evidence. `publisher` above is still the publisher, `url` is still the article,
+     * and these two are the channel.
+     */
+    readonly discoverySource?: string | undefined;
+    /**
+     * Every engine that surfaced this article, sorted.
+     *
+     * A list rather than one value, because a merged metasearch result is one article several
+     * engines returned. Three engines here is **one** document and contributes **one** thing to
+     * Axis D's independence count — the engines are not sources, and `clusterFindings` never
+     * sees them. Recording them is provenance; counting them would be the independence
+     * inflation FR-10 exists to prevent.
+     */
+    readonly discoveryEngines?: readonly string[] | undefined;
     /** Structured indexed-source provenance. Absent for fetched documents. */
     readonly sourceRecordId?: string | undefined;
     readonly sourceSnapshotVersion?: string | undefined;
@@ -128,8 +149,14 @@ export interface RejectedLeadRecord {
   readonly url: string;
   readonly title: string;
   readonly publisher: string;
+  /** The host the fetch would have contacted. An approval is written against a domain. */
+  readonly publisherDomain: string;
   readonly cascadeRung: number;
   readonly queryId: string;
+  /** Did a request actually leave? False for everything refused before the socket. */
+  readonly fetchAttempted: boolean;
+  /** Upstream engines that surfaced this candidate. Empty unless it came from a metasearch. */
+  readonly discoveredByEngines: readonly string[];
   /**
    * Where the lead stopped.
    *

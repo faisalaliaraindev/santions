@@ -27,6 +27,971 @@ Say what you did about it.
 
 ---
 
+## 2026-09-23 (twenty-ninth) — Zquence tenant Google acceptance flow (local diagnostic only)
+
+**Did:** a request-scoped, local-only override that lets the real local Zquence LIVE tenant run
+one normal adverse search with `GOOGLE_NEWS` added, plus Postman Folder 19 to run it.
+
+- `apps/api/src/sources/searxng/local-diagnostic.ts` — the five conditions (not production;
+  loopback Host **and** socket; `ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true`; tenant ==
+  `GOOGLE_DIAGNOSTIC_TENANT_ID`; header `X-Local-Discovery-Diagnostic: GOOGLE_NEWS`) and an
+  in-memory widening that can only ever touch `GOOGLE_NEWS`.
+- `config.ts` — the two variables; **production refuses to start** with the flag set.
+- `searches.controller.ts` — decides before anything is written. Header present + any condition
+  failing → `403 FORBIDDEN` (no reason in the body). Granted + non-live → `400`.
+- The run record carries `localDiscoveryDiagnostic: { engines: ['GOOGLE_NEWS'] }`; the job handler
+  and pipeline pass it to `DiscoveryRunContext.diagnosticEngines`; the SearXNG adapter **re-checks
+  the process conditions** before honouring it. A stale worker or one without the flag runs the
+  search without Google.
+- Engine diagnostics: the Google row gains `diagnosticOverride`, `diagnosticOnly`,
+  `effectiveEnabled` (all `true`), only on a diagnostic run; `governanceStatus` stays `REFUSED`.
+  Contract fields optional; OpenAPI regenerated.
+- **Not changed:** D20, `governanceStatus`, `defaultEnabledForDiscovery`, `tenantEnabled`,
+  `searxngEngineSettings`, FetchGate, any source.
+- Postman Folder `19 - Zquence LIVE Google Diagnostic` (12 requests, 19.0–19.10), folder-level
+  guard, template env vars. Collection-level `apiKey` check exempts `19.*` requests only.
+- `docs/testing/google-live-local.md` — how to start the stack and run it.
+
+**Verified** (no `dev:live` stack running): `pnpm typecheck` 0, `pnpm lint` 0; unit **1203/1203**
+(73 files), invariants **31/31**, evaluation **12/12**, integration **238/238**, security
+**186/186**, e2e-api **34/34**. New tests:
+`apps/api/test/local-google-diagnostic.test.ts` (14), `apps/api/test/postman-folder-19.test.ts`
+(23, executes the folder's scripts in a `pm` sandbox), `tests/security/local-google-diagnostic.test.ts`
+(5, real HTTP + Mongo).
+
+**Not run:** the live Google request. No Zquence credentials exist in this session, and the user
+drives it: start the stack per the doc, enter `zquenceApiKey` + `zquenceTenantId`, run Folder 19.
+
+**Found:** there is no worker health endpoint, so Folder 19 proves worker currency indirectly —
+19.5 (a worker consumed the job) and 19.7 (`diagnosticOverride` can only be set by a current
+worker with the env). Not added, per "do not redesign".
+
+**Also in this commit:** the twenty-eighth session's Wikinews work was still uncommitted in the
+working tree, and the user asked for one commit — so it is included here.
+
+**Next session should:** nothing is queued from this commit. If the user reports a Folder 19
+failure, start from its "If it fails" table.
+
+**Decisions touched:** none. D20 unchanged.
+
+## 2026-09-23 (twenty-eighth) — the chain is proven: SearXNG → Wikinews → fetch → finding
+
+**The one-line state.** D22 was approved and carried out, `wikinews-en` is **ACTIVE** through a
+genuine four-eyes lifecycle, and **one real article was fetched and became one real finding**.
+Folder 18: **50 requests, 47 assertions, 0 failures, 18.7s**. Getting there uncovered **two real
+defects that had nothing to do with governance** and were each presenting as a governance refusal.
+
+### 1. The two defects, because they are the important part
+
+**Defect A — `loadActiveByDomain` matched nothing, ever.** The publisher-authorisation lookup
+queried a **top-level** `canonicalDomains`, but version documents carry
+`content.canonicalDomains` — which is where the in-memory matching loop immediately below the
+query correctly reads it from. The query returned zero documents and the function returned null
+before the good loop ever ran.
+
+So **every** discovered candidate was refused `PUBLISHER_NOT_APPROVED`, including ones with a
+perfectly good ACTIVE record. `wikinews-en` was taken all the way to ACTIVE and the Madoff article
+was *still* refused with "No approved source record covers en.wikinews.org" — the one sentence
+guaranteed to send the reader off to audit the registry rather than the query. The twenty-fifth
+session's "46 per-candidate refusals" and the twenty-seventh's "0 findings" were both this bug
+wearing a governance costume.
+
+Fixed to match `content.canonicalDomains` **and** the legacy top-level shape, because
+`mapActiveVersion` already tolerates both (`document['content'] ?? document`) — narrowing the
+query to one while the mapper accepts two is how they drifted apart.
+
+**Why no test caught it: nine unit-test files stub `loadActiveByDomain`, and all nine passed.**
+They have to — they test the gate's behaviour *given* an answer, not how the answer is fetched.
+Another unit test would not have caught it either. The defect lived in the shape of a real
+document, so `tests/integration/publisher-domain-lookup.test.ts` (8 tests) uses real documents in
+a real collection. Verified by reverting the fix: **3 of the 8 fail.** It also pins the refusals —
+look-alike suffixes, non-ACTIVE versions, bare TLDs — so widening the field path did not widen the
+status filter with it.
+
+**Defect B — every MediaWiki page on earth read as a bot challenge.** With A fixed, the fetch was
+attempted and came back `SOFT_BLOCK: matched "captcha"`. It was a **200, 85KB, fully-served
+article**. `detectChallenge` scanned the first 4KB for bare substrings, and MediaWiki embeds a
+config blob in `<head>`: `wgConfirmEditCaptchaNeededForGenericEdit`, `wgConfirmEditHCaptchaSiteKey`
+— a statement about what *editing* would require, inside a `<script>`.
+
+Fixed by stripping `<script>` blocks before scanning. **This is not a loosening.** A real
+interstitial exists to be read by a person, so its text is in the title and the visible body and
+survives script-stripping; what does not survive is a publisher's JavaScript mentioning a captcha
+it would use somewhere else. The conservative bias is untouched. An unterminated `<script>` at the
+window edge is dropped whole, so a marker cannot hide in a tail the window cut in half. Three
+tests added to `http-evidence-fetch.test.ts`, including the real Wikinews `<head>` and a
+real-shaped Cloudflare interstitial that must still be caught.
+
+### 2. D22 — approved, and carried out narrowly
+
+Three serial GETs to two hosts: `en.wikinews.org/robots.txt` (200, 4427B, `/wiki/`: **ALLOWED**),
+`foundation.wikimedia.org/robots.txt` (200, 3880B, **ALLOWED**), Terms of Use (200, 37610B).
+
+**The verdict was checked against the exact article path and it discriminates:** the Madoff
+article and `/wiki/` are ALLOWED; `/w/index.php`, `/wiki/Special:Random`,
+`/wiki/Wikinews:Story_preparation/` and `/api/rest_v1/…` are DISALLOWED. No `Crawl-delay` for any
+agent. Full robots body in `docs/sources/evidence/wikinews-en.json`.
+
+`wikinews-en` v1 ACTIVE via propose → submit → approve → activate, **two distinct principals**:
+SUBMIT `api-key:4f93491691d8c22e`, APPROVE `api-key:b49936006e34f1ae`. The activated version
+carries `firstContactApproval.decision: "D22"` — **not D19** — and
+`permittedCollectionMethods: ["HTML_FETCH"]`, both of which are the twenty-seventh session's fixes
+proving out on a real record.
+
+**The narrowness is visible in the numbers.** 63 unique candidates discovered, **1** fetched, 47
+leads refused `PUBLISHER_NOT_APPROVED` by publisher — `www.reuters.com` (20), `finance.yahoo.com`,
+`www.bloomberg.com`, `time.com` and the rest. That is the intended outcome, not a coverage gap.
+
+### 3. The real finding — the whole chain, in one row
+
+`searchId 75693931-f796-4853-87d4-0a2900e569d2`, `findingId 4d945910-…` (chain run).
+
+```
+SearXNG            discoverySource  searxng-adverse-media
+  -> Wikinews      discoveryEngines ["WIKINEWS"]        engine RETURNED_RESULTS, 9 results, 4 unique
+  -> authorisation wikinews-en v1 ACTIVE, D22, robots HONOURED, tier 4
+  -> fetch         articlesFetched 1, mode LIVE, retrievalDate 2026-09-23
+                   https://en.wikinews.org/wiki/Madoff_jailed_after_pleading_guilty_to_%2450_billion_fraud_scheme
+  -> extraction    subjectMentionSpans [1561-1575, 5016-5030], conductSpan [1690-1706]
+                   extractorVersion rule-based-1-unbenchmarked
+  -> FR-08         EXACT_COMMON_NAME / WEAK — "Bernard Madoff" matched as written
+  -> classification category MONEY_LAUNDERING_TF, attribution DIRECT_PERSONAL
+  -> FR-10         cluster-1: 2 documents, independent corroboration 0, 2 excluded as copies
+  -> finding       band AMBIGUOUS
+```
+
+**AMBIGUOUS is the correct band and it is worth saying why**, because a weaker system would have
+said CONFIRMED. The name matched exactly, but the document states no date of birth, identifier,
+company or country the subject record also states — so identity rests on a name alone and Axis A
+is WEAK. Party role is UNSPECIFIED, which caps at AMBIGUOUS under FR-09. And FR-10 counted **0**
+independent corroboration, excluding both documents in the cluster as copies or non-independent
+tiers. The system declined to overclaim on its own first end-to-end finding.
+
+### 4. One Postman assertion was wrong and was corrected, not deleted
+
+18.16 `a metasearch document is lead-only authority` asserted `authorityTier === 5` exactly. It
+passed for three sessions only because **nothing was ever fetched**: every metasearch document was
+a tier-5 snippet from the discovery layer itself. Now that a candidate can be fetched from an
+approved publisher, the document carries **that publisher's** tier from its own registry record
+(Wikinews is 4), with the channel recorded separately in `discoverySource`. Pinning it to 5 would
+force the publisher's tier to be overwritten by the finder's — the opposite of what FR-09
+provenance is for.
+
+It now asserts the property the name actually claims: `authorityTier >= 4` (discovery never buys
+authority — never regulator- or wire-grade) and `namingAuthority === null`. The collection was
+edited at `indent=2`; `git diff --stat` shows ~12 added lines, no reflow.
+
+### 5. Verified — every number, with the stack stopped for the suites
+
+```
+typecheck   clean                     lint        clean (0 errors)
+unit        71 files, 1166 tests      invariants  31          evaluation  12
+security    8 files, 181              integration 15 files, 238
+e2e-api     3 files, 34
+
+Folder 18 (newman, final)   50 requests, 47 assertions, 0 failures, 18.7s, 243.34kB
+                            avg 24ms, min 7ms, max 218ms
+```
+
+Per-engine on the final run — 104 raw, 63 unique, 41 collapsed:
+
+| engine | outcome | results | unique | governance |
+| :-- | :-- | --: | --: | :-- |
+| BING_NEWS | INTERNAL_ERROR | 13 | 1 | PERMITTED |
+| BRAVE_NEWS | TIMEOUT | 0 | 0 | PERMITTED |
+| DUCKDUCKGO_NEWS | RETURNED_RESULTS | 33 | 20 | PERMITTED |
+| GOOGLE_NEWS | **DISABLED_BY_POLICY** | 0 | 0 | **REFUSED** |
+| REUTERS | RETURNED_RESULTS | 49 | 27 | PERMITTED |
+| WIKINEWS | RETURNED_RESULTS | 9 | 4 | PERMITTED |
+
+**The twenty-seventh session's Google change is confirmed in production**, from the live control
+API: `GOOGLE_NEWS default false, tenant false, effective false, REFUSED` — while the other five
+read `default true, tenant true, effective true`. Zero Google requests.
+
+**The dev:live stack was stopped before the suites**, as instructed. That confirms the previous
+entry's diagnosis outright: with it running, integration and e2e failed on outbox assertions with
+a different set of tests each run; with it stopped, **238/238 and 34/34, first time, no re-runs**.
+
+### 6. Found — things a future session needs
+
+1. **A running `dev:live` stack serves a stale build.** It ran from 18:50 on 2026-09-22 and did
+   not carry the Google default change made at ~20:00. `GOOGLE_NEWS` reported `tenantEnabled=true`
+   and it took a rebuild plus restart to see the truth. **Before believing any live diagnostic,
+   check the stack's start time against your last build.**
+2. **`dev.mjs` listens on 3000 unless `PORT` is exported.** Earlier entries say 28081; that came
+   from the operator's environment, not from the repo.
+3. **The signup limiter is 5/hour per hashed address and diagnostic probes spend it.** Folder 18
+   signs up a real tenant, so a burst of probing blocks the acceptance run with a 429. The
+   limiter is working correctly; I deleted my own probe rows from `attemptLog` on the local dev
+   database to restore the pre-probe state. **No code, policy or window was changed.**
+4. **Two stale-health artefacts had to be cleared, both created by defect B**: a `domainHealth`
+   cooldown for `wikinews.org` and an OPEN `sourceHealth` breaker on `searxng-adverse-media` from
+   2 HARD_BLOCKs. They recorded blocks that never happened. Deleted on the local database only.
+5. **Folder 18's `sxEmail` must not contain `+`.** 18.3 interpolates it into a query string
+   unencoded, so `+` decodes as a space, the lookup misses, and the *latest* verification token
+   for some other address is returned — which then verifies a different tenant and leaves yours
+   unverified, surfacing three steps later as a 403 on live-key issuance. Cost about twenty
+   minutes. Worth encoding in the collection; not done, because the collection is shared with
+   sixteen other folders and that is a change to make deliberately.
+6. `sec-press-releases` reported `HOURLY_BUDGET_EXHAUSTED` (6/hour) during the middle runs. The
+   budget working, not a fault.
+7. The security suite failed **once** on `login.test.ts` I3 and **once** on `api-keys.test.ts`
+   T68 — a different test each time, both passing in isolation, and **181/181 on two consecutive
+   clean runs**. Same shared-Mongo parallel-suite class as the outbox contention.
+
+**Next session should:** nothing is blocked. The acceptance milestone is closed. If more
+adverse-media coverage is wanted, the next act is a **second publisher approval** under its own
+decision — `scripts/lib/first-contact-approvals.mjs` throws for a source no decision names, so
+that is a deliberate act and cannot be done by accident. `www.reuters.com` is the highest-value
+candidate on the evidence: 49 results, 27 unique, 20 refused leads in one run.
+
+**Decisions touched:** **D22 CLOSED — approved and carried out**, scoped to `en.wikinews.org`
+alone. **D20 unchanged**, Google still REFUSED and now also default-OFF, zero requests.
+**D21 as amended** by the twenty-seventh entry, confirmed live. **D-042 vindicated rather than
+weakened**: the one approval authorised one publisher and refused 47 leads from everybody else.
+
+## 2026-09-22 (twenty-seventh) — Google's default switched OFF; Wikinews built up to the request and stopped
+
+**The one-line state.** Google is now blocked by **two independent gates** instead of one, with a
+regression test that holds the second against a *simulated* future permission. The Wikinews
+publisher approval is built end to end — evidence script, onboarding wiring, decision record — and
+**deliberately not run**: no request has been made to `en.wikinews.org`, so the rung-5 chain is
+still unproven past discovery, and folder 18 was **not** re-run.
+
+### 1. The Google safety change, and what it is not
+
+`GOOGLE_NEWS.defaultEnabledForDiscovery` is **`false`**. It is the only `false` in the matrix.
+
+**Why the old `true` was a latent problem rather than a present one.** While Google is `REFUSED`,
+`effectiveEnabled` is false whatever the switch says, so the default's value is *unobservable* —
+and it becomes load-bearing on the single day somebody edits the reading, which is the worst
+possible moment to find out it was wrong. With the default at `true`, one edit to
+`governanceStatus` — one field, in one review framed as a governance decision — would have taken
+Google from "queried by nobody" to "queried on every search of every tenant who never configured
+an engine", in one release, with no tenant having asked. A governance decision and a fleet-wide
+activation are two different acts and must not be spendable with one keystroke.
+
+**It is a blast-radius control, not a second refusal.** A reader who mistakes it for one will
+conclude the refusal is redundant and delete a gate. D20 is untouched, not reopened, not weakened.
+
+**The D20-A diagnostic moved nothing.** Google returning HTTP 200 with original-publisher URLs is
+evidence about Google's *infrastructure*, never about Google's *terms*. It did retire one of D20's
+two objections for this route — the FR-09 provenance objection was about the RSS feed's
+`news.google.com/rss/articles` redirects and does **not** carry over to the SearXNG scrape — so the
+licence objection is now the whole of the refusal. That is recorded in the evidence note so the
+next reader does not cite a retired objection or infer permission from a status code.
+
+**Confirmed state:** `integrated=true`, `defaultEnabledForDiscovery=false`,
+`governanceStatus=REFUSED`, `effectiveEnabled=false`, zero Google production queries. Google is
+still *reported* in full — `DISABLED_BY_POLICY`, never absent — because the adapter derives that
+outcome from `!effectiveEnabled`, so the diagnostic rows are unchanged.
+
+### 2. The regression test, and proof that it bites
+
+`apps/api/test/searxng-google-default-off.test.ts` — 7 tests. The load-bearing ones resolve
+against a matrix where Google's reading has been moved to `PERMITTED` **and nothing else has**,
+using `vi.doMock` plus a dynamic import so the *real* `EngineEnablementService.resolveFor` runs.
+The rule is not re-implemented in the test; a test that recomputed
+`integrated && tenantEnabled && status !== 'REFUSED'` itself would keep passing if that expression
+were deleted from the service.
+
+It asserts that after the simulated edit an unconfigured tenant still has
+`tenantEnabled: false, effectiveEnabled: false`; that the other five engines are untouched (a fix
+that also silenced the working engines would be a regression dressed as caution); and that
+activation then requires a named tenant's API call with a reason, reaching that tenant only.
+
+**Verified by planting the violation:** restoring `defaultEnabledForDiscovery: true` fails **5 of
+the 7**. Restored afterwards.
+
+### 3. Wikinews — everything except the request
+
+**`pnpm wikinews:first-contact`** (`scripts/wikinews-first-contact.mjs`). Three serial GETs to two
+hosts, >=4s apart: `en.wikinews.org/robots.txt` evaluated for `/wiki/`;
+`foundation.wikimedia.org/robots.txt` evaluated for the terms path, because **a second host's
+rules are its own and are never inherited**; then the Terms of Use page, so `licenceTermsVersion`
+names something somebody actually loaded. Each step is skipped when the step authorising it did
+not permit it. Writes `docs/sources/evidence/wikinews-en.json` and stops.
+
+**It deliberately does not fetch an article.** The thing to prove is *SearXNG -> publisher
+authorisation -> FetchGate -> fetch -> extraction -> finding*, and an article pulled down by this
+script would be a fetch that went **round** the gate rather than through it.
+
+Why it is its own script rather than `--source` on `indexed-first-contact.mjs`: that script's
+fourth step is "load the configured endpoint", and Wikinews has none by design (`endpointUrl:
+null`, D-043 — it is never polled). Passing it through would either crash on the null or invite
+somebody to invent an endpoint so the script would run.
+
+**Verified unarmed: prints the plan, sends nothing.**
+
+### 4. The onboarding wiring, and the false-signature defect it closes
+
+`wikinews-en` now goes through `source-onboard.mjs`. Four changes, and the third is the one that
+matters:
+
+1. Registered from the compiled registry, beside `searxng-adverse-media` rather than covered by it.
+2. `EVIDENCE_FETCH_HTTP` -> collection method **`HTML_FETCH`**. It was falling through to the
+   `BULK_DOWNLOAD` default, which would have put a **false declaration on an approved version**:
+   the rights policy would clear a method this source never performs and not clear the one it does.
+3. **First-contact approvals are now per source, with no fallback.** `contentFor` wrote
+   `FIRST_CONTACT_APPROVAL` — D19, dated 2026-09-21, naming ten indexed publishers — onto *every*
+   proposal, and the submit/approve **audit reasons** named D19 too. Onboarding Wikinews would
+   have recorded D19's signature for a publisher D19 never mentions: a specific, checkable, false
+   claim about a real person, which is worse than a missing approval. Now in
+   `scripts/lib/first-contact-approvals.mjs`: D19's ten sources are **enumerated**, later
+   publishers carry their own decision, and anything covered by neither **throws**. Adding a
+   publisher therefore cannot be done without deciding under whose authority it may be contacted.
+   The operator banner and both audit reasons resolve per source.
+4. `jurisdictionFor`'s null-endpoint comment claimed only internal services reach it. Now names
+   both cases.
+
+`apps/api/test/source-onboard-config.test.ts` (7 tests) holds all of it, including that a source
+no decision names throws rather than defaulting, and that the approval stays one domain —
+`en.wikinews.org`, no wildcard.
+
+**The eleven existing sources plan identically to before** — 9 ACTIVE, `world-bank-debarred`
+blocked on its own robots verdict, `searxng-adverse-media` ACTIVE.
+
+### 5. Verified — every number run
+
+```
+typecheck   clean                      lint        clean (0 errors)
+unit        71 files, 1163 tests       invariants  31          evaluation  12
+security    8 files, 181               integration 14 files, 230 (clean on re-run, see below)
+e2e-api     3 files, 34                (clean on re-run, see below)
+
+wikinews:first-contact, unarmed       plan printed, 0 requests sent
+source:onboard --source wikinews-en   APPROVED (blocked), banner reads "D22, Faisal Ali, 2026-09-22"
+source:onboard (all 12)               11 unchanged; banner "D19 ... | D22 ..."
+regression test, violation planted    5 of 7 fail; restored
+```
+
+Unit went 69 files/1149 -> 71/1163: +7 for the Google default test, +7 for the onboard config test.
+
+**A `dev:live` stack was running throughout, and it contaminates integration and e2-api.** First
+integration run: 2 failed. Second run of identical code: **3 failed, different tests** —
+`persistence.test.ts` FI-04 (`expected +0 to be 1`), `transactions.test.ts` FI-05 ("The publisher
+never reached the event under test") and the commit-together test (`expected <timestamp> to be
+null`). e2e-api: 2 failed, then **34/34 on re-run**.
+
+Every one of them is an **outbox-publishing** assertion, and the cause is the one the
+`vitest.config.mts` e2e comment already spells out: `OutboxPublisher.publishOnce` claims whatever
+is due and has no deployment filter — correctly, because in production many API instances publish
+from one outbox. The running dev stack (`scripts/dev.mjs --live`, PID 49180, plus
+`apps/api/dist/main.js`) is a second live publisher against the same Mongo, so it drains events
+the tests are about to assert are unpublished. The failure names the victim, never the thief.
+
+Diagnosed rather than assumed: the two failing files **pass in isolation, 52/52**, and full
+re-runs are **230/230** and **34/34**. Nothing in this session touches outbox, transaction or
+persistence code.
+
+**If a future session sees outbox assertions failing, check for a running `dev.mjs` before
+touching the outbox.** It is not a flake in the sense the twenty-fourth and twenty-fifth entries
+used the word — it is deterministic given a live stack, and it goes away when there is not one.
+
+### 6. Left half-done — one act, and it is the user's
+
+**No request has been made to `en.wikinews.org`, so the second half of the chain is still
+unproven, and folder 18 was not re-run.** Re-running it now would have spent SEC budget to
+reproduce the recorded 0-findings result, and the brief sequences it *after* the approval.
+
+The blocker is **D22**, open, and it is a source-admin act with two distinct principals — not an
+engineering step. `wikinews-en.ts` still ships `robotsPosition: 'NOT_ESTABLISHED'` and
+`firstContactApproval: null`, and `wikinews-en-proposal.test.ts` still asserts both, so these are
+**not unfinished fields to tidy up**. Filling them by editing the file bypasses the lifecycle.
+
+```
+pnpm wikinews:first-contact                        # prints the plan, sends nothing
+pnpm wikinews:first-contact --yes-contact-wikimedia
+
+SOURCE_PROPOSER_KEY=... SOURCE_APPROVER_KEY=... \
+  pnpm source:onboard --apply --source wikinews-en
+```
+
+The second refuses if both keys resolve to one principal and stops before activation if the
+evidence does not support it. No flag overrides either.
+
+**Then, and only then:** re-run the adverse-media flow for the Madoff candidate already discovered
+by the `WIKINEWS` engine
+(`en.wikinews.org/wiki/Madoff_jailed_after_pleading_guilty_to_%2450_billion_fraud_scheme`), re-run
+folder 18, and report the real finding with exact Newman totals. The Zquence readiness verdict
+waits on that chain, because until one article is fetched the honest answer is that the last hop
+is unproven.
+
+### 7. Found
+
+1. **The false-signature defect in section 4.3.** Pre-existing, latent while every onboarded
+   publisher happened to be one D19 names. Wikinews was the first source that would have exposed
+   it, and it would have exposed it silently, on an approved version and in the audit trail.
+2. **`EVIDENCE_FETCH_HTTP` had no collection-method branch** (section 4.2) — the first fetch-only
+   publisher to go through this script.
+3. CLAUDE.md rule 3 still said the SEC was "the only source ever contacted", which stopped being
+   true at D18 (GDELT) and again at D20-A. Corrected, with the Wikinews act named as the open one.
+4. **A running `dev:live` stack makes integration and e2e-api fail on outbox assertions**, with a
+   different set of tests each run. Diagnosed in section 5; worth knowing before anyone concludes
+   the outbox broke.
+
+**Next session should:** nothing on Google — it is finished and must be left alone. Take the D22
+first-contact decision with the user, in the order in section 6.
+
+**Decisions touched:** **D21 amended** — Google's default switch is now OFF; the readings are
+untouched and D20 is not reopened. **D22 opened** — first contact with `en.wikinews.org`, scoped
+to that one domain, explicitly not a blanket approval for SearXNG-discovered publishers.
+**D20 unchanged.**
+
+## 2026-09-22 (twenty-sixth) — D20-A: the one Google diagnostic, and Google worked
+
+**The one-line state.** Under a narrow amendment to D20, **one** request was issued to Google News
+through our own SearXNG instance. **It succeeded** — HTTP 200, 10 results, 10 unique, 1107ms, no
+CAPTCHA, and every URL an original publisher's. **Nothing was enabled.** Google is still
+`REFUSED`, still `effectiveEnabled: false`, still unreachable from any tenant search.
+
+### 1. Why the diagnostic was needed
+
+Neither of the two previous observations answered the engineering question. The twenty-fourth
+session saw `CAPTCHA` at 6ms. The twenty-fifth saw `DISABLED_BY_POLICY` at **0ms** — a better
+behaviour, because the governance gate now refuses before the socket opens, and one that erased
+the observation along with the request. So acceptance was about to close on an engine whose
+technical state nobody had actually seen: integrated-and-unusable, or integrated-and-would-work?
+
+### 2. What was authorised, and what was not — D20-A
+
+`docs/open-decisions.md` now carries **D20-A**, an amendment under D20 rather than a reopening of
+it. It permits **a single bounded request for technical verification** and lists what it does not
+permit: a second diagnostic, a scheduled one, any Google request from the tenant search path,
+activation of `google-news-rss-en-us`, or any edit to the Google row in the engine matrix.
+
+**D20's answer is unchanged.** The refusal, `governanceStatus: 'REFUSED'` and
+`effectiveEnabled: false` were all untouched, and the runner asserts each of them **before and
+after** the request — so a run that happened to coincide with somebody flipping a flag could not
+be mistaken for this one.
+
+### 3. How it reached an engine the instance has disabled
+
+It did **not** reconfigure anything. `infra/local/searxng/settings.yml` still carries
+`google news: disabled: true`, and that file's own comment already documented the property used
+here: the engine "never runs for a request that merely names `categories=news`; only a request
+naming the engine explicitly could reach it, and our connector's allowlist will not name it." The
+connector still will not name it. `tests/live/searxng-google-diagnostic.test.ts` names it, once.
+
+Three gates on that file: it is in the `live` vitest project, it is armed by
+`SEARXNG_GOOGLE_DIAGNOSTIC=yes-one-google-request-under-d20a` — **a different variable from**
+`SEARXNG_LIVE_SMOKE`, so arming the routine smoke can never arm this — and it `skipIf`s itself
+rather than throwing, so `pnpm test:live` does not break for anyone who did not ask for it.
+Verified: unarmed, it skips, and zero requests leave.
+
+### 4. The result
+
+```
+attempted          true
+request            /search?q=%22Bernard+Madoff%22+fraud&format=json&engines=google+news&pageno=1&language=en
+outcome            RETURNED_RESULTS
+http status        200
+upstream           SUCCESS — no CAPTCHA, no 429, no 403, no timeout
+duration           1107 ms
+raw results        10
+unique results     10
+duplicates         0
+unresponsive       (none)
+engines credited   google news only  (asserted: the instance ran no engine we did not name)
+```
+
+**Suspension state.** Not suspended before: the 3600s cooldown from the 10:51 CAPTCHA had expired
+about two hours earlier, so the request genuinely reached Google rather than our own breaker —
+worth checking before any repeat, because a suspended engine makes the diagnostic measure
+SearXNG instead of Google. **Not suspended after:** `docker logs … | grep -i google` shows
+exactly two entries, 09:30:52 and 10:51:32, both predating this run — it wrote none. `GET
+/stats/errors` moved `google news` from **100% to 50%** on the same single `ErrorContext`, which
+is one success recorded beside one historical error. Cooldown after the run: **0s**.
+
+No retry was issued, no proxy or alternate egress was used, no CAPTCHA was solved or submitted,
+and no header was forged — the request carried exactly what `NodeSearxngTransport` sends every
+other engine.
+
+### 5. The finding that actually matters, and it is not the success
+
+**All 10 URLs were original publisher URLs. Zero Google-hosted redirects.** Bloomberg, the
+Guardian, Reuters, CNBC, SCMP, Time, the Independent, ABC, Dawn.
+
+D20 recorded a **second, independent defect** beside the licence one: a Google News RSS
+`<item><link>` is a `news.google.com/rss/articles/CBMi<token>` redirect rather than the
+publisher's article URL, so the feed could not meet FR-09 provenance *even with permission*.
+
+**That defect is specific to the RSS feed and does not carry over to this route.** The SearXNG
+`google news` engine scrapes `google.com/search?tbm=nws`, which returns publisher URLs directly.
+Anyone reopening this must not cite the provenance objection as though it still applied here.
+
+**The licence objection is untouched, and it is now the whole of the refusal.** Personal
+non-commercial use only; no robot or automated process to monitor or copy content. Scraping the
+news results page is if anything further from permitted than the RSS feed D20 examined.
+
+### 6. What this does NOT do
+
+**It does not make Google `PERMITTED`.** Inferring permission from an engine having worked is the
+exact inversion `engine-governance.ts` was written to prevent — its file header says so in as many
+words. The reading moves when somebody reads the terms and decides, not when a request returns
+200.
+
+**Nothing became tenant data.** No lead, no candidate, no fetched document, no finding, no
+database row. The ten URLs exist in the evidence file and in the run's console output, nowhere
+else.
+
+**Tenant production is unchanged.** `effectiveEnabled` is `integrated && tenantEnabled &&
+governanceStatus !== 'REFUSED'`, so the REFUSED reading blocks execution whatever a tenant switch
+says. The diagnostic bypassed that gate only inside its own file, which nothing on the request
+path can reach.
+
+### 7. Verified
+
+```
+pnpm typecheck                       clean
+diagnostic unarmed                   1 test file, 1 skipped, 0 requests
+diagnostic armed                     1 test file, 1 passed, 1113ms, exactly 1 upstream request
+```
+
+**Files added:** `tests/live/searxng-google-diagnostic.test.ts`,
+`docs/sources/evidence/google-news-searxng-diagnostic.json`.
+**Files edited:** `docs/open-decisions.md` (D20-A and the D20 summary row), this log.
+**No production source file was touched.** `engine-governance.ts`,
+`engine-enablement.service.ts`, `searxng-client.ts`, the connector and `settings.yml` are all
+unchanged **by this session**. `git diff --stat -- apps/api/src/sources/searxng/` is empty;
+`settings.yml` does show a diff against HEAD, but that is the twenty-fourth session's
+`keep_only` work sitting uncommitted in a dirty tree, and `google news: disabled: true` is
+still on line 76. Confirmed after the run rather than assumed:
+`integrated=true, governanceStatus=REFUSED, tenantEnabled=true, effectiveEnabled=false`.
+
+**Next session should:** still the Wikinews first-contact decision from the twenty-fifth entry —
+read `en.wikinews.org/robots.txt`, then propose → submit → approve → activate with two distinct
+principals, then re-run folder 18 for the Madoff article. **The user drives first contact.** The
+Google diagnostic did not displace that and did not touch it.
+
+**Decisions touched:** **D20 amended by D20-A** — one bounded diagnostic permitted, the refusal
+itself unchanged. **D20 NOT reopened**; its answer is still no. **A new question is raised and
+deliberately left open:** Google works from this egress with usable provenance, so the refusal now
+rests on the licence alone. Whether to reopen D20 on the clauses it quoted, or to take the
+documented licensed alternative (Programmable Search Engine / Custom Search JSON API, paid beyond
+a free allowance), is a **separate production-governance decision and has not been taken.** **D21
+untouched.**
+
+## 2026-09-22 (twenty-fifth) — D21 closed, and publisher-fetch permission split from discovery permission
+
+**The one-line state.** The 12-source stack is live and honestly reported, but the chain is proven
+end to end *except the last hop*: SearXNG discovery works, and **no article is fetched yet**,
+because the fetch gate now — correctly — demands an approval for the publisher's own domain, and
+only one candidate publisher has been proposed for one.
+
+### 1. Runtime first, because the previous run's results were invalid
+
+**Two full `dev:live` stacks were running against one queue.** Stack A (12:59) and stack B
+(16:23), both reading the same `.env`, so both workers polled `adverse-search-jobs`. Stack A's
+worker was loaded from a build predating the D20 enforcement fix, so it could have processed an
+acceptance job under pre-fix code. Proof it was stale: `GET /v1/tenant/discovery/engines` returned
+**404** on stack A (route absent from its loaded build) and **401** on stack B. Stack A was killed
+as a tree.
+
+**The SQS queues did not exist.** `ListQueues` returned empty and `GetQueueAttributes` returned
+`NonExistentQueue`; the worker had been failing every poll since LocalStack last restarted. Fixed
+by calling `bootstrapAws()` from `scripts/bootstrap/aws.mjs` directly — bucket and queues only, no
+data seeding. The worker recovered on its next poll (`ReceiveMessage => 200`).
+
+**If a future session finds adverse-search jobs never completing, check for a second `dev.mjs`
+tree, then check the queue exists.** Both were wrong today and neither was visible from the API.
+
+### 2. D21 closed — five engines PERMITTED
+
+`engine-governance.ts`: `BING_NEWS`, `BRAVE_NEWS`, `DUCKDUCKGO_NEWS`, `REUTERS`, `WIKINEWS` moved
+`PENDING` to `PERMITTED`, with `reviewedBy` naming the product owner. **Google untouched** — still
+`REFUSED` under D20, `effectiveEnabled: false`, `DISABLED_BY_POLICY`, zero upstream requests.
+
+Each `evidenceNote` now opens by saying the decision is a **recorded acceptance of residual risk,
+not a completed legal review by counsel**, then retains its original limitation verbatim. Nothing
+was softened to justify the change, which is the point of recording it rather than assuming it.
+
+**A test went vacuous and was strengthened rather than left green.** `never records a reviewer for
+an engine nobody has reviewed` guarded an empty set once no engine was `PENDING`. It now also
+asserts the converse — a decided reading must name its decider — and that all six are decided.
+
+### 3. A reporting defect: an engine that returned 49 results said ZERO_RESULTS
+
+`worstOutcome` ranked `ZERO_RESULTS` as *more severe* than `RETURNED_RESULTS`, so Reuters — which
+returned 49 results across 5 of its 12 queries — aggregated to `ZERO_RESULTS`. Folder 18 passed
+anyway, because no assertion checked the substance. The ordering is swapped. Every genuine failure
+still outranks both, so the property the ordering exists for is unchanged.
+
+### 4. The architectural change: discovery permission is not publisher-fetch permission
+
+**The defect.** All 46 fetchable candidates were refused because `searxng-adverse-media` carried
+`firstContactApproval: null`. The obvious fix — record one on that source — was **rejected by the
+product owner**, and rightly: it would have turned one signature on our own internal record into an
+approval to fetch from every publisher on the open web.
+
+**What was built instead.** `SourceVersionReader.loadActiveByDomain(domain)` and
+`domainMatchCandidates`, matching **whole labels**, most specific first — so `sec.gov` covers
+`www.sec.gov`, `notsec.gov` matches nothing, and a bare TLD is never a candidate.
+`FetchGateInput.publisherDomain` makes the gate authorise a **discovered document** against the
+registry record for the domain being contacted, never the source that named it. A domain no record
+covers is refused `PUBLISHER_NOT_APPROVED`.
+
+**That refusal is per candidate, never per source** (`isSourceLevelRefusal` returns false).
+Source-level would report the discovery service as a coverage gap on every run and hide the engines
+that worked behind a whole-source exclusion. Confirmed live: `searxng-adverse-media` now reports
+`COMPLETED` with 46 per-candidate refusals beside it.
+
+**Mock mode is exempt**, on the rule D-042 already uses: no publisher is involved. Fixture leads
+name invented domains (`nacion-example.cr`) while fixture sources register `fixtures.local`, so
+resolving by publisher in mock mode refuses every fixture — and refuses a publisher that does not
+exist. Found by `tests/integration/pipeline.test.ts` dropping to zero findings.
+
+**Diagnostics now carry** `publisherDomain`, `fetchAttempted` and `discoveredByEngines` on every
+rejected lead, so an unapproved publisher is visible rather than merely absent. Read defensively in
+`searches.service.ts`, so rows written before these fields existed still read.
+
+### 5. Left half-done — one thing, and it needs a person
+
+**No article has been fetched, so the fetch → extraction → FR-08 → FR-10 → finding half of the
+chain is still unproven against a real article.** The blocker is one narrowly scoped approval.
+
+`apps/api/src/sources/registry/wikinews-en.ts` is written and schema-valid: `en.wikinews.org` only,
+`authorityTier: 4`, `EVIDENCE_FETCH_HTTP`, never polled. It is **deliberately not activatable** —
+`robotsPosition: 'NOT_ESTABLISHED'` and `firstContactApproval: null` — and
+`wikinews-en-proposal.test.ts` asserts both, so a future session cannot read them as unfinished
+fields to tidy up.
+
+The candidate it would unlock is real and already discovered:
+`https://en.wikinews.org/wiki/Madoff_jailed_after_pleading_guilty_to_%2450_billion_fraud_scheme`,
+surfaced by the `WIKINEWS` engine. Wikinews was chosen because its access is the one reading in the
+D21 matrix resting on published evidence: the documented MediaWiki Action API, Wikimedia's API
+etiquette contemplating automated clients, and CC BY 2.5 content.
+
+**The next session must NOT fill those two fields by editing the file.** It needs a first read of
+`en.wikinews.org/robots.txt` and then propose → submit → approve → activate with two distinct
+principals. The user drives first contact.
+
+### 6. Verified — every number run today
+
+```
+typecheck   clean                    lint        clean (0 errors)
+unit        69 files, 1149 tests     invariants  31        evaluation  12
+security    8 files, 181             integration 14 files, 230
+e2e-api     3 files, 34
+```
+
+`tests/integration/jobs.test.ts` FI-09 failed once under full-suite load and passed in isolation
+and on a full re-run — the **same pre-existing flake** the twenty-fourth entry recorded, not new.
+
+**Live SearXNG smoke** (`SEARXNG_LIVE_SMOKE=yes-query-the-instance`): GOOGLE_NEWS
+`DISABLED_BY_POLICY`, 0 results, **0ms**. Worth noting it was `CAPTCHA` at 6ms before, which meant
+a request *was* being sent; it now makes none. BING 7, BRAVE `CONNECTION_ERROR`, DDG 17, REUTERS
+20, WIKINEWS 4. 48 raw, 42 unique, 6 collapsed.
+
+**Folder 18**, three runs against port 28081; final run **47 requests, 47 assertions, 0 failures,
+17.3s**. 104 raw → 62 unique → 42 collapsed → 46 `PUBLISHER_NOT_APPROVED` → 0 fetched → 0 findings.
+On the third run `sec-press-releases` reported `SKIPPED — hourly free-tier budget of 6 spent`,
+which is the budget working rather than a fault.
+
+### 7. Folder 18 collection defects found and fixed
+
+1. **`caToken` leaked in from folder 17.** 18.3 wrote it and 18.4 read it, so the two folders
+   shared one verification token. Renamed to `sxToken`; folder 17 verified untouched.
+2. **The collection-level pre-request guard throws unless `apiKey` is set** for any `/v1` path, and
+   folder 18 authenticates with `sourceAdminKey` and `sxLiveKey`. Satisfied from the
+   **environment** rather than by weakening a guard shared with sixteen other folders.
+3. The preflight route (`GET /v1/admin/sources?recordId=…`) was already correct — verified live.
+4. `baseUrl` still defaults to `:3000` at collection level and the environment overrides it to
+   `:28081`. Left alone deliberately: it is shared with every other folder.
+
+**A formatting trap worth knowing:** rewriting that collection with `json.dumps(indent=1)` reflowed
+all 15k lines. It is `indent=2`. Check `git diff --stat` after any scripted edit to it.
+
+**Next session should:** take the Wikinews first-contact decision — robots read, then the four-eyes
+lifecycle — then re-run folder 18 and prove SearXNG → publisher → FetchGate → fetch → extraction →
+FR-08 → classification → FR-10 → finding for the Madoff article. Everything else on the
+twenty-fifth brief is done.
+
+**Decisions touched:** **D21 CLOSED on all six readings** — five PERMITTED, Google REFUSED under
+D20. **D20 unchanged and not reopened.** **D-042 strengthened, not weakened**: it now binds the
+publisher rather than the discoverer.
+
+## 2026-09-22 (twenty-fourth) — SearXNG multi-engine adverse-media discovery, rung 5
+
+**Did:**
+
+*Audit first.* Found the existing SearXNG (compose service `searxng`, `127.0.0.1:28888`, JSON
+already the only format) and read `GET /config`. Two real defects:
+
+1. **The instance was running 267 engines, not the two its settings file claimed.**
+   `use_default_settings: true` MERGES an `engines:` block with the upstream defaults rather
+   than replacing them, so the comment reading "an approved engine list, not everything SearXNG
+   supports" described the intent and the deployment did the opposite. Fixed with
+   `use_default_settings.engines.keep_only` — 267 → 11.
+2. **`engines=` is a UNION with `categories=`, not a filter on it.** A request naming one engine
+   *and* `categories=news` runs every news engine. The milestone brief specifies
+   `categories=news`; sending it would have made the engine allowlist decorative. **The connector
+   names one engine per request and never names a category.** Evidence in
+   `docs/sources/evidence/searxng-adverse-media.json`.
+
+*New code.* `apps/api/src/sources/searxng/`: `engine-governance.ts` (the six-engine matrix),
+`engine-enablement.service.ts` (per-tenant switches + resolution), `engine-health.ts` (typed
+per-engine outcomes, run summary, derived source outcome), `searxng-client.ts` (internal
+transport + JSON parse), `searxng-discovery.adapter.ts` (the connector).
+`apps/api/src/tenancy/discovery-engines.controller.ts` is the control API.
+`registry/searxng-adverse-media.ts` is the source proposal. Also:
+`NEWS_DISCOVERY_SEARXNG` connector type; `FetchGateService.authoriseInternalDiscoveryService`;
+`INTERNAL_SERVICE_NOT_A_PUBLISHER` robots position; `DiscoveryAttribution` on `Lead`;
+`discoverySource`/`discoveryEngines` on findings; `searxngDiscovery` on the findings response;
+`SEARXNG_URL` in config; ladder-builder wiring; `source-onboard.mjs` now carries this source.
+
+*Three design decisions worth knowing about, because each looks wrong at a glance.*
+
+- **One request per engine, not one merged request.** A merged request cannot give per-engine
+  timing, fails as a unit (losing engines that had already answered), and cannot distinguish
+  `ZERO_RESULTS` from "never ran". **It costs the upstreams nothing**: a merged request forwards
+  to all six anyway, so each engine sees the same one query. Only loopback traffic multiplies.
+- **It does NOT go through `EvidenceFetchPort`.** SEC-02 refuses http and refuses loopback,
+  correctly — it exists to stop us dialling an address a *third party* named. The SearXNG base URL
+  is ours, from configuration. Routing it through the publisher gate would have meant punching a
+  loopback exception into the one function that stops a news feed reaching our database. Instead
+  there is a narrow transport that addresses one configured host and re-checks it before the
+  socket opens. **The leads it returns are screened normally** and article fetches go through
+  FetchGate untouched.
+- **The QUERY_FEED "must record an endpoint" schema rule moved** from
+  `sourceAccessPolicySchema` to `sourceContentSchema.superRefine`, where `connectorType` is in
+  scope. It is not weakened: an internal service must record NO endpoint (a loopback URL on an
+  approved version reads as a publisher's published address), and a publisher claiming the
+  exemption is refused. Both directions are tested.
+
+**Verified** (all run, all numbers real):
+
+- `pnpm typecheck` — clean. `pnpm lint` — 0 errors.
+- `pnpm test:unit` — **67 files, 1130 tests, all passing** (was 64/1061).
+- `pnpm test:invariants` — 31 passing. `pnpm test:evaluation` — 12. `pnpm test:security` — 181.
+- `pnpm test:integration` — 230 passing. `pnpm test:e2e:api` — 34 passing.
+- **Live smoke**, `SEARXNG_LIVE_SMOKE=yes-query-the-instance pnpm exec vitest run --project live
+  tests/live/searxng-live-smoke.test.ts`, one bounded query per engine for "Bernard Madoff" fraud:
+
+  | engine | outcome | results | ms |
+  | :-- | :-- | --: | --: |
+  | GOOGLE_NEWS | CAPTCHA | 0 | 6 |
+  | BING_NEWS | RETURNED_RESULTS | 7 | 691 |
+  | BRAVE_NEWS | CONNECTION_ERROR | 0 | 134 |
+  | DUCKDUCKGO_NEWS | RETURNED_RESULTS | 17 | 522 |
+  | REUTERS | RETURNED_RESULTS | 20 | 1276 |
+  | WIKINEWS | RETURNED_RESULTS | 4 | 740 |
+
+  48 raw results, 42 unique, 6 duplicates collapsed, source outcome `PARTIAL`. Four engines
+  returned and two failed in two different ways, in one run, and every candidate from the four
+  that worked was retained. An earlier run had Reuters failing with `HTTP error` and three
+  engines returning — the failures are transient, which is the point.
+
+**Left half-done:**
+
+- **Postman folder 18 has never been executed.** It is written (18 steps, folder 17 untouched)
+  and it has not been run, because it needs `pnpm source:onboard --apply` to have activated
+  `searxng-adverse-media` first and that has not been done either. Arm with
+  `sxConfirm = yes-query-searxng-and-sec`.
+- **`searxng-adverse-media` is proposed but not ACTIVE.** Until it is, the rung reports as
+  unsearched. `pnpm source:onboard --apply` will take it through propose → submit → approve →
+  activate with four eyes; its evidence file already records `activationSupported: true`.
+- **No end-to-end run has yet produced a metasearch *finding*.** The smoke test proves discovery;
+  the fetch → extraction → FR-08 → FR-10 half of the path is wired and unit-tested but has not
+  been exercised against a real article from this source.
+
+**Found:**
+
+1. The two audit defects above.
+2. **A fixed feed only serves F1 queries.** `RssNewsDiscoveryAdapter` declines a `FIXED_FEED` for
+   any family but F1 — correct (polling the publisher's whole list again per conduct term is the
+   same bytes 50 times) and it silently made an F3-based isolation test look like "the SEC had
+   nothing". Cost an hour. The test now uses F1 and says why.
+3. **The "only the gate issues a FetchAuthorisation" test greps for a literal string.** A *comment*
+   mentioning `urlPolicyPassed:` fails it. Worth knowing before writing prose near that file.
+4. Two integration tests flaked once each under parallel load (`jobs.test.ts` FI-09;
+   `search-index.test.ts` Meilisearch searchability) and both passed in isolation and on re-run.
+   Shared-Mongo/Meili timing, unrelated to this work, but worth a look if they recur.
+
+**Next session should:** run `SOURCE_PROPOSER_KEY=... SOURCE_APPROVER_KEY=... pnpm
+source:onboard --apply --source searxng-adverse-media`, confirm it reaches ACTIVE, then run
+Postman folder 18 and record the per-engine table it prints.
+
+**Decisions touched:**
+
+- **D21 opened** — the per-engine governance matrix. It is deliberately **not** one decision.
+- **All six engines are integrated and default to ON**, by the product owner's decision this
+  session. That is a *switch*, not a *reading*: five readings are `PENDING` and Google's is
+  `REFUSED` under **D20**, and none was rewritten. The disagreement on Google is carried
+  explicitly — `overridesRefusal: true` on every control-API response, a warning log and an audit
+  entry when a tenant enables it, and the `REFUSED` reading in every per-engine diagnostic row.
+  Google is additionally `disabled: true` on the instance, so in practice it returns CAPTCHA.
+- **D20 unchanged.** Nothing here reopened it.
+
+## 2026-09-22 (twenty-third) — Google News RSS refused before contact; the stack is live and armed
+
+**The one-line state.** `google-news-rss-en-us` is **closed as refused (D20)** on Google's own
+published terms, without a single request ever being sent to `news.google.com`; the local stack is
+up in **live** mode with SEC healthy and today's feed read; and the combined Postman acceptance
+(folder 17, 9 indexed + 2 SEC) is armed and **waiting on the user**, who is driving the tenant
+signup by hand.
+
+---
+
+### 1. Google News RSS — asked for, audited, refused
+
+The ask was to add Google as an adverse-media **discovery** source: tier-5 provenance, not an
+evidence authority, graded through the same FR-08 resolver as SEC, clustered by FR-10, isolated on
+failure, with its own budget and breaker. Mechanically all of that was already possible —
+`GOOGLE_NEWS_RSS_TEMPLATE` has existed as PROPOSED since the discovery rungs were written, and its
+`connectorType` is `NEWS_DISCOVERY_RSS`, the **same connector the SEC feeds use**. No connector
+work was ever the blocker.
+
+**The blocker is the right to call it, and the answer is no.** Google's News Terms of Use:
+
+> "You may only display the content of the Service for your own personal use (i.e.,
+> non-commercial use)"
+
+> "use any robot, spider, other device or manual process to monitor or copy any content from the
+> Service"
+
+This is a commercial screening product that would poll automatically. Either clause alone excludes
+it. **The endpoint being undocumented is not a loophole** — an undocumented endpoint carries no
+separate grant, so the general terms are the only terms in force.
+
+**No request was made to `news.google.com`, deliberately.** Act one of the onboarding procedure
+normally loads robots.txt, the terms page and the endpoint. Here the terms answered the question
+*before* the endpoint was reached, and the answer was a prohibition on automated access. Loading
+the feed to "verify" it would be performing the prohibited act in order to decide whether the act
+is prohibited. `robots.txt` was not read either: it governs crawling and cannot grant what the
+terms withhold.
+
+Verified in the database after the fact: `google-news-rss-en-us` is still **PROPOSED v1**, zero
+`sourceHealth` rows, zero `sourceDocumentVersions` mentioning `news.google.com`.
+
+### 2. A second defect that outlives the licence question
+
+Even with permission, the feed **cannot meet FR-09 provenance**. Since late 2024 a Google News RSS
+`<item><link>` is not the publisher's article URL but a Google redirect,
+`news.google.com/rss/articles/CBMi<token>?oc=5`. The only two ways to recover the real article URL
+are (a) follow the redirect — another automated request to Google, the prohibited act — or (b)
+decode the token, whose base64 payload is a protobuf holding Google's *internal article id* and
+needs a signature that cannot be computed offline. The `<source url>` element gives the publisher's
+**domain**, never the document.
+
+So the requirement "resolve the original publisher/article URL where safely possible" has a real
+answer: **it is not safely possible.** A finding that names a domain and cannot name the document
+is one a reviewer cannot check. This is worth keeping in mind for *any* aggregator proposed later —
+the question "does the link go to the publisher?" is now a standing onboarding question.
+
+### 3. What was written
+
+- **`docs/sources/evidence/google-news-rss-en-us.json`** — the evidence, in a deliberately
+  different shape from every other file in that directory. It carries `method:
+  "DESK_RESEARCH_ONLY"` and `endpointContacted: false` with the reason, and records **no**
+  httpStatus, wireBytes or body hash, because none was observed. The file says in as many words
+  that a future reader must not treat those absences as an unfinished evidence run to be completed.
+- **`docs/open-decisions.md`** — **D20** added to the index and given a full detail section.
+- **`docs/sources/source-catalogue.md`** — the Google row now reads `PROHIBITED — D20`. The section
+  already predicted this outcome ("these are the two rungs where a publisher's terms most plausibly
+  forbid automated querying"); the note now records that the prediction was tested and was right.
+- **`apps/api/src/sources/registry/discovery-rungs.ts`** — the template carries the refusal in its
+  header comment **and in `policySummary`, which is the version content an administrator actually
+  reads before approving**. A comment alone would not have been enough.
+- **`apps/api/test/discovery-rungs.test.ts`** — three new tests (12 → **15 passed**) asserting the
+  refusal survives in `policySummary`, that `firstContactApproval` is still null and
+  `robotsPosition` still `NOT_ESTABLISHED`, and that no licence version is named.
+
+**Why the test matters more than it looks.** Google is the one template in that file whose evidence
+*has* been gathered. Without a test, the next person tidying the file reads `UNVERIFIED`, takes it
+to mean "go and verify it", and the source becomes activatable. The tests make the refusal
+load-bearing.
+
+### 4. NOT done for Google, deliberately
+
+No version proposed, approved or activated. No connector written. **No four-eyes step bypassed —
+because no lifecycle step was taken at all.** No live smoke test. No Postman folder. The eight
+proofs that were asked for (real candidates, publisher URLs preserved, no fixtures, article-based
+identity matching, duplicate clustering, failure isolation, indexed sources silent, SEC healthy)
+were **not run and cannot be run**, because running them requires making the request that the terms
+forbid. Reporting them as untested is the honest outcome, not a gap.
+
+**`bing-news-rss-en-us` (rung 4) was not examined** and must not be activated on the assumption
+that Microsoft's position differs. The same two questions — commercial use, and whether the link is
+the publisher's — have to be answered for it on its own evidence.
+
+**The legitimate alternative**, recorded so it is not re-derived: Google's Programmable Search
+Engine / Custom Search JSON API is documented, licensed for commercial use, and returns publisher
+URLs directly. It is paid beyond a small free allowance, which makes it a commercial decision and
+puts it outside this project's free-and-open-source constraint.
+
+### 5. Stack state, and one thing that bit
+
+`pnpm local:up` brought all seven containers healthy. **Mongo persisted across the Docker restart;
+LocalStack did not** — the SQS queues were gone and the worker logged `QueueDoesNotExist` on every
+poll. `pnpm local:bootstrap` **refuses to run while `ADVERSE_SEARCH_MODE=live`** (seeding is
+mock-only, T55), so it was run as `ADVERSE_SEARCH_MODE=mock node scripts/local-bootstrap.mjs` to
+recreate the queues and S3 bucket. Every write is an upsert; no live record was touched. The worker
+recovered on its next poll and has logged no failure since.
+
+If a future session finds a live-mode worker failing every poll after a Docker restart, this is why.
+
+### 6. SEC live smoke — one run, healthy
+
+```
+node scripts/sec-live-smoke.mjs --yes-contact-the-sec     PASSED
+```
+
+25 leads normalised, `mode: LIVE`, 965ms, outcome OK. Budget moved by **2** (the feed poll plus a
+cold-process `robots.txt`), daily spend 2 of 120, breaker CLOSED, no kill switch. Today's feed:
+`lr-26644` Michael T. Christensen (new, published 2026-09-21), `lr-26643` Michael Ayala / Wavemark
+Capital, `lr-26642` Ellen Polcari.
+
+### 7. Folder 17 — armed, NOT run
+
+An armed environment was written to the scratchpad (`folder17.env.json`): `local.ready` plus
+`caConfirm = yes-contact-sec-and-indexed` and `caSecSubjectName = Ellen Polcari` — chosen because
+it is the case proven to grade in the 2026-09-21 acceptance run and is still in today's feed, so a
+failure points at the pipeline rather than at name-form matching. The repo's
+`local.ready.postman_environment.json` was **not** modified.
+
+**The user is creating the tenant themselves from Postman, so newman was not run.** One field still
+needs setting by hand: **`caEmail`** — nothing in folder 17 generates it, and 17.5 reads the
+verification token back out by that exact address.
+
+Because Google is refused, the "combined" acceptance is folder 17 exactly as it already stands:
+**9 indexed + 2 SEC discovery, GDELT suspended.** No assertion was weakened and no Google section
+was added.
+
+### 8. Verified — exact commands and figures
+
+```
+pnpm typecheck                                          clean
+eslint discovery-rungs.ts discovery-rungs.test.ts       clean
+vitest --project unit apps/api/test/discovery-rungs.test.ts    15 passed (was 12)
+node scripts/sec-live-smoke.mjs --yes-contact-the-sec   PASSED, 25 leads, budget +2
+```
+
+Registry read from Mongo and over the Admin API, agreeing: **11 ACTIVE real sources** (9 indexed +
+2 SEC), 8 fixture/mock ACTIVE, `gdelt-doc-v2` SUSPENDED, `world-bank-debarred` APPROVED-blocked,
+`google-news-rss-en-us` and `bing-news-rss-en-us` PROPOSED. 33,619 indexed rows.
+`source:four_eyes_bypassed_for_testing` count **0**.
+
+### 9. Next session should
+
+1. **Run folder 17** (set `caEmail` first) and confirm 52 assertions still pass against today's
+   live SEC feed. That is the gate the user set before Zquence onboarding starts.
+2. Then **Zquence**, where the real distance is. Note in particular that
+   `docs/integration/zquence.md` still opens with *"the service runs end to end in mock mode. Every
+   source is a fixture"* — **stale since 2026-09-16** and actively misleading to a first client.
+   Fix that header before the document is sent anywhere. There is also no Zquence tenant (203
+   tenants, none matching), and `pnpm demo:zquence` is still a stub that exits 1.
+3. **F3** — the eight FR-07 validation rules — is still unwritten. `grep validateAssertion` still
+   returns nothing.
+
+### 10. Decisions touched
+
+**D20 opened and closed the same day — refused.** D6, D17, D18 unaffected. No four-eyes step was
+taken for Google, so no approval exists to audit. D7 (extraction model) remains the blocker behind
+discovery findings carrying a name and nothing else.
+
+---
+
 ## 2026-09-21 (twenty-second) — Queue isolation, SEC discovery restored, and the combined acceptance run is green
 
 **The one-line state.** The e2e suites can no longer have their jobs stolen — by a `pnpm dev`

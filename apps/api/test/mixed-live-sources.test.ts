@@ -338,6 +338,16 @@ function dbWith(documents: readonly Record<string, unknown>[]): Db {
 
 const READER: SourceVersionReader = {
   loadActive: (sourceId) => Promise.resolve(VERSIONS[sourceId] ?? null),
+  // Mirrors SourceVersionService.loadActiveByDomain: the publisher-fetch permission is looked
+  // up against the domain actually being contacted, not inherited from the discovery source.
+  loadActiveByDomain: (domain) =>
+    Promise.resolve(
+      Object.values(VERSIONS).find((version) =>
+        version.canonicalDomains.some(
+          (canonical) => domain === canonical || domain.endsWith(`.${canonical}`),
+        ),
+      ) ?? null,
+    ),
 };
 
 const EMPTY_SET: SourceAdapterSet = {

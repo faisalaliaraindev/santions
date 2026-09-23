@@ -59,7 +59,38 @@ const UNVERIFIED =
   'approval before activating. Until all three are done the fetch gate refuses every request to ' +
   'this source, which is the safe direction.';
 
-/** Rung 2 — Google News RSS, per language and edition. Template only. */
+/**
+ * Rung 2 — Google News RSS, per language and edition.
+ *
+ * # DO NOT ACTIVATE THIS. It is refused, not merely unverified. See D20.
+ *
+ * Every other template in this file is inert because nobody has checked it yet. This one is inert
+ * because somebody checked, on 2026-09-22, and the answer was no. The difference matters: the
+ * others are waiting for evidence, and this one **has** its evidence
+ * (`docs/sources/evidence/google-news-rss-en-us.json`).
+ *
+ * **The licence.** Google's News Terms of Use restrict the service to *"your own personal use
+ * (i.e., non-commercial use)"* and separately forbid *"any robot, spider, other device or manual
+ * process to monitor or copy any content from the Service"*. This is a commercial screening
+ * product that would poll automatically. Either clause alone excludes it. That the `/rss/search`
+ * endpoint is undocumented is not a loophole — an undocumented endpoint carries no separate grant,
+ * so the general terms are the only terms there are.
+ *
+ * **This project has never sent a request to `news.google.com`, and must not.** The terms were read
+ * before the endpoint, and loading the feed to "verify" it would be performing the prohibited act
+ * in order to decide whether the act is prohibited.
+ *
+ * **A second defect that outlives the licence question.** Since late 2024 the feed's `<item><link>`
+ * is a Google redirect (`/rss/articles/CBMi<token>`), not the publisher's article URL. Resolving it
+ * needs either another request to Google or reverse-engineering a signed protobuf token, and
+ * `<source url>` gives only the publisher's *domain*. FR-09 provenance names a document, never a
+ * domain — so even with permission, a finding from here could not be checked by a reviewer.
+ *
+ * The connector was never the missing piece: `NEWS_DISCOVERY_RSS` below already works, and would
+ * have fetched this feed mechanically on day one. What is missing is the right to use it.
+ *
+ * `discovery-rungs.test.ts` fails if this template stops recording the refusal.
+ */
 export const GOOGLE_NEWS_RSS_TEMPLATE = {
   sourceName: 'Google News RSS (en-US edition)',
   publisher: 'Google',
@@ -91,7 +122,15 @@ export const GOOGLE_NEWS_RSS_TEMPLATE = {
     conditionalGet: true,
     userAgentRequired: false,
     policyUrl: null,
-    policySummary: `${UNVERIFIED} Google publishes no fair-access figures for this feed, so the ceiling is recorded as unknown rather than guessed.`,
+    policySummary:
+      `${UNVERIFIED} Google publishes no fair-access figures for this feed, so the ceiling is ` +
+      `recorded as unknown rather than guessed. ` +
+      `REFUSED 2026-09-22 (D20) — DO NOT ACTIVATE. Google's News Terms of Use permit only ` +
+      `"your own personal use (i.e., non-commercial use)" and forbid "any robot, spider, other ` +
+      `device or manual process to monitor or copy any content from the Service". This service is ` +
+      `commercial and automated, so both clauses are engaged. Separately, the feed's item links are ` +
+      `Google redirects rather than publisher article URLs, so FR-09 provenance cannot be met even ` +
+      `with permission. The endpoint has deliberately never been loaded by this project.`,
     stopConditions: DEFAULT_STOP_CONDITIONS,
     firstContactApproval: null,
   },

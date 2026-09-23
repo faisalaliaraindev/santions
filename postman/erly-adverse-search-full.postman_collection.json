@@ -31,9 +31,11 @@
         "type": "text/javascript",
         "exec": [
           "// Fail early and clearly rather than letting every request 401.",
+          "// Folder 19 authenticates with zquenceApiKey and guards itself, so it is exempt here.",
+          "const inFolder19 = String(pm.info.requestName || '').indexOf('19.') === 0;",
           "const path = pm.request.url.getPath();",
           "const needsKey = path.indexOf('/v1') === 0 || path.indexOf('/auth/session') === 0;",
-          "if (needsKey && !pm.environment.get('apiKey')) {",
+          "if (!inFolder19 && needsKey && !pm.environment.get('apiKey')) {",
           "  throw new Error('No apiKey set. Run `pnpm key:issue` and paste the secret into the environment.');",
           "}"
         ]
@@ -7184,6 +7186,2049 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "18 - Adverse Search LIVE: Indexed + SEC + SearXNG",
+      "description": "The multi-engine adverse-media layer, live, alongside the nine indexed sources and the two SEC feeds.\n\nWhat this folder proves, in order: the metasearch source is approved and is not a publisher; the per-tenant control API lists every integrated engine with its governance reading and lets this tenant switch one off and back on; a real search runs across all three discovery shapes; every configured engine reports a typed outcome, a duration and a result count - including the ones that were off and the ones that failed; a failed engine removes nothing; duplicates across engines collapse to one evidence item; and nothing in the run came from a fixture or a paid provider.\n\nFolder 17 is untouched. Arm this one with sxConfirm = yes-query-searxng-and-sec.",
+      "item": [
+        {
+          "name": "18.0 STOP - confirm you mean to query SearXNG and the SEC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "This folder runs a REAL adverse search over three discovery shapes at once: nine indexed sources answered from local snapshots, two SEC feeds polled live, and the self-hosted SearXNG metasearch layer querying its enabled upstream engines.\n\nArmed by sxConfirm = yes-query-searxng-and-sec. Deliberately NOT folder 14 liveConfirm, 15 mixedLiveConfirm or 17 caConfirm: arming one live run must never arm another.\n\nWhat it costs upstream: one bounded query per ENABLED engine per planned query, capped at 12 planned queries per search by the connector own bound. The instance itself is on loopback and costs nothing. Engines that are switched off are not contacted at all and are reported as DISABLED_BY_POLICY.\n\nIt activates nothing and it suspends nothing."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const armed = pm.environment.get('sxConfirm') === 'yes-query-searxng-and-sec';",
+                  "pm.test('the run is armed', function () {",
+                  "  pm.expect(armed, 'set sxConfirm = yes-query-searxng-and-sec to run this folder').to.be.true;",
+                  "});",
+                  "if (!armed) { postman.setNextRequest(null); }",
+                  "pm.test('the API is alive', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.1 Pre-flight: searxng-adverse-media is ACTIVE at rung 5",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sources?recordId=searxng-adverse-media&limit=200",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sources"
+              ],
+              "query": [
+                {
+                  "key": "recordId",
+                  "value": "searxng-adverse-media"
+                },
+                {
+                  "key": "limit",
+                  "value": "200"
+                }
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sourceAdminKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The metasearch layer is a registry source like any other and sits on the ladder only while an approved version says so. It is NOT a publisher: it records no endpoint URL (the address is SEARXNG_URL), no first-contact approval (there is no third party on the hop) and robotsPosition NOT_ESTABLISHED (there is no robots.txt). Those three would refuse a publisher; the internal-service gate does not read them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the source exists', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const versions = pm.response.json().items || [];",
+                  "const active = versions.find((v) => v.status === 'ACTIVE');",
+                  "pm.test('searxng-adverse-media is ACTIVE', function () {",
+                  "  pm.expect(active, 'run: pnpm source:onboard --apply').to.not.be.undefined;",
+                  "});",
+                  "if (!active) { postman.setNextRequest(null); } else {",
+                  "  pm.test('it sits at rung 5 with its own connector type', function () {",
+                  "    pm.expect(active.content.cascadeRung).to.eql(5);",
+                  "    pm.expect(active.content.connectorType).to.eql('NEWS_DISCOVERY_SEARXNG');",
+                  "  });",
+                  "  pm.test('it is lead-only authority - a metasearch hit is a headline', function () {",
+                  "    pm.expect(active.content.authorityTier).to.eql(5);",
+                  "  });",
+                  "  pm.test('it records no endpoint URL: the address is deployment configuration', function () {",
+                  "    pm.expect(active.content.accessPolicy.endpointUrl).to.be.null;",
+                  "  });",
+                  "  pm.test('it names us as publisher, never an engine', function () {",
+                  "    pm.expect(active.content.publisher).to.contain('Erly');",
+                  "    ['Google', 'Bing', 'Brave', 'DuckDuckGo', 'Reuters'].forEach(function (e) {",
+                  "      pm.expect(active.content.publisher).to.not.contain(e);",
+                  "    });",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.2 Sign up a real tenant",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup"
+              ]
+            },
+            "description": "A stranger becomes a customer. Nobody at Erly is involved, nothing is seeded, and every customer call after 17.8 authenticates with a key this tenant issued to itself.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organisationName\": \"Combined Acceptance {{$randomInt}}\",\n  \"contactEmail\": \"{{sxEmail}}\",\n  \"password\": \"{{sxPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('signed up', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('sxTenantId', b.tenantId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.3 Get the verification token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/dev/outbound-emails/latest?kind=EMAIL_VERIFICATION&email={{sxEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "dev",
+                "outbound-emails",
+                "latest"
+              ],
+              "query": [
+                {
+                  "key": "kind",
+                  "value": "EMAIL_VERIFICATION"
+                },
+                {
+                  "key": "email",
+                  "value": "{{sxEmail}}"
+                }
+              ]
+            },
+            "description": "A development-only route. It is absent in production by registration, not by a guard - there is no flag that turns it on there.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the message was sent', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.set('sxToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.4 Verify the email address",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "verify"
+              ]
+            },
+            "description": "Confirming the address is THE thing standing between a self-signed-up tenant and a live key (D-052). Without it the tenant has sandbox only, and a sandbox key cannot run this folder.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{sxToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('verified', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.5 Sign in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "The session's environment is DERIVED from the tenant's state by decideLiveAccess, never requested. A caller cannot ask for live.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{sxEmail}}\",\n  \"password\": \"{{sxPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('signed in', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.environment.set('sxSession', pm.response.json().sessionToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.6 Issue the tenant own LIVE key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Authorization",
+                "value": "Session {{sxSession}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "api-keys"
+              ]
+            },
+            "description": "The tenant mints its own live credential. The secret is shown once and is not recoverable.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"combined acceptance\",\n  \"roles\": [\"tenant_admin\", \"analyst\"],\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('live key issued', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('sxLiveKey', b.secret);",
+                  "pm.test('it is a live key', () => pm.expect(b.environment).to.eql('live'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.7 CONTROL API: the engine matrix this tenant will search with",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/discovery/engines",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "discovery",
+                "engines"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The per-tenant control surface. Every integrated engine is listed whether it is on or off - an engine that vanished when disabled would leave \"why is Google not in my results?\" unanswerable here as well as in the diagnostics.\n\nFour explicit fields prevent authority from being confused: integrated is a technical fact; tenantEnabled is the tenant preference; governanceStatus is the read-only platform decision; effectiveEnabled is the execution gate. REFUSED always makes effectiveEnabled false."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the matrix is readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const names = b.engines.map((e) => e.engine).sort();",
+                  "pm.test('all six engines are integrated and listed', function () {",
+                  "  pm.expect(names).to.eql(['BING_NEWS','BRAVE_NEWS','DUCKDUCKGO_NEWS','GOOGLE_NEWS','REUTERS','WIKINEWS']);",
+                  "  b.engines.forEach(function (e) { pm.expect(e.integrated, e.engine).to.be.true; });",
+                  "});",
+                  "pm.test('every engine carries its governance reading and decision id', function () {",
+                  "  b.engines.forEach(function (e) {",
+                  "    pm.expect(['PERMITTED','REFUSED','PENDING'], e.engine).to.include(e.governanceStatus);",
+                  "    pm.expect(e.decisionId, e.engine).to.be.a('string').and.not.empty;",
+                  "    pm.expect(e.evidenceNote, e.engine).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "});",
+                  "const google = b.engines.find((e) => e.engine === 'GOOGLE_NEWS');",
+                  "pm.test('Google carries its D20 refusal, whatever the switch says', function () {",
+                  "  pm.expect(google.governanceStatus).to.eql('REFUSED');",
+                  "  pm.expect(google.decisionId).to.eql('D20');",
+                  "});",
+                  "pm.test('a tenant switch can never override D20', function () {",
+                  "  pm.expect(google.tenantEnabled).to.be.a('boolean');",
+                  "  pm.expect(google.effectiveEnabled).to.be.false;",
+                  "});",
+                  "pm.environment.set('sxEnabledCount', String(b.enabledCount));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.8 CONTROL API: switch one engine OFF for this tenant",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/discovery/engines/BRAVE_NEWS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "discovery",
+                "engines",
+                "BRAVE_NEWS"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false,\n  \"reason\": \"Acceptance run: proving the per-tenant switch is real.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A reason is required and non-empty, and it is written to the audit trail with the calling principal. Switching an engine on or off is a coverage decision; a settings row that cannot say why it was set is a value that appeared rather than a decision somebody made."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the switch moved', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const e = pm.response.json();",
+                  "pm.test('it is off, and recorded as this tenant choice', function () {",
+                  "  pm.expect(e.tenantEnabled).to.be.false;",
+                  "  pm.expect(e.effectiveEnabled).to.be.false;",
+                  "  pm.expect(e.configuredByTenant).to.be.true;",
+                  "  pm.expect(e.reason).to.contain('Acceptance run');",
+                  "});",
+                  "pm.test('the governance reading was NOT rewritten by a tenant preference', function () {",
+                  "  pm.expect(['PENDING','REFUSED','PERMITTED']).to.include(e.governanceStatus);",
+                  "  pm.expect(e.defaultEnabledForDiscovery).to.be.a('boolean');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.9 CONTROL API: an unknown engine is refused, not silently stored",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/discovery/engines/YANDEX_NEWS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "discovery",
+                "engines",
+                "YANDEX_NEWS"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"reason\": \"Should be refused.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A stored row for an engine nothing can query would be a setting that silently does nothing, which is worse than an error."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused', () => pm.expect(pm.response.code).to.be.oneOf([400, 404]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.10 CONTROL API: switch it back on",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/discovery/engines/BRAVE_NEWS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "discovery",
+                "engines",
+                "BRAVE_NEWS"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "DELETE drops this tenant preference and returns the engine to the platform default - which is a different state from \"explicitly on\", and the response says which."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('reset', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const e = pm.response.json();",
+                  "pm.test('it is back on the platform default', function () {",
+                  "  pm.expect(e.configuredByTenant).to.be.false;",
+                  "  pm.expect(e.tenantEnabled).to.eql(e.defaultEnabledForDiscovery);",
+                  "  pm.expect(e.effectiveEnabled).to.eql(e.integrated && e.tenantEnabled && e.governanceStatus !== 'REFUSED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.11 Create the subject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Bernard Madoff\",\n  \"aliases\": [],\n  \"countryContext\": [\"US\"],\n  \"knownCompanies\": [],\n  \"externalSubjectRef\": \"searxng-acceptance-{{$guid}}\",\n  \"purpose\": \"CUSTOMER_ONBOARDING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A public figure whose adverse coverage is a matter of public record, so the engines have something to return and an empty result would mean something."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('sxSubjectId', b.subjectId);",
+                  "pm.environment.set('sxSubjectVersion', String(b.version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.12 Start the LIVE search: indexed + SEC + SearXNG",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": { \"subjectId\": \"{{sxSubjectId}}\", \"version\": {{sxSubjectVersion}} },\n  \"externalCaseRef\": \"searxng-acceptance\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"US\"],\n    \"languages\": [\"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "One search, three discovery shapes. Rung 0 is answered from local snapshots with no publisher request; rung 1 polls the SEC feeds; rung 5 queries the metasearch layer once per enabled engine per planned query."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.expect(pm.response.code).to.eql(202));",
+                  "if (pm.response.code !== 202) { pm.execution.setNextRequest(null); } else {",
+                  "  pm.environment.set('sxSearchId', pm.response.json().searchId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.13 Poll until terminal",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{sxSearchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{sxSearchId}}"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "PARTIAL is a normal and correct outcome: an engine blocked on a CAPTCHA or a source with no snapshot is an honest coverage gap, not a failure."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code !== 200) {",
+                  "  pm.test('poll response is readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "  pm.execution.setNextRequest(null);",
+                  "}",
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "let polls = Number(pm.environment.get('sxPolls') || '0');",
+                  "if (terminal.indexOf(b.execution) === -1 && polls < 200) {",
+                  "  pm.environment.set('sxPolls', String(polls + 1));",
+                  "  setTimeout(function () {}, 500);",
+                  "  postman.setNextRequest('18.13 Poll until terminal');",
+                  "} else {",
+                  "  pm.environment.unset('sxPolls');",
+                  "  pm.test('the run reached a terminal state', function () {",
+                  "    pm.expect(terminal, 'still ' + b.execution + ' after ' + polls + ' polls').to.include(b.execution);",
+                  "  });",
+                  "  pm.test('the run is NOT FAILED - no single engine can fail the job', function () {",
+                  "    pm.expect(b.execution).to.not.eql('FAILED');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.14 PROVE the per-engine table",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{sxSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{sxSearchId}}",
+                "findings"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The heart of this folder. Every configured engine must appear with a typed outcome, a duration and a result count - including the ones that were switched off and the ones that failed. An engine missing from this table is an engine nobody can account for."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.json();",
+                  "const d = b.searxngDiscovery;",
+                  "pm.test('the run reports its metasearch diagnostics', function () {",
+                  "  pm.expect(d, 'searxngDiscovery is null - the run held no engine log').to.not.be.null;",
+                  "});",
+                  "if (!d) { postman.setNextRequest(null); } else {",
+                  "  console.log('--- per-engine outcomes ---');",
+                  "  d.perEngine.forEach(function (e) {",
+                  "    console.log('  ' + e.engine + '  ' + e.outcome + '  ' + e.resultsReturned + ' results  ' + e.durationMs + 'ms  ' + e.failureReasons.join('; '));",
+                  "  });",
+                  "  console.log('source outcome: ' + d.sourceOutcome + '; configured=' + d.enginesConfigured + ' permitted=' + d.enginesPermitted + ' attempted=' + d.enginesAttempted + ' returned=' + d.enginesReturnedResults + ' failed=' + d.enginesFailed);",
+                  "  console.log('raw=' + d.totalRawResults + ' unique=' + d.uniqueCandidateUrls + ' duplicatesCollapsed=' + d.duplicatesCollapsed + ' articlesFetched=' + d.articlesFetched + ' findings=' + d.findingsGenerated);",
+                  "  pm.test('every integrated engine has a row', function () {",
+                  "    pm.expect(d.perEngine.length).to.eql(d.enginesConfigured);",
+                  "    pm.expect(d.enginesConfigured).to.eql(6);",
+                  "  });",
+                  "  const OUTCOMES = ['RETURNED_RESULTS','ZERO_RESULTS','TIMEOUT','RATE_LIMITED','CAPTCHA','ACCESS_DENIED','CONNECTION_ERROR','DISABLED_BY_POLICY','NOT_CONFIGURED','INTERNAL_ERROR'];",
+                  "  pm.test('every engine reports a typed outcome, a duration and a count', function () {",
+                  "    d.perEngine.forEach(function (e) {",
+                  "      pm.expect(OUTCOMES, e.engine).to.include(e.outcome);",
+                  "      pm.expect(e.durationMs, e.engine).to.be.a('number').and.to.be.at.least(0);",
+                  "      pm.expect(e.resultsReturned, e.engine).to.be.a('number').and.to.be.at.least(0);",
+                  "    });",
+                  "  });",
+                  "  pm.test('a switched-off engine is reported, never omitted', function () {",
+                  "    d.perEngine.filter((e) => e.outcome === 'DISABLED_BY_POLICY').forEach(function (e) {",
+                  "      pm.expect(e.attempted, e.engine).to.be.false;",
+                  "      pm.expect(e.decisionId, e.engine).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "  });",
+                  "  pm.test('the source outcome is derived, and zero results is not a failure', function () {",
+                  "    pm.expect(['COMPLETED','PARTIAL','FAILED','REFUSED']).to.include(d.sourceOutcome);",
+                  "    const anyAnswered = d.perEngine.some((e) => e.outcome === 'RETURNED_RESULTS' || e.outcome === 'ZERO_RESULTS');",
+                  "    if (anyAnswered) { pm.expect(d.sourceOutcome).to.not.eql('FAILED'); }",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.15 PROVE failure isolation: a failed engine removes nothing",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{sxSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{sxSearchId}}",
+                "findings"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The milestone objective, asserted rather than described: no individual engine can block adverse search. Engines fail here routinely - Google is suspended on a CAPTCHA, Brave returns connection errors - and the indexed findings, the SEC findings and the other engines candidates must all survive it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const d = b.searxngDiscovery;",
+                  "const outcomes = b.sourceOutcomes || [];",
+                  "const indexed = outcomes.filter((o) => o.snapshotVersion !== undefined && o.snapshotVersion !== null);",
+                  "const sec = outcomes.filter((o) => String(o.sourceId).indexOf('sec-') === 0);",
+                  "pm.test('the indexed sources still answered', function () {",
+                  "  pm.expect(indexed.length, JSON.stringify(outcomes.map((o) => o.sourceId))).to.be.at.least(1);",
+                  "});",
+                  "pm.test('the SEC sources are still on the run', function () {",
+                  "  pm.expect(sec.length).to.be.at.least(1);",
+                  "});",
+                  "if (d && d.enginesFailed > 0) {",
+                  "  pm.test('engines failed AND the run still produced its other results', function () {",
+                  "    pm.expect(b.execution).to.not.eql('FAILED');",
+                  "    pm.expect(d.enginesAttempted).to.be.at.least(d.enginesFailed);",
+                  "  });",
+                  "  pm.test('a failed engine did not remove a working engine results', function () {",
+                  "    if (d.enginesReturnedResults > 0) { pm.expect(d.uniqueCandidateUrls).to.be.above(0); }",
+                  "  });",
+                  "}",
+                  "pm.test('the metasearch source is never the only thing the run depends on', function () {",
+                  "  const searx = outcomes.find((o) => o.sourceId === 'searxng-adverse-media');",
+                  "  if (searx) { pm.expect(outcomes.length).to.be.above(1); }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.16 PROVE duplicates collapse and provenance survives",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{sxSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{sxSearchId}}",
+                "findings"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "One article several engines returned is ONE evidence item with several discovery channels. Engine count is never corroboration count: the engines appear as discoveryEngines on the document, and axes.independenceCount is computed by FR-10 clustering which never sees them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const d = b.searxngDiscovery;",
+                  "if (d) {",
+                  "  pm.test('the merge is arithmetically consistent', function () {",
+                  "    pm.expect(d.duplicatesCollapsed).to.eql(Math.max(0, d.totalRawResults - d.uniqueCandidateUrls));",
+                  "    pm.expect(d.uniqueCandidateUrls).to.be.at.most(d.totalRawResults);",
+                  "  });",
+                  "}",
+                  "const media = (b.findings || []).filter((f) => f.document.discoverySource !== undefined);",
+                  "console.log('metasearch findings: ' + media.length);",
+                  "pm.test('a metasearch finding names the service as channel and the publisher as source', function () {",
+                  "  media.forEach(function (f) {",
+                  "    pm.expect(f.document.discoverySource).to.eql('searxng-adverse-media');",
+                  "    pm.expect(f.document.publisher).to.not.contain('searxng');",
+                  "    pm.expect(f.document.url).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "});",
+                  "pm.test('several engines on one document is ONE finding, not several', function () {",
+                  "  media.forEach(function (f) {",
+                  "    const engines = f.document.discoveryEngines || [];",
+                  "    if (engines.length > 1) {",
+                  "      pm.expect(f.axes.independenceCount, 'engine count must never become corroboration count').to.be.below(engines.length + 1);",
+                  "    }",
+                  "  });",
+                  "});",
+                  "pm.test('a metasearch document is lead-only authority', function () {",
+                  "  media.forEach(function (f) {",
+                  "    // Until 2026-09-23 this asserted exactly 5, and it passed only because nothing was ever",
+                  "    // fetched: every metasearch document was a snippet produced by the discovery layer itself,",
+                  "    // which is tier 5. Now that a discovered candidate can be fetched from an APPROVED",
+                  "    // PUBLISHER, the document carries that publisher's tier from its own registry record --",
+                  "    // en.wikinews.org is authorityTier 4 -- and the channel that found it is recorded",
+                  "    // separately in discoverySource. The authority of evidence is the publisher's, never the",
+                  "    // channel's, so pinning this to 5 would have forced the publisher's tier to be overwritten",
+                  "    // with the finder's, which is the opposite of what FR-09 provenance is for.",
+                  "    // What must still hold is that DISCOVERY NEVER BUYS AUTHORITY.",
+                  "    pm.expect(f.document.authorityTier, 'discovery must never confer authority').to.be.at.least(4);",
+                  "    pm.expect(f.namingAuthority, 'a news article never names a designation').to.be.null;",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "18.17 PROVE no fixture, and no paid API",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{sxSearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{sxSearchId}}",
+                "findings"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{sxLiveKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The two claims that would be quietly false if anybody wired in a commercial provider or let a fixture through: every record is stamped LIVE, no fixture source appears, and the metasearch source holds no credential reference at all."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('the run is LIVE, not a fixture', function () {",
+                  "  pm.expect(b.mode).to.eql('LIVE');",
+                  "  (b.findings || []).forEach(function (f) {",
+                  "    pm.expect(f.document.mode, f.findingId).to.eql('LIVE');",
+                  "  });",
+                  "});",
+                  "pm.test('no fixture source contributed', function () {",
+                  "  (b.sourceOutcomes || []).forEach(function (o) {",
+                  "    pm.expect(String(o.sourceId)).to.not.contain('fixture');",
+                  "    pm.expect(String(o.sourceId)).to.not.contain('mock');",
+                  "  });",
+                  "});",
+                  "pm.test('no paid search or news provider is anywhere in this run', function () {",
+                  "  const blob = JSON.stringify(b).toLowerCase();",
+                  "  ['dataforseo', 'serpapi', 'brightdata', 'bright data', 'newsapi.org'].forEach(function (p) {",
+                  "    pm.expect(blob, p).to.not.contain(p);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "19 - Zquence LIVE Google Diagnostic",
+      "description": "FINAL MANUAL ACCEPTANCE. One LIVE adverse search, by the real local Zquence tenant, through the normal tenant API, with GOOGLE_NEWS added for that one request by the local diagnostic header.\n\nGoogle stays REFUSED under D20 and defaults OFF: nothing here changes a setting. The API grants the diagnostic only when NODE_ENV is not production, the request is to and from loopback, ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true, the tenant is GOOGLE_DIAGNOSTIC_TENANT_ID, and the request carries X-Local-Discovery-Diagnostic: GOOGLE_NEWS. Publisher FetchGate is unchanged, so Google candidates from unapproved publishers are refused per candidate and the run continues.\n\nYou enter two values: zquenceApiKey and zquenceTenantId. Everything else is pre-set in the local environment. How to start the stack: docs/testing/google-live-local.md.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Folder 19 guard. Runs before EVERY request in this folder, so nothing is sent unless armed.",
+              "const baseUrl = String(pm.environment.get('baseUrl') || pm.collectionVariables.get('baseUrl') || '');",
+              "const confirm = pm.environment.get('googleDiagnosticConfirm');",
+              "const key = String(pm.environment.get('zquenceApiKey') || '').trim();",
+              "const tenant = String(pm.environment.get('zquenceTenantId') || '').trim();",
+              "const problems = [];",
+              "if (!/^https?:\\/\\/(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?\\/?$/i.test(baseUrl)) { problems.push('baseUrl must be a local API (http://127.0.0.1:<port>), it is: ' + baseUrl); }",
+              "if (confirm !== 'yes-run-google-live-local') { problems.push('set googleDiagnosticConfirm = yes-run-google-live-local'); }",
+              "if (key === '' || /CHANGE ME|<|>/i.test(key)) { problems.push('set zquenceApiKey to the local Zquence LIVE tenant API key'); }",
+              "if (tenant === '' || /CHANGE ME|<|>/i.test(tenant)) { problems.push('set zquenceTenantId to the local Zquence tenant id'); }",
+              "if (problems.length > 0) {",
+              "  postman.setNextRequest(null);",
+              "  throw new Error('Folder 19 is not armed - nothing was sent. ' + problems.join('; '));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "19.0 Guard: local, confirmed, and the real Zquence LIVE tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the Zquence key authenticates', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const b = pm.response.code === 200 ? pm.response.json() : {};",
+                  "pm.test('the key belongs to zquenceTenantId', function () {",
+                  "  pm.expect(b.tenantId, 'the key is for tenant ' + b.tenantId).to.eql(pm.environment.get('zquenceTenantId'));",
+                  "});",
+                  "pm.test('the key is a LIVE key', () => pm.expect(b.environment).to.eql('live'));",
+                  "if (pm.response.code !== 200 || b.tenantId !== pm.environment.get('zquenceTenantId') || b.environment !== 'live') {",
+                  "  postman.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "session"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.1 Google normal state: REFUSED, default off, not effective",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the engine matrix is readable with the Zquence key', function () {",
+                  "  pm.expect(pm.response.code, 'this key needs the tenant_admin role to read the control API').to.eql(200);",
+                  "});",
+                  "if (pm.response.code !== 200) { postman.setNextRequest(null); return; }",
+                  "const google = pm.response.json().engines.find((e) => e.engine === 'GOOGLE_NEWS');",
+                  "pm.test('GOOGLE_NEWS is listed', () => pm.expect(google).to.be.an('object'));",
+                  "pm.test('GOOGLE_NEWS: integrated, REFUSED, default off, not effective', function () {",
+                  "  pm.expect(google.integrated).to.be.true;",
+                  "  pm.expect(google.governanceStatus).to.eql('REFUSED');",
+                  "  pm.expect(google.decisionId).to.eql('D20');",
+                  "  pm.expect(google.defaultEnabledForDiscovery).to.be.false;",
+                  "  pm.expect(google.effectiveEnabled).to.be.false;",
+                  "});",
+                  "pm.test('the normal control API carries no diagnostic field', function () {",
+                  "  pm.expect(google).to.not.have.property('diagnosticOverride');",
+                  "});",
+                  "pm.environment.set('g19GoogleBefore', JSON.stringify(google));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/discovery/engines",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "discovery",
+                "engines"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.2a Health: API ready",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the API is ready', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('it says ok', () => pm.expect(pm.response.json().status).to.eql('ok'));",
+                  "if (pm.response.code !== 200) { postman.setNextRequest(null); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.2b Health: SearXNG instance",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('searxngUrl')) { pm.environment.set('searxngUrl', 'http://127.0.0.1:28888'); }",
+                  "const s = String(pm.environment.get('searxngUrl'));",
+                  "if (!/^https?:\\/\\/(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?\\/?$/i.test(s)) {",
+                  "  throw new Error('searxngUrl must be the local SearXNG instance (loopback). It is: ' + s);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('SearXNG is healthy', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if (pm.response.code !== 200) { postman.setNextRequest(null); }",
+                  "console.log('Worker: there is no worker health endpoint. A current worker is proven by 19.5 (a worker consumed the job) and 19.7 (the worker honoured the diagnostic, which a stale worker cannot).');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{searxngUrl}}/healthz",
+              "host": [
+                "{{searxngUrl}}"
+              ],
+              "path": [
+                "healthz"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.3 Create the subject (stable Zquence externalSubjectRef)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const name = String(pm.environment.get('googleSubjectName') || 'Bernard Madoff').trim();",
+                  "const country = String(pm.environment.get('googleSubjectCountry') || 'US').trim().toUpperCase();",
+                  "const dob = String(pm.environment.get('googleSubjectDob') || '').trim();",
+                  "const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');",
+                  "const body = {",
+                  "  fullName: name,",
+                  "  aliases: [],",
+                  "  countryContext: [country],",
+                  "  knownCompanies: [],",
+                  "  externalSubjectRef: 'zquence-google-diagnostic:' + slug,",
+                  "  purpose: 'CUSTOMER_ONBOARDING',",
+                  "};",
+                  "// Optional, and only in the shape the normal subject contract accepts.",
+                  "if (/^\\d{4}-\\d{2}-\\d{2}$/.test(dob)) { body.dateOfBirth = { value: dob, precision: 'DAY' }; }",
+                  "pm.variables.set('g19SubjectBody', JSON.stringify(body));",
+                  "pm.environment.set('g19Country', country);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('subject created', () => pm.expect(pm.response.code).to.eql(201));",
+                  "if (pm.response.code !== 201) { postman.setNextRequest(null); return; }",
+                  "const b = pm.response.json();",
+                  "pm.test('it carries the stable Zquence reference', function () {",
+                  "  pm.expect(b.externalSubjectRef).to.match(/^zquence-google-diagnostic:/);",
+                  "});",
+                  "pm.environment.set('g19SubjectId', b.subjectId);",
+                  "pm.environment.set('g19SubjectVersion', String(b.version));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/subjects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "subjects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{{g19SubjectBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.4 Start the LIVE search with X-Local-Discovery-Diagnostic: GOOGLE_NEWS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted by the normal search endpoint', function () {",
+                  "  pm.expect(pm.response.code, pm.response.code === 403",
+                  "    ? 'the diagnostic was refused: check ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true and GOOGLE_DIAGNOSTIC_TENANT_ID equal to zquenceTenantId on the API, NODE_ENV is not production, and baseUrl is 127.0.0.1/localhost'",
+                  "    : pm.response.text()).to.eql(202);",
+                  "});",
+                  "if (pm.response.code !== 202) { postman.setNextRequest(null); return; }",
+                  "pm.environment.set('g19SearchId', pm.response.json().searchId);",
+                  "pm.environment.unset('g19Polls');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Local-Discovery-Diagnostic",
+                "value": "GOOGLE_NEWS",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subjectRef\": { \"subjectId\": \"{{g19SubjectId}}\", \"version\": {{g19SubjectVersion}} },\n  \"externalCaseRef\": \"zquence-google-diagnostic\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"{{g19Country}}\"],\n    \"languages\": [\"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.5 Poll until terminal",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const polls = Number(pm.environment.get('g19Polls') || '0');",
+                  "// A real pause between polls; the first poll goes immediately.",
+                  "if (polls > 0) { setTimeout(function () {}, 2000); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code !== 200) {",
+                  "  pm.test('poll response is readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "  postman.setNextRequest(null);",
+                  "  return;",
+                  "}",
+                  "const b = pm.response.json();",
+                  "const terminal = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];",
+                  "const polls = Number(pm.environment.get('g19Polls') || '0');",
+                  "if (terminal.indexOf(b.execution) === -1 && polls < 300) {",
+                  "  pm.environment.set('g19Polls', String(polls + 1));",
+                  "  postman.setNextRequest('19.5 Poll until terminal');",
+                  "} else {",
+                  "  pm.environment.unset('g19Polls');",
+                  "  pm.test('the run reached a terminal state (a worker consumed it)', function () {",
+                  "    pm.expect(terminal, 'still ' + b.execution + ' after ' + polls + ' polls - is exactly one current worker running on this queue?').to.include(b.execution);",
+                  "  });",
+                  "  pm.test('the run is not FAILED', () => pm.expect(b.execution).to.not.eql('FAILED'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{g19SearchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{g19SearchId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.6 Retrieve the findings and results",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('findings readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if (pm.response.code !== 200) { postman.setNextRequest(null); return; }",
+                  "const b = pm.response.json();",
+                  "pm.test('the run is LIVE', () => pm.expect(b.mode).to.eql('LIVE'));",
+                  "pm.test('the run reports metasearch diagnostics', () => pm.expect(b.searxngDiscovery).to.be.an('object'));",
+                  "pm.test('the counts describe the findings list', () => pm.expect(b.findingCounts.total).to.eql(b.findings.length));",
+                  "console.log('execution=' + b.execution + ' findings=' + b.findings.length + ' rejectedLeads=' + b.rejectedLeads.length + ' coverage=' + b.coverage);",
+                  "(b.sourceOutcomes || []).forEach(function (o) { console.log('  ' + o.sourceId + ' ' + o.outcome + (o.failureClass ? '/' + o.failureClass : '')); });",
+                  "if (!b.searxngDiscovery) { postman.setNextRequest(null); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{g19SearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{g19SearchId}}",
+                "findings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.7 PROVE Google ran: attempted, diagnostic override, live results",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().searxngDiscovery || { perEngine: [] };",
+                  "const g = d.perEngine.find((e) => e.engine === 'GOOGLE_NEWS');",
+                  "pm.test('GOOGLE_NEWS has a row', () => pm.expect(g).to.be.an('object'));",
+                  "if (!g) { return; }",
+                  "console.log('GOOGLE_NEWS ' + g.outcome + ' results=' + g.resultsReturned + ' ' + g.durationMs + 'ms ' + (g.failureReasons || []).join('; '));",
+                  "pm.test('the worker that ran this search is current (it honoured the diagnostic)', function () {",
+                  "  pm.expect(g.diagnosticOverride, 'GOOGLE_NEWS was not overridden: a worker without this build, or without ALLOW_LOCAL_GOOGLE_DIAGNOSTIC / GOOGLE_DIAGNOSTIC_TENANT_ID, took the job. Stop old workers and restart one current worker with the same env as the API.').to.eql(true);",
+                  "});",
+                  "pm.test('GOOGLE_NEWS attempted', () => pm.expect(g.attempted).to.be.true);",
+                  "pm.test('diagnosticOnly and effective for this request only', function () {",
+                  "  pm.expect(g.diagnosticOnly).to.be.true;",
+                  "  pm.expect(g.effectiveEnabled).to.be.true;",
+                  "});",
+                  "pm.test('the governance reading is still REFUSED beside it', function () {",
+                  "  pm.expect(g.governanceStatus).to.eql('REFUSED');",
+                  "  pm.expect(g.decisionId).to.eql('D20');",
+                  "});",
+                  "pm.test('Google returned live results', function () {",
+                  "  pm.expect(g.outcome, (g.failureReasons || []).join('; ')).to.eql('RETURNED_RESULTS');",
+                  "  pm.expect(g.resultsReturned).to.be.above(0);",
+                  "});",
+                  "pm.test('the Google request took real time', () => pm.expect(g.durationMs).to.be.above(0));",
+                  "pm.test('only Google is a diagnostic override', function () {",
+                  "  pm.expect(d.perEngine.filter((e) => e.diagnosticOverride === true).map((e) => e.engine)).to.eql(['GOOGLE_NEWS']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{g19SearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{g19SearchId}}",
+                "findings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.8 PROVE provenance: Google is the channel, the publisher is the evidence",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const GOOGLE_HOST = /(^|\\.)google\\.[a-z.]+$|(^|\\.)googleusercontent\\.com$|(^|\\.)gstatic\\.com$/i;",
+                  "function hostOf(u) { try { return new URL(u).hostname.toLowerCase(); } catch (e) { const m = String(u).match(/^[a-z]+:\\/\\/([^\\/:?#]+)/i); return m ? m[1].toLowerCase() : ''; } }",
+                  "function byGoogle(list) { return (list || []).indexOf('GOOGLE_NEWS') !== -1; }",
+                  "const b = pm.response.json();",
+                  "const gFindings = (b.findings || []).filter((f) => byGoogle(f.document.discoveryEngines));",
+                  "const gRejected = (b.rejectedLeads || []).filter((r) => byGoogle(r.discoveredByEngines));",
+                  "console.log('Google candidates: ' + gFindings.length + ' finding(s), ' + gRejected.length + ' rejected lead(s)');",
+                  "gRejected.forEach(function (r) { console.log('  ' + r.stage + ' ' + r.publisherDomain + ' fetched=' + r.fetchAttempted + ' ' + r.url); });",
+                  "pm.test('Google candidates are visible on the run', function () {",
+                  "  pm.expect(gFindings.length + gRejected.length, 'no candidate on the run names GOOGLE_NEWS').to.be.above(0);",
+                  "});",
+                  "pm.test('discovery engine is recorded as GOOGLE_NEWS', function () {",
+                  "  gFindings.forEach((f) => pm.expect(f.document.discoveryEngines).to.include('GOOGLE_NEWS'));",
+                  "  gRejected.forEach((r) => pm.expect(r.discoveredByEngines).to.include('GOOGLE_NEWS'));",
+                  "});",
+                  "pm.test('the original publisher URL is retained, never a Google URL', function () {",
+                  "  gRejected.forEach(function (r) {",
+                  "    pm.expect(r.url, r.url).to.match(/^https?:\\/\\//);",
+                  "    pm.expect(GOOGLE_HOST.test(hostOf(r.url)), r.url).to.be.false;",
+                  "  });",
+                  "  gFindings.forEach(function (f) {",
+                  "    pm.expect(GOOGLE_HOST.test(hostOf(f.document.url)), f.document.url).to.be.false;",
+                  "  });",
+                  "});",
+                  "pm.test('Google is never treated as the evidence publisher', function () {",
+                  "  gRejected.forEach(function (r) {",
+                  "    pm.expect(GOOGLE_HOST.test(String(r.publisherDomain).toLowerCase()), r.publisherDomain).to.be.false;",
+                  "    pm.expect(String(r.publisher).toLowerCase(), r.publisher).to.not.match(/^google( news)?$/);",
+                  "  });",
+                  "  gFindings.forEach(function (f) {",
+                  "    pm.expect(String(f.document.publisher).toLowerCase()).to.not.match(/^google( news)?$/);",
+                  "    pm.expect(f.document.discoverySource).to.eql('searxng-adverse-media');",
+                  "  });",
+                  "});",
+                  "pm.test('no search-results / query-string URL became an adverse finding', function () {",
+                  "  (b.findings || []).forEach(function (f) {",
+                  "    const u = String(f.document.url);",
+                  "    pm.expect(GOOGLE_HOST.test(hostOf(u)), u).to.be.false;",
+                  "    pm.expect(/\\/search(\\?|$)|[?&](q|query|tbm)=/i.test(u), 'finding cites a search URL: ' + u).to.be.false;",
+                  "  });",
+                  "});",
+                  "pm.test('publisher FetchGate still applies to Google candidates', function () {",
+                  "  gRejected.filter((r) => r.stage === 'FETCH' && r.fetchAttempted === false).forEach(function (r) {",
+                  "    pm.expect(r.reason, r.url).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  const refused = gRejected.filter((r) => /No approved source record covers/.test(r.reason));",
+                  "  console.log('Google candidates refused PUBLISHER_NOT_APPROVED: ' + refused.length);",
+                  "  refused.forEach(function (r) {",
+                  "    pm.expect(r.stage, r.url).to.eql('FETCH');",
+                  "    pm.expect(r.fetchAttempted, 'an unapproved publisher must never be contacted: ' + r.url).to.be.false;",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{g19SearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{g19SearchId}}",
+                "findings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.9 PROVE failure isolation: indexed, SEC and Wikinews results survive",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const outcomes = b.sourceOutcomes || [];",
+                  "const indexed = outcomes.filter((o) => o.snapshotVersion !== undefined && o.snapshotVersion !== null);",
+                  "const sec = outcomes.filter((o) => String(o.sourceId).indexOf('sec-') === 0);",
+                  "const nonGoogle = (b.findings || []).filter((f) => (f.document.discoveryEngines || []).indexOf('GOOGLE_NEWS') === -1);",
+                  "const wikinews = (b.findings || []).filter((f) => /(^|\\.)wikinews\\.org$/i.test(String(f.document.url).replace(/^https?:\\/\\//, '').split('/')[0]));",
+                  "console.log('indexed sources=' + indexed.length + ' sec sources=' + sec.length + ' non-Google findings=' + nonGoogle.length + ' wikinews findings=' + wikinews.length);",
+                  "pm.test('the indexed sources still answered', () => pm.expect(indexed.length, JSON.stringify(outcomes.map((o) => o.sourceId))).to.be.at.least(1));",
+                  "pm.test('the SEC sources are still on the run', () => pm.expect(sec.length).to.be.at.least(1));",
+                  "pm.test('publisher refusals of Google candidates did not fail the run', () => pm.expect(b.execution).to.not.eql('FAILED'));",
+                  "pm.test('the metasearch source is one source among several', () => pm.expect(outcomes.length).to.be.above(1));",
+                  "pm.test('every non-Google finding is intact and LIVE', function () {",
+                  "  nonGoogle.forEach(function (f) {",
+                  "    pm.expect(f.document.mode, f.findingId).to.eql('LIVE');",
+                  "    pm.expect(f.document.url, f.findingId).to.be.a('string').and.not.empty;",
+                  "    pm.expect(f.band, f.findingId).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "});",
+                  "pm.test('Wikinews findings, where present, are attributed to Wikinews', function () {",
+                  "  wikinews.forEach(function (f) {",
+                  "    pm.expect(f.document.discoverySource).to.eql('searxng-adverse-media');",
+                  "  });",
+                  "});",
+                  "pm.test('no paid search or news provider is anywhere in this run', function () {",
+                  "  const blob = JSON.stringify(b).toLowerCase();",
+                  "  ['dataforseo', 'serpapi', 'brightdata', 'bright data', 'newsapi.org'].forEach((p) => pm.expect(blob, p).to.not.contain(p));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/searches/{{g19SearchId}}/findings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "searches",
+                "{{g19SearchId}}",
+                "findings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "19.10 State restored: Google is REFUSED, default off, not effective",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the engine matrix is readable', () => pm.expect(pm.response.code).to.eql(200));",
+                  "if (pm.response.code !== 200) { return; }",
+                  "const google = pm.response.json().engines.find((e) => e.engine === 'GOOGLE_NEWS');",
+                  "pm.test('GOOGLE_NEWS is REFUSED, default off, not effective', function () {",
+                  "  pm.expect(google.governanceStatus).to.eql('REFUSED');",
+                  "  pm.expect(google.defaultEnabledForDiscovery).to.be.false;",
+                  "  pm.expect(google.effectiveEnabled).to.be.false;",
+                  "});",
+                  "pm.test('no persistent override exists: identical to before the search', function () {",
+                  "  const before = pm.environment.get('g19GoogleBefore');",
+                  "  pm.expect(before, 'run 19.1 first').to.be.a('string');",
+                  "  pm.expect(google).to.eql(JSON.parse(before));",
+                  "  pm.expect(google).to.not.have.property('diagnosticOverride');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "Authorization",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "ApiKey {{zquenceApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tenant/discovery/engines",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tenant",
+                "discovery",
+                "engines"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     }

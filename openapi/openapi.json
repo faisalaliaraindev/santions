@@ -2568,6 +2568,8 @@
               "retrievalDate": { "$ref": "#/components/schemas/PreciseDate" },
               "cascadeRung": { "type": "integer", "minimum": 0, "maximum": 7 },
               "mode": { "type": "string", "enum": ["MOCK", "LIVE"] },
+              "discoverySource": { "type": "string" },
+              "discoveryEngines": { "type": "array", "items": { "type": "string" } },
               "sourceRecordId": { "type": "string" },
               "sourceSnapshotVersion": { "type": "string" },
               "parserVersion": { "type": "string" },
@@ -2675,7 +2677,10 @@
           "stage": {
             "type": "string",
             "enum": ["RELEVANCE", "FETCH", "EXTRACTION", "CLASSIFICATION"]
-          }
+          },
+          "publisherDomain": { "type": "string" },
+          "fetchAttempted": { "type": "boolean" },
+          "discoveredByEngines": { "type": "array", "items": { "type": "string" }, "default": [] }
         },
         "required": [
           "leadId",
@@ -2685,7 +2690,9 @@
           "cascadeRung",
           "queryId",
           "reason",
-          "stage"
+          "stage",
+          "publisherDomain",
+          "fetchAttempted"
         ],
         "additionalProperties": false
       },
@@ -2794,6 +2801,97 @@
               "totalRequestsIssued": { "type": "integer", "minimum": 0 }
             },
             "required": ["sources", "totalRequestsIssued"],
+            "additionalProperties": false,
+            "nullable": true
+          },
+          "searxngDiscovery": {
+            "type": "object",
+            "properties": {
+              "sourceOutcome": {
+                "type": "string",
+                "enum": ["COMPLETED", "PARTIAL", "FAILED", "REFUSED"]
+              },
+              "enginesConfigured": { "type": "integer", "minimum": 0 },
+              "enginesPermitted": { "type": "integer", "minimum": 0 },
+              "enginesAttempted": { "type": "integer", "minimum": 0 },
+              "enginesReturnedResults": { "type": "integer", "minimum": 0 },
+              "enginesFailed": { "type": "integer", "minimum": 0 },
+              "perEngine": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "engine": { "type": "string" },
+                    "searxngEngineName": { "type": "string" },
+                    "attempted": { "type": "boolean" },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "RETURNED_RESULTS",
+                        "ZERO_RESULTS",
+                        "TIMEOUT",
+                        "RATE_LIMITED",
+                        "CAPTCHA",
+                        "ACCESS_DENIED",
+                        "CONNECTION_ERROR",
+                        "DISABLED_BY_POLICY",
+                        "NOT_CONFIGURED",
+                        "INTERNAL_ERROR"
+                      ]
+                    },
+                    "queriesAttempted": { "type": "integer", "minimum": 0 },
+                    "queriesReturnedResults": { "type": "integer", "minimum": 0 },
+                    "queriesFailed": { "type": "integer", "minimum": 0 },
+                    "durationMs": { "type": "integer", "minimum": 0 },
+                    "resultsReturned": { "type": "integer", "minimum": 0 },
+                    "uniqueResultsContributed": { "type": "integer", "minimum": 0 },
+                    "failureReasons": { "type": "array", "items": { "type": "string" } },
+                    "governanceStatus": { "type": "string" },
+                    "decisionId": { "type": "string" },
+                    "diagnosticOverride": { "type": "boolean" },
+                    "diagnosticOnly": { "type": "boolean" },
+                    "effectiveEnabled": { "type": "boolean" }
+                  },
+                  "required": [
+                    "engine",
+                    "searxngEngineName",
+                    "attempted",
+                    "outcome",
+                    "queriesAttempted",
+                    "queriesReturnedResults",
+                    "queriesFailed",
+                    "durationMs",
+                    "resultsReturned",
+                    "uniqueResultsContributed",
+                    "failureReasons",
+                    "governanceStatus",
+                    "decisionId"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "queriesIssued": { "type": "integer", "minimum": 0 },
+              "totalRawResults": { "type": "integer", "minimum": 0 },
+              "uniqueCandidateUrls": { "type": "integer", "minimum": 0 },
+              "duplicatesCollapsed": { "type": "integer", "minimum": 0 },
+              "articlesFetched": { "type": "integer", "minimum": 0, "nullable": true },
+              "findingsGenerated": { "type": "integer", "minimum": 0, "nullable": true }
+            },
+            "required": [
+              "sourceOutcome",
+              "enginesConfigured",
+              "enginesPermitted",
+              "enginesAttempted",
+              "enginesReturnedResults",
+              "enginesFailed",
+              "perEngine",
+              "queriesIssued",
+              "totalRawResults",
+              "uniqueCandidateUrls",
+              "duplicatesCollapsed",
+              "articlesFetched",
+              "findingsGenerated"
+            ],
             "additionalProperties": false,
             "nullable": true
           }
@@ -3048,6 +3146,7 @@
               "INDEXED_HTML",
               "NEWS_DISCOVERY_RSS",
               "NEWS_DISCOVERY_GDELT",
+              "NEWS_DISCOVERY_SEARXNG",
               "WEB_DISCOVERY_SEARX",
               "PRIMARY_SOURCE_HTTP",
               "COMPANY_REGISTRY_HTTP",

@@ -122,3 +122,34 @@ describe('what the templates claim about authority', () => {
     }
   });
 });
+
+describe('D20 — Google News RSS is refused, not merely unverified', () => {
+  // These are not style checks. `google-news-rss-en-us` is the one template in this file whose
+  // evidence has been gathered and whose answer was no, and the registry record is where an
+  // administrator reads that before approving anything. If the refusal can be dropped from the
+  // record without a test failing, the next person to tidy this file removes it and the source
+  // becomes activatable on a reading of "UNVERIFIED — go and verify it".
+
+  it('records the refusal on the version content itself, not only in a comment', () => {
+    const summary = GOOGLE_NEWS_RSS_TEMPLATE.accessPolicy.policySummary;
+    expect(summary).toContain('DO NOT ACTIVATE');
+    expect(summary).toContain('D20');
+    // The two independent grounds. Either alone is sufficient, so both must survive.
+    expect(summary).toContain('non-commercial use');
+    expect(summary).toContain('robot, spider');
+  });
+
+  it('still carries no first-contact approval and no established robots position', () => {
+    // The fetch gate (D-042) refuses on either of these, so they are the mechanical backstop
+    // behind the documentary refusal above. A future edit that "completes" the record by filling
+    // them in would make the source callable.
+    expect(GOOGLE_NEWS_RSS_TEMPLATE.accessPolicy.firstContactApproval).toBeNull();
+    expect(GOOGLE_NEWS_RSS_TEMPLATE.robotsPosition).toBe('NOT_ESTABLISHED');
+  });
+
+  it('names no licence terms, because there are none this service may rely on', () => {
+    // `UNVERIFIED` here means "no usable licence position exists", which is stronger than the
+    // same string on the Bing template, where it means "nobody has looked yet".
+    expect(GOOGLE_NEWS_RSS_TEMPLATE.licenceTermsVersion).toBe('UNVERIFIED');
+  });
+});

@@ -115,4 +115,23 @@ export function assertNotFixtureAuthorisation(request: FetchRequest): void {
         `be fetching a real host under a record saying no real host was involved (T55).`,
     );
   }
+  // The same rule for the other non-publisher position. An internal-discovery authorisation
+  // records both SEC-02 assertions — the URL policy and the SSRF validation — as **false**,
+  // because neither half runs on the hop to a service we configured ourselves. Handing it to the
+  // publisher transport would therefore fetch a third party's document under an authorisation
+  // that truthfully says neither screening happened, which is the one combination
+  // `assertFetchAuthorised` cannot catch precisely because the fields are honest.
+  //
+  // (The two field names are spelt out in prose rather than in code here on purpose: the
+  // "only the gate issues an authorisation" test in fetch-gate.test.ts greps this directory for
+  // the literal assignment, and a comment that looked like one would read as an offender.)
+  if (request.authorisation.robotsPosition === 'INTERNAL_SERVICE_NOT_A_PUBLISHER') {
+    throw new Error(
+      `Refusing to fetch ${request.url} on an internal-discovery authorisation. ` +
+        `INTERNAL_SERVICE_NOT_A_PUBLISHER is issued only for a query to a service this ` +
+        `deployment runs, where no robots position, no first-contact approval and neither half ` +
+        `of the SEC-02 address screening applies. A publisher fetch must carry an authorisation ` +
+        `on which all three did.`,
+    );
+  }
 }

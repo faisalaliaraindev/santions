@@ -172,6 +172,41 @@ const rawSchema = z.object({
    * may call this API, which is a different question from where the customer's interface lives.
    */
   PUBLIC_APP_URL: optional(z.string().url()),
+
+  /**
+   * The self-hosted SearXNG instance the rung-5 discovery connector queries.
+   *
+   * Optional, and absent is a supported state rather than a misconfiguration: without it the
+   * connector is not constructed and the rung reports as unsearched, which is true. There is
+   * deliberately **no default**. A default would point the connector at a loopback port nobody
+   * deployed, and the resulting `ECONNREFUSED` would read as "the discovery layer is down"
+   * rather than as "no discovery layer is configured" — the same distinction
+   * `FETCH_CONTACT_URL` is defaulted away from, for the same reason.
+   *
+   * It is validated further by `validateSearxngBaseUrl`, which refuses a URL carrying a path,
+   * a query or credentials. This schema only establishes that it is a URL at all; the narrower
+   * rule lives beside the client that enforces it.
+   *
+   * Note what is NOT checked here: that the host is public. It is expected to be loopback or a
+   * private service address, which is the one shape the SEC-02 policy refuses for discovered
+   * URLs — see the client's header for why that is the right asymmetry rather than a hole.
+   */
+  SEARXNG_URL: optional(z.string().url()),
+
+  /**
+   * **LOCAL DIAGNOSTIC ONLY.** Lets one named tenant run `GOOGLE_NEWS` on a single LIVE search
+   * that carries `X-Local-Discovery-Diagnostic: GOOGLE_NEWS`, against a loopback process.
+   *
+   * It changes no engine setting and no governance reading — see
+   * `sources/searxng/local-diagnostic.ts` for every condition. Refused outright in production:
+   * setting it there is a startup failure, like the four-eyes bypass.
+   */
+  ALLOW_LOCAL_GOOGLE_DIAGNOSTIC: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** The one tenant the local Google diagnostic may run for. Unset permits nobody. */
+  GOOGLE_DIAGNOSTIC_TENANT_ID: optional(z.string().min(1)),
 });
 
 export type AppConfig = Readonly<{
@@ -184,6 +219,15 @@ export type AppConfig = Readonly<{
    * version. Always false in production, where setting the flag fails startup.
    */
   disableSourceFourEyesForTesting: boolean;
+  /**
+   * **LOCAL DIAGNOSTIC ONLY.** The process half of the local Google diagnostic's conditions.
+   * `allowLocalGoogleDiagnostic` is always false in production, where setting it fails startup.
+   */
+  localGoogleDiagnostic: {
+    isProduction: boolean;
+    allowLocalGoogleDiagnostic: boolean;
+    googleDiagnosticTenantId: string | null;
+  };
   mongodbUri: string;
   oidc: { issuer: string; clientId: string; clientSecret: string; audience: string };
   session: { secret: string; secure: boolean };
@@ -226,6 +270,13 @@ export type AppConfig = Readonly<{
     worldBankSanctionsApiKey: string | null;
     /** Null when unset, which leaves the live fetch adapter unconstructed. See FR-06. */
     fetchContactUrl: string | null;
+    /**
+     * The SearXNG base URL, or null when none is configured.
+     *
+     * Null leaves the rung-5 connector unconstructed and the rung reporting as unsearched. It is
+     * not a fallback to anything.
+     */
+    searxngUrl: string | null;
   };
 }>;
 
@@ -289,6 +340,15 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
         'DISABLE_SOURCE_FOUR_EYES_FOR_TESTING is set in production. It is a testing-only flag ' +
           'that lets one principal both propose and approve a source version, and it must never ' +
           'be set outside a local or test deployment. Unset it.',
+      );
+    }
+    // The local Google diagnostic runs an engine D20 refused. It exists for a developer's
+    // loopback process and nowhere else, so production cannot enable it at all.
+    if (raw.ALLOW_LOCAL_GOOGLE_DIAGNOSTIC) {
+      problems.push(
+        'ALLOW_LOCAL_GOOGLE_DIAGNOSTIC is set in production. It is a local-development ' +
+          'diagnostic that runs GOOGLE_NEWS, which D20 refused, and it must never be set ' +
+          'outside a local deployment. Unset it.',
       );
     }
 
@@ -428,6 +488,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     port: raw.PORT,
     // Belt and braces: production already failed above, so this can only be true off production.
     disableSourceFourEyesForTesting: !isProduction && raw.DISABLE_SOURCE_FOUR_EYES_FOR_TESTING,
+    localGoogleDiagnostic: {
+      isProduction,
+      // Belt and braces, as above.
+      allowLocalGoogleDiagnostic: !isProduction && raw.ALLOW_LOCAL_GOOGLE_DIAGNOSTIC,
+      googleDiagnosticTenantId: raw.GOOGLE_DIAGNOSTIC_TENANT_ID ?? null,
+    },
     mongodbUri: raw.MONGODB_URI,
     oidc: {
       issuer: raw.OIDC_ISSUER,
@@ -481,6 +547,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
       companiesHouseApiKey: raw.COMPANIES_HOUSE_API_KEY ?? null,
       worldBankSanctionsApiKey: raw.WORLD_BANK_SANCTIONS_API_KEY ?? null,
       fetchContactUrl: raw.FETCH_CONTACT_URL ?? null,
+      searxngUrl: raw.SEARXNG_URL ?? null,
     },
   };
 }

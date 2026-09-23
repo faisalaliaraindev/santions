@@ -25,8 +25,29 @@ before any work starts.
    run it, say so.
 
    **First live contact has happened** — 2026-09-16, the SEC, under D17. See
-   `docs/sources/first-live-contact.md` for exactly what was contacted and when. That is the
-   only source ever contacted, and it does not make any other claim about coverage true.
+   `docs/sources/first-live-contact.md` for exactly what was contacted and when. Since then:
+   GDELT under D18, and one bounded Google-News-via-SearXNG diagnostic under D20-A (which
+   activated nothing — Google is still REFUSED and now also defaults OFF). Each was contacted
+   under a decision that names it, and none of them makes any other claim about coverage true.
+
+   **`en.wikinews.org` was contacted on 2026-09-23 under D22**, approved by Faisal Ali, Source
+   admin. `wikinews-en` is ACTIVE through a four-eyes lifecycle and one article has been fetched
+   and turned into one finding — the rung-5 chain is proven end to end.
+
+   **It is the ONLY publisher approved for rung-5 fetching.** Every other domain SearXNG
+   discovers is refused `PUBLISHER_NOT_APPROVED`, per candidate, and that is correct rather than
+   a coverage gap. Approving another one needs its own decision recorded in
+   `scripts/lib/first-contact-approvals.mjs`, which throws for a source no decision names.
+
+   **A local-only Google diagnostic exists** (twenty-ninth session): one LIVE search, by the
+   tenant named in `GOOGLE_DIAGNOSTIC_TENANT_ID`, with `ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true`, to a
+   loopback API, carrying `X-Local-Discovery-Diagnostic: GOOGLE_NEWS`, may add `GOOGLE_NEWS` for
+   that request only. It writes no setting and moves nothing in D20; production refuses to start
+   with the flag. Postman Folder 19 and `docs/testing/google-live-local.md`. The user runs it.
+
+   **The user drives first contact.** Build and verify up to the request, then stop and hand over
+   the armed command. Never fill `robotsPosition` or `firstContactApproval` on a registry record
+   by editing the file — that is bypassing the lifecycle, not completing it.
 
 ## Purity boundary
 

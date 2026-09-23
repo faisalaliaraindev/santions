@@ -67,6 +67,65 @@ export interface Lead {
   /** Which planned query (FR-04) produced this lead. Carried through to the coverage view. */
   readonly queryId: string;
   readonly provenance: AdapterProvenance;
+  /**
+   * How a metasearch source found this lead, when one did. Absent for every other connector.
+   *
+   * See `DiscoveryAttribution`. It is optional because most discovery sources are the publisher
+   * themselves — an SEC feed is not "discovered by" anything — and inventing a channel for them
+   * would make the field meaningless where it is most likely to be read.
+   */
+  readonly discovery?: DiscoveryAttribution | undefined;
+}
+
+/**
+ * The channel a lead came through, as distinct from where the evidence lives.
+ *
+ * # The distinction this type exists to hold
+ *
+ * A SearXNG result is **three** different things and collapsing any two of them produces a
+ * wrong record:
+ *
+ * - `discoverySource` — the thing we asked. `searxng-adverse-media`, our own internal service.
+ *   It is the registry source, it is what a budget is charged against, and it is **never the
+ *   publisher of the evidence**. A finding whose provenance named SearXNG would be a finding
+ *   citing a search engine for a fact about a person.
+ * - `discoveryEngines` — the upstream engines that surfaced it. `GOOGLE_NEWS`, `BING_NEWS` and
+ *   the rest. These are **channels**, not authorities: that Bing returned an article is not
+ *   evidence about the article's subject, and four engines returning the same article is one
+ *   article rather than four confirmations (FR-10, and §13 of the milestone brief).
+ * - the publisher — `Lead.publisher` and `Lead.publisherDomain`, resolved from the article's own
+ *   URL. That is the only one of the three that can ever support a finding, and it only does so
+ *   after the document itself has been fetched through the gate and read.
+ *
+ * # Why the engines are a list
+ *
+ * SearXNG merges results: one Reuters URL returned by Google, Brave and Bing arrives as **one**
+ * result carrying `engines: ["google news", "brave.news", "bing news"]`. Keeping all three is
+ * what makes "found by three engines" expressible without it becoming three candidates, three
+ * fetches and three findings. Dropping to a single engine would lose the attribution; splitting
+ * into three leads would manufacture independence the run does not have.
+ */
+export interface DiscoveryAttribution {
+  /** The registry source id of the discovery service. Never the publisher. */
+  readonly discoverySource: string;
+  /**
+   * Every engine that surfaced this URL, deduplicated and sorted.
+   *
+   * Sorted so that the same set found in a different order is the same value — the record is
+   * compared in tests and read by a reviewer, and an order that depends on which engine answered
+   * first is noise in both.
+   */
+  readonly discoveryEngines: readonly string[];
+  /**
+   * The relevance score the discovery service assigned, or null.
+   *
+   * Carried because it is what the source said, and **read by nothing**. It is a metasearch
+   * instance's opinion about ranking, which is not evidence about a person and is not allowed to
+   * become one: FR-06 is explicit that relevance filtering never decides adversity.
+   */
+  readonly discoveryScore: number | null;
+  /** The category the discovery service assigned the result, as it named it. Null when absent. */
+  readonly discoveryCategory: string | null;
 }
 
 /**
@@ -90,6 +149,12 @@ export interface DiscoveryRunContext {
   readonly jurisdictions: readonly string[];
   readonly languages: readonly string[];
   readonly taxonomy: TaxonomyVersion;
+  /**
+   * **LOCAL DIAGNOSTIC ONLY.** Engines this run asked to execute beyond the tenant's resolved
+   * set. Only the metasearch connector reads it, and only after re-checking its own process's
+   * environment (`sources/searxng/local-diagnostic.ts`). Absent on every normal run.
+   */
+  readonly diagnosticEngines?: readonly string[] | undefined;
 }
 
 /**

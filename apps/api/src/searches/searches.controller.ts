@@ -1,5 +1,16 @@
-import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 
 import {
   cancelSearchSchema,
@@ -21,6 +32,12 @@ import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { ApiException } from '../common/api-exception.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';
 import { validate } from '../common/zod-validation.pipe.js';
+import type { AppConfig } from '../config/config.js';
+import {
+  decideLocalDiagnostic,
+  LOCAL_DIAGNOSTIC_HEADER,
+} from '../sources/searxng/local-diagnostic.js';
+import { APP_CONFIG } from '../tokens.js';
 import { requireTenant } from '../subjects/subjects.controller.js';
 import { IdempotencyService } from './idempotency.service.js';
 import { SearchesService } from './searches.service.js';
@@ -33,6 +50,7 @@ export class SearchesController {
     @Inject(SearchesService) private readonly searches: SearchesService,
     @Inject(IdempotencyService) private readonly idempotency: IdempotencyService,
     @Inject(AssociationGraphService) private readonly graph: AssociationGraphService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   /**
@@ -48,20 +66,54 @@ export class SearchesController {
     @CurrentPrincipal() principal: Principal,
     @Body(validate(createSearchSchema)) body: CreateSearchInput,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ searchId: string; statusUrl: string; execution: SearchSummary['execution'] }> {
     const tenantId = requireTenant(principal);
     const now = new Date();
 
+    // The local Google diagnostic — every condition is in `local-diagnostic.ts`. Decided here,
+    // before anything is written, and refused loudly rather than ignored: a developer who asked
+    // for Google and silently got a normal search would read Google's absence as its answer.
+    const diagnostic = decideLocalDiagnostic(this.config.localGoogleDiagnostic, {
+      tenantId,
+      header: req.headers[LOCAL_DIAGNOSTIC_HEADER],
+      // The raw Host header rather than `req.hostname`, which a trusted proxy setting would let
+      // X-Forwarded-Host replace. The socket address is likewise the socket's, never `req.ip`.
+      hostname: hostnameOf(req.headers.host),
+      remoteAddress: req.socket.remoteAddress,
+    });
+    if (diagnostic.kind === 'REFUSED') {
+      throw new ApiException(
+        'FORBIDDEN',
+        'The local discovery diagnostic is not available for this request.',
+        {
+          internalDetail: `tenant=${tenantId} localDiagnosticRefused: ${diagnostic.reason}`,
+        },
+      );
+    }
+    if (diagnostic.kind === 'GRANTED' && body.environment !== 'live') {
+      throw new ApiException(
+        'VALIDATION_FAILED',
+        'The local discovery diagnostic applies only to a live search.',
+        { details: [{ path: 'environment', message: 'must be live' }] },
+      );
+    }
+    const diagnosticEngines = diagnostic.kind === 'GRANTED' ? diagnostic.engines : null;
+
     // Without a key there is no duplicate protection, so the simple path runs unguarded and
     // the client owns the consequences. With a key, exactly one run is committed (T22).
     if (idempotencyKey === undefined || idempotencyKey.trim() === '') {
-      const created = await this.searches.create({ principal, data: body, now });
+      const created = await this.searches.create({ principal, data: body, now, diagnosticEngines });
       res.status(202);
       return accepted(created);
     }
 
-    const requestHash = IdempotencyService.hashRequest(body);
+    // The diagnostic is part of what was asked, so the same key with and without it is two
+    // different requests rather than a replay.
+    const requestHash = IdempotencyService.hashRequest(
+      diagnosticEngines === null ? body : { ...body, localDiscoveryDiagnostic: diagnosticEngines },
+    );
     const claim = await this.idempotency.claim({
       tenantId,
       key: idempotencyKey,
@@ -87,7 +139,7 @@ export class SearchesController {
     }
 
     try {
-      const created = await this.searches.create({ principal, data: body, now });
+      const created = await this.searches.create({ principal, data: body, now, diagnosticEngines });
       await this.idempotency.complete({
         tenantId,
         key: idempotencyKey,
@@ -235,6 +287,19 @@ export function parseIfMatch(header: string | undefined): number {
     });
   }
   return revision;
+}
+
+/** The hostname of a Host header, without its port. Handles a bracketed IPv6 literal. */
+function hostnameOf(host: string | undefined): string | undefined {
+  if (host === undefined) {
+    return undefined;
+  }
+  const trimmed = host.trim();
+  if (trimmed.startsWith('[')) {
+    const end = trimmed.indexOf(']');
+    return end === -1 ? undefined : trimmed.slice(1, end);
+  }
+  return trimmed.split(':')[0];
 }
 
 function accepted(search: SearchSummary): {

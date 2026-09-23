@@ -180,7 +180,10 @@ function notModified(): SourceOutcome<FetchResult> {
 }
 
 function readerFor(version: ActiveSourceVersion | null): SourceVersionReader {
-  return { loadActive: () => Promise.resolve(version) };
+  return {
+    loadActive: () => Promise.resolve(version),
+    loadActiveByDomain: () => Promise.resolve(null),
+  };
 }
 
 function adapterFor(

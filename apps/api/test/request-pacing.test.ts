@@ -325,7 +325,10 @@ function queryFor(index: number): DiscoveryQuery {
 describe('the GDELT connector still reports one request per query, unaffected by pacing', () => {
   it('issues one request per eligible query against distinct endpoints, and merges none', async () => {
     const time = fakeTime();
-    const reader: SourceVersionReader = { loadActive: () => Promise.resolve(gdeltVersion(0.2)) };
+    const reader: SourceVersionReader = {
+      loadActive: () => Promise.resolve(gdeltVersion(0.2)),
+      loadActiveByDomain: () => Promise.resolve(null),
+    };
     const fetch = new TimedFetch(time.now);
     const log = new DiscoveryRequestLog();
     const adapter = new GdeltDiscoveryAdapter({
@@ -365,7 +368,10 @@ describe('the GDELT connector still reports one request per query, unaffected by
     // The connector does not pace; it authorises. What it must do is put the approved ceiling on
     // the authorisation, because that is the only thing `HttpEvidenceFetchAdapter` can read it
     // from at the moment the socket opens.
-    const reader: SourceVersionReader = { loadActive: () => Promise.resolve(gdeltVersion(0.2)) };
+    const reader: SourceVersionReader = {
+      loadActive: () => Promise.resolve(gdeltVersion(0.2)),
+      loadActiveByDomain: () => Promise.resolve(null),
+    };
     const fetch = new TimedFetch(() => 0);
     const adapter = new GdeltDiscoveryAdapter({
       sourceId: GDELT_DOC_V2_SOURCE_ID,
@@ -387,7 +393,10 @@ describe('the GDELT connector still reports one request per query, unaffected by
     // findings response still reported requestsIssued 53 against a recorded budget of 24. A count
     // that says we sent 53 requests a publisher never saw is worse than no count at all: it is
     // the number an operator would use to answer "did we exceed their limit?".
-    const reader: SourceVersionReader = { loadActive: () => Promise.resolve(gdeltVersion(0.2)) };
+    const reader: SourceVersionReader = {
+      loadActive: () => Promise.resolve(gdeltVersion(0.2)),
+      loadActiveByDomain: () => Promise.resolve(null),
+    };
     const log = new DiscoveryRequestLog();
     const refusing: EvidenceFetchPort = {
       descriptor: FETCH_DESCRIPTOR,
@@ -426,7 +435,10 @@ describe('the GDELT connector still reports one request per query, unaffected by
   });
 
   it('records no ceiling on the authorisation when the version records none', async () => {
-    const reader: SourceVersionReader = { loadActive: () => Promise.resolve(gdeltVersion(null)) };
+    const reader: SourceVersionReader = {
+      loadActive: () => Promise.resolve(gdeltVersion(null)),
+      loadActiveByDomain: () => Promise.resolve(null),
+    };
     const fetch = new TimedFetch(() => 0);
     const adapter = new GdeltDiscoveryAdapter({
       sourceId: GDELT_DOC_V2_SOURCE_ID,

@@ -37,6 +37,11 @@ import type { FixedFeedPollCache } from '../sources/feed-poll-cache.js';
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import type { NewsDiscoveryPort } from '../sources/news-discovery.port.js';
 import { GdeltDiscoveryAdapter } from '../sources/gdelt-discovery.adapter.js';
+import { SearxngDiscoveryAdapter } from '../sources/searxng/searxng-discovery.adapter.js';
+import type { SearxngEngineLog } from '../sources/searxng/engine-health.js';
+import type { LocalDiagnosticPolicy } from '../sources/searxng/local-diagnostic.js';
+import type { EngineEnablementPort } from '../sources/searxng/engine-enablement.service.js';
+import type { SearxngClient } from '../sources/searxng/searxng-client.js';
 import type { RequestPacer } from '../sources/request-pacer.js';
 import { RssNewsDiscoveryAdapter } from '../sources/rss-news-discovery.adapter.js';
 import type { Clock, OperatingMode, SourceOutcome } from '../sources/source-adapter.js';
@@ -79,9 +84,15 @@ const DEFAULT_ENGINE_MIX: readonly string[] = ['duckduckgo', 'wikipedia'];
  * Adding a publisher should almost always be the first kind. A new connector type means a new
  * response format, not a new source.
  */
-const LIVE_CONNECTORS: Readonly<Record<string, 'RSS' | 'GDELT'>> = {
+const LIVE_CONNECTORS: Readonly<Record<string, 'RSS' | 'GDELT' | 'SEARXNG'>> = {
   NEWS_DISCOVERY_RSS: 'RSS',
   NEWS_DISCOVERY_GDELT: 'GDELT',
+  // Rung 5. A third type for a third response format, and — unlike the other two — a different
+  // *transport*: it addresses a service this deployment runs rather than a publisher, so it does
+  // not go through `EvidenceFetchPort`. It is still built here, still keyed off an approved
+  // version's `connectorType`, and still handed to the cascade as an ordinary ladder entry.
+  // Everything about how it is *asked* is the same; only what it dials differs.
+  NEWS_DISCOVERY_SEARXNG: 'SEARXNG',
 };
 
 /**
@@ -132,6 +143,34 @@ export interface LiveDiscoveryDeps {
    * A process without one falls back to the module-level `requestPacer`.
    */
   readonly pacer?: RequestPacer;
+  /**
+   * The client for this process's SearXNG instance, or null when none is configured.
+   *
+   * Null is a supported state and is not defaulted: the connector is constructed with a null
+   * client, the gate refuses every query with `INTERNAL_SERVICE_NOT_CONFIGURED`, and the rung
+   * reports as unsearched with that reason on the coverage line. The alternative — not building
+   * the connector at all — would report the rung as having no approved source, which is a
+   * different and untrue statement when a source IS approved.
+   */
+  readonly searxngClient?: SearxngClient | null | undefined;
+  /**
+   * Per-engine diagnostics. One per process, like the request log, and for the same reason: what
+   * it measures is traffic the upstream engines see.
+   */
+  readonly searxngEngineLog?: SearxngEngineLog | undefined;
+  /**
+   * **LOCAL DIAGNOSTIC ONLY.** This process's half of the local Google diagnostic conditions,
+   * handed to the metasearch connector. Absent means no run is ever widened.
+   */
+  readonly localDiagnostic?: LocalDiagnosticPolicy | undefined;
+  /**
+   * Per-tenant engine switches, resolved at query time.
+   *
+   * Required for the rung-5 connector, and absent rather than defaulted: a connector that fell
+   * back to the platform matrix would ignore every tenant's configuration silently, which is the
+   * one way this control surface could look like it works and not.
+   */
+  readonly searxngEnablement?: EngineEnablementPort | undefined;
 }
 
 export class LadderBuilder {
@@ -286,37 +325,87 @@ export class LadderBuilder {
       return existing;
     }
 
-    if (this.live.evidenceFetch === null) {
-      // No contact URL, or no source health. `buildSourceAdapters` already refuses to build the
-      // fetch adapter without either, and an RSS connector with nothing to fetch through would
-      // be a connector that cannot make a request — so the rung reports unsearched, honestly.
-      this.logger.warn(
-        `${source.sourceId} is approved at rung ${String(source.rung)} and this process has no ` +
-          `evidence-fetch adapter, so it cannot be read. FETCH_CONTACT_URL and source health are ` +
-          `both required (FR-06, D5). The rung will report as unsearched.`,
-      );
-      return null;
-    }
-
-    const shared = {
-      sourceId: source.sourceId,
-      versions: this.live.versions,
-      gate: this.live.gate,
-      fetch: this.live.evidenceFetch,
+    const optional = {
       // Absent rather than null when the process has none: `exactOptionalPropertyTypes` makes
       // the difference visible, and an adapter without a cache polls every time, honestly.
-      ...(this.live.pollCache === undefined ? {} : { pollCache: this.live.pollCache }),
       ...(this.live.clock === undefined ? {} : { clock: this.live.clock }),
       ...(this.live.requestLog === undefined ? {} : { requestLog: this.live.requestLog }),
-      ...(this.live.pacer === undefined ? {} : { pacer: this.live.pacer }),
     };
-    const adapter =
-      kind === 'GDELT' ? new GdeltDiscoveryAdapter(shared) : new RssNewsDiscoveryAdapter(shared);
+
+    let adapter: NewsDiscoveryPort;
+
+    if (kind === 'SEARXNG') {
+      // **The one connector that does not need the evidence-fetch adapter**, and the reason is
+      // the whole difference between rung 5 and the feed rungs: it addresses a service this
+      // deployment runs, over its own narrow transport, rather than a publisher over the one
+      // screened HTTPS path. Requiring `evidenceFetch` here would have made a missing
+      // `FETCH_CONTACT_URL` silently remove the discovery layer as well — two unrelated
+      // capabilities failing together for a reason neither of them has.
+      //
+      // The **articles** it discovers are a different matter entirely. Those are third-party
+      // documents and they go through `EvidenceFetchPort` like every other lead. A process
+      // without a fetch adapter therefore discovers leads it cannot fetch, and records each one
+      // as a rejected lead with that reason — which is honest, and visibly different from
+      // finding nothing.
+      if (this.live.searxngEngineLog === undefined || this.live.searxngEnablement === undefined) {
+        this.logger.warn(
+          `${source.sourceId} is approved at rung ${String(source.rung)} and this process holds ` +
+            `no SearXNG engine log or no engine-enablement service, so it cannot be run. Both ` +
+            `are required and neither is defaulted: without the log a run cannot say which ` +
+            `engines answered, and without the enablement service it would query the platform ` +
+            `defaults while ignoring every tenant's configuration. The rung reports as ` +
+            `unsearched rather than running blind.`,
+        );
+        return null;
+      }
+      adapter = new SearxngDiscoveryAdapter({
+        sourceId: source.sourceId,
+        versions: this.live.versions,
+        gate: this.live.gate,
+        client: this.live.searxngClient ?? null,
+        engineLog: this.live.searxngEngineLog,
+        enablement: this.live.searxngEnablement,
+        ...(this.live.localDiagnostic === undefined
+          ? {}
+          : { localDiagnostic: this.live.localDiagnostic }),
+        ...optional,
+      });
+    } else {
+      if (this.live.evidenceFetch === null) {
+        // No contact URL, or no source health. `buildSourceAdapters` already refuses to build the
+        // fetch adapter without either, and an RSS connector with nothing to fetch through would
+        // be a connector that cannot make a request — so the rung reports unsearched, honestly.
+        this.logger.warn(
+          `${source.sourceId} is approved at rung ${String(source.rung)} and this process has no ` +
+            `evidence-fetch adapter, so it cannot be read. FETCH_CONTACT_URL and source health ` +
+            `are both required (FR-06, D5). The rung will report as unsearched.`,
+        );
+        return null;
+      }
+
+      const shared = {
+        sourceId: source.sourceId,
+        versions: this.live.versions,
+        gate: this.live.gate,
+        fetch: this.live.evidenceFetch,
+        ...(this.live.pollCache === undefined ? {} : { pollCache: this.live.pollCache }),
+        ...(this.live.pacer === undefined ? {} : { pacer: this.live.pacer }),
+        ...optional,
+      };
+      adapter =
+        kind === 'GDELT' ? new GdeltDiscoveryAdapter(shared) : new RssNewsDiscoveryAdapter(shared);
+    }
+
     this.liveAdapters.set(source.sourceId, adapter);
     this.logger.log(
       `Live ${kind} connector for ${source.sourceName} (${source.sourceId}) at rung ` +
-        `${String(source.rung)}. Every request it makes passes the same gate a document fetch ` +
-        `does, including the named first-contact approval (D-042).`,
+        `${String(source.rung)}. ` +
+        (kind === 'SEARXNG'
+          ? `Every query passes FetchGateService.authoriseInternalDiscoveryService, and every ` +
+            `upstream engine it may name is approved individually in engine-governance.ts. ` +
+            `Running the instance ourselves authorises no engine.`
+          : `Every request it makes passes the same gate a document fetch does, including the ` +
+            `named first-contact approval (D-042).`),
     );
     return adapter;
   }

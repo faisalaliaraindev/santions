@@ -100,6 +100,24 @@ export const connectorTypeSchema = z.enum([
    * rather than a feed and needs its own parse, not because it is a different kind of source.
    */
   'NEWS_DISCOVERY_GDELT',
+  /**
+   * Our own self-hosted SearXNG instance, as the adverse-media discovery layer (rung 5).
+   *
+   * A separate type from `WEB_DISCOVERY_SEARX` below, and the difference is not cosmetic.
+   * `WEB_DISCOVERY_SEARX` was declared in Phase D for the `WebDiscoveryPort` seam, which is
+   * asked per **engine mix** and has a second method for rung-6 site search. Nothing was ever
+   * built behind it. What this milestone built is asked exactly as the other news rungs are —
+   * one planned query at a time, through `NewsDiscoveryPort` — so it goes on the same ladder
+   * path as `NEWS_DISCOVERY_RSS` and `NEWS_DISCOVERY_GDELT` rather than growing a parallel
+   * execution path beside them.
+   *
+   * It is also the one connector type the fetch gate treats as an **internal service**: it is
+   * the value `authoriseInternalDiscoveryService` requires, and a source recorded as anything
+   * else cannot reach that method. The upstream engines it queries are governed separately and
+   * are not authorised by this type — see `apps/api/src/sources/searxng/engine-governance.ts`.
+   */
+  'NEWS_DISCOVERY_SEARXNG',
+  /** Declared in Phase D for the `WebDiscoveryPort` seam. No adapter was ever built behind it. */
   'WEB_DISCOVERY_SEARX',
   'PRIMARY_SOURCE_HTTP',
   'COMPANY_REGISTRY_HTTP',
@@ -349,10 +367,13 @@ export const sourceAccessPolicySchema = z
       'connector would have to guess where the query goes, and a guess aimed at a third ' +
       "party's server is not a guess worth making.",
   })
-  .refine((policy) => policy.endpointKind !== 'QUERY_FEED' || policy.endpointUrl !== null, {
-    path: ['endpointUrl'],
-    message: 'A QUERY_FEED must record the endpoint it queries.',
-  });
+  // The companion rule — "a QUERY_FEED must record the endpoint it queries" — is NOT here.
+  //
+  // It cannot be, because it has one exception and the exception is decided by `connectorType`,
+  // which this schema cannot see. See `sourceContentSchema.superRefine` below, where both fields
+  // are in scope. Leaving a weakened version here as well would be two rules disagreeing about
+  // the same field.
+  ;
 export type SourceAccessPolicy = z.infer<typeof sourceAccessPolicySchema>;
 
 /**
@@ -427,6 +448,41 @@ export const sourceContentSchema = z
         code: z.ZodIssueCode.custom,
         path: ['countries'],
         message: 'GLOBAL jurisdiction scope must not also carry an incomplete named-country list.',
+      });
+    }
+    // **A QUERY_FEED must record the endpoint it queries — unless it is a service we run.**
+    //
+    // The rule exists so that a connector never has to guess an address, because "a guess aimed
+    // at a third party's server is not a guess worth making". Every word of that reasoning is
+    // about a third party. `NEWS_DISCOVERY_SEARXNG` addresses an instance this deployment runs,
+    // at an address that comes from `SEARXNG_URL` and is validated at startup — there is no
+    // guess, and recording a loopback URL on an approved version would put a deployment detail
+    // where the next reader would take it for a publisher's published address.
+    //
+    // The exemption cannot be borrowed. It is keyed on one connector type, that type is the one
+    // `authoriseInternalDiscoveryService` requires, and `authoriseUrl` — the gate every
+    // publisher goes through — refuses that type outright. A source claiming this type to skip
+    // recording an endpoint would also be refused the publisher path entirely.
+    const addressedInternally = content.connectorType === 'NEWS_DISCOVERY_SEARXNG';
+    if (
+      !addressedInternally &&
+      content.accessPolicy?.endpointKind === 'QUERY_FEED' &&
+      content.accessPolicy.endpointUrl === null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['accessPolicy', 'endpointUrl'],
+        message: 'A QUERY_FEED must record the endpoint it queries.',
+      });
+    }
+    if (addressedInternally && content.accessPolicy?.endpointUrl !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['accessPolicy', 'endpointUrl'],
+        message:
+          'An internal discovery service must NOT record an endpoint URL. Its address is ' +
+          'deployment configuration (SEARXNG_URL), and a URL here would be read as the ' +
+          'published address of a publisher.',
       });
     }
     if (content.connectorType.startsWith('INDEXED_') && content.refreshPolicy === undefined) {

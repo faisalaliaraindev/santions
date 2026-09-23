@@ -10,6 +10,14 @@ import { SearchJobHandler } from './pipeline/search-job.handler.js';
 import { CascadeService } from './pipeline/cascade.service.js';
 import { LadderBuilder } from './pipeline/ladder.builder.js';
 import { DiscoveryRequestLog } from './sources/discovery-request-log.js';
+import { SearxngEngineLog } from './sources/searxng/engine-health.js';
+import { EngineEnablementService } from './sources/searxng/engine-enablement.service.js';
+import { DiscoveryEnginesController } from './tenancy/discovery-engines.controller.js';
+import {
+  NodeSearxngTransport,
+  SearxngClient,
+  validateSearxngBaseUrl,
+} from './sources/searxng/searxng-client.js';
 import { FixedFeedPollCache } from './sources/feed-poll-cache.js';
 import { SearchPipeline } from './pipeline/search-pipeline.service.js';
 import { FetchGateService } from './sources/fetch-gate.service.js';
@@ -84,7 +92,7 @@ import { ApiExceptionFilter } from './common/exception.filter.js';
 import { ReservedController } from './common/reserved.controller.js';
 import { loadConfig, type AppConfig } from './config/config.js';
 import { DevMailboxController } from './dev/dev-mailbox.controller.js';
-import { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
+import { APP_CONFIG, MONGO_CLIENT, MONGO_DB, SEARXNG_CLIENT } from './tokens.js';
 import { HealthController } from './health/health.controller.js';
 import {
   DEAD_LETTER_PORT,
@@ -144,7 +152,7 @@ import { EntitlementsService } from './tenancy/entitlements.service.js';
 import { PolicyService } from './tenancy/policy.service.js';
 
 // Re-exported for convenience; defined in ./tokens.js to avoid a circular import.
-export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
+export { APP_CONFIG, MONGO_CLIENT, MONGO_DB, SEARXNG_CLIENT } from './tokens.js';
 
 /**
  * Every indexed source's reviewed content, in one lookup.
@@ -157,7 +165,10 @@ export { APP_CONFIG, MONGO_CLIENT, MONGO_DB } from './tokens.js';
  * reviewed minimum while reading a number nobody had reviewed.
  */
 const INDEXED_SOURCE_REFRESH_POLICIES: Readonly<
-  Record<string, { intervalSeconds: number; staleAfterSeconds: number; minimumExpectedRows: number }>
+  Record<
+    string,
+    { intervalSeconds: number; staleAfterSeconds: number; minimumExpectedRows: number }
+  >
 > = {
   ...Object.fromEntries(
     Object.entries(GLOBAL_INDEXED_SOURCE_CONTENT).map(([sourceId, content]) => [
@@ -245,6 +256,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
     // check on a route that was never meant to exist (FR-15, decision D-007).
     SignupController,
     TenantApiKeysController,
+    DiscoveryEnginesController,
     ReservedController,
     AdminController,
     // Absent in production, rather than present and guarded. See DEV_ONLY_CONTROLLERS.
@@ -623,38 +635,13 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
       useFactory: (): ReadonlyMap<string, IndexedSourceSchedule> => {
         const ofac = new OfacXmlParser();
         return new Map<string, IndexedSourceSchedule>([
-          [
-            OFAC_SDN_SOURCE_ID,
-            indexedSchedule(
-              OFAC_SDN_SOURCE_ID,
-              OFAC_SDN_XML_URL,
-              ofac,
-            ),
-          ],
+          [OFAC_SDN_SOURCE_ID, indexedSchedule(OFAC_SDN_SOURCE_ID, OFAC_SDN_XML_URL, ofac)],
           [
             OFAC_NON_SDN_SOURCE_ID,
-            indexedSchedule(
-              OFAC_NON_SDN_SOURCE_ID,
-              OFAC_NON_SDN_XML_URL,
-              ofac,
-            ),
+            indexedSchedule(OFAC_NON_SDN_SOURCE_ID, OFAC_NON_SDN_XML_URL, ofac),
           ],
-          [
-            UKSL_SOURCE_ID,
-            indexedSchedule(
-              UKSL_SOURCE_ID,
-              UKSL_XML_URL,
-              new UkslXmlParser(),
-            ),
-          ],
-          [
-            UNSC_SOURCE_ID,
-            indexedSchedule(
-              UNSC_SOURCE_ID,
-              UNSC_XML_URL,
-              new UnscXmlParser(),
-            ),
-          ],
+          [UKSL_SOURCE_ID, indexedSchedule(UKSL_SOURCE_ID, UKSL_XML_URL, new UkslXmlParser())],
+          [UNSC_SOURCE_ID, indexedSchedule(UNSC_SOURCE_ID, UNSC_XML_URL, new UnscXmlParser())],
           [
             EU_SANCTIONS_SOURCE_ID,
             indexedSchedule(
@@ -717,8 +704,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
               new OfficialFeedParser({
                 parserId: 'official-feed',
                 parserVersion: 'official-feed-fca-warnings-1',
-                publisherUrl:
-                  'https://www.fca.org.uk/consumers/warning-list-unauthorised-firms',
+                publisherUrl: 'https://www.fca.org.uk/consumers/warning-list-unauthorised-firms',
                 // The FCA warning list is a regulator naming firms and individuals it has not
                 // authorised. That is its own kind of adverse signal, and calling it
                 // CONSUMER_HARM_MISSELLING asserted a mis-selling finding the FCA has not made.
@@ -832,6 +818,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         cascade: CascadeService,
         requestLog: DiscoveryRequestLog,
         indexedSources: IndexedSourceSearchService,
+        engineLog: SearxngEngineLog,
       ) =>
         new SearchPipeline(
           subjects,
@@ -848,6 +835,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
           cascade,
           requestLog,
           indexedSources,
+          engineLog,
         ),
       inject: [
         SubjectsService,
@@ -864,12 +852,59 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         CascadeService,
         DiscoveryRequestLog,
         IndexedSourceSearchService,
+        SearxngEngineLog,
       ],
     },
     // What the live discovery connectors put on the wire (D-060). A singleton for the same
     // reason the poll cache is one: it measures traffic the publisher sees, which is a property
     // of the process. A diagnostic — nothing reads it back to decide anything.
     DiscoveryRequestLog,
+    // Per-engine diagnostics for the rung-5 metasearch connector (§15). A singleton for the same
+    // reason the request log is: what it measures is traffic the upstream engines see, which is
+    // a property of the process. A diagnostic — nothing reads it back to decide anything.
+    SearxngEngineLog,
+    {
+      // Per-tenant engine switches, behind the control API. Not a singleton by accident: the
+      // switches live in Mongo, so every read is current and a change made through the API takes
+      // effect on the next search rather than at the next deploy.
+      provide: EngineEnablementService,
+      useFactory: (db: Db) => new EngineEnablementService(db),
+      inject: [MONGO_DB],
+    },
+    {
+      // The client for this process's SearXNG instance, or null.
+      //
+      // Validated once, here, at startup rather than per request: a base URL carrying a path or
+      // credentials is a configuration fault and should be visible at boot, not on the first
+      // search of the day. A refusal logs the reason and yields null, which leaves the rung
+      // reporting `INTERNAL_SERVICE_NOT_CONFIGURED` with that reason on the coverage line —
+      // deliberately not a crash, because a malformed optional variable must not stop a service
+      // whose other eleven sources are fine.
+      provide: SEARXNG_CLIENT,
+      useFactory: (config: AppConfig): SearxngClient | null => {
+        const logger = new Logger('Searxng');
+        if (config.sources.searxngUrl === null) {
+          logger.warn(
+            'SEARXNG_URL is not set, so the rung-5 adverse-media discovery layer has no ' +
+              'instance to query. The rung reports as unsearched, which is the truth — it is ' +
+              'not evidence that nothing exists.',
+          );
+          return null;
+        }
+        const validation = validateSearxngBaseUrl(config.sources.searxngUrl);
+        if (validation.kind === 'REFUSED') {
+          logger.error(`SEARXNG_URL was refused: ${validation.detail}`);
+          return null;
+        }
+        logger.log(
+          `SearXNG discovery enabled against ${validation.base.value}. This client addresses ` +
+            `that host and no other. Running the instance does not authorise any upstream ` +
+            `engine: see engine-governance.ts.`,
+        );
+        return new SearxngClient(validation.base, new NodeSearxngTransport());
+      },
+      inject: [APP_CONFIG],
+    },
     // The fixed-feed poll floor. A singleton because what it bounds is the number of requests
     // the publisher sees, which is a property of the process rather than of any one run.
     FixedFeedPollCache,
@@ -885,6 +920,9 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         gate: FetchGateService,
         pollCache: FixedFeedPollCache,
         requestLog: DiscoveryRequestLog,
+        searxngClient: SearxngClient | null,
+        searxngEngineLog: SearxngEngineLog,
+        searxngEnablement: EngineEnablementService,
       ) =>
         new LadderBuilder(db, adapters, {
           mode: config.mode === 'mock' ? 'MOCK' : 'LIVE',
@@ -900,6 +938,12 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
           // So a QUERY_FEED's per-query request count and a FIXED_FEED's collapsed one are both
           // numbers on the response rather than claims in a comment.
           requestLog,
+          // Rung 5. Null when unconfigured, which the connector reports rather than crashes on.
+          searxngClient,
+          searxngEngineLog,
+          searxngEnablement,
+          // Local diagnostic only. The connector re-checks it per run; production cannot set it.
+          localDiagnostic: config.localGoogleDiagnostic,
         }),
       inject: [
         MONGO_DB,
@@ -909,6 +953,9 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
         FetchGateService,
         FixedFeedPollCache,
         DiscoveryRequestLog,
+        SEARXNG_CLIENT,
+        SearxngEngineLog,
+        EngineEnablementService,
       ],
     },
     {

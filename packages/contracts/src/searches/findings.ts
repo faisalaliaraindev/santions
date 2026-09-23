@@ -71,6 +71,24 @@ export const findingDocumentSchema = z
     cascadeRung: z.number().int().min(0).max(7),
     /** `MOCK` means fixture data. It is never servable as a live result (T55). */
     mode: z.enum(['MOCK', 'LIVE']),
+    /**
+     * How a metasearch layer found this document, when one did (FR-09).
+     *
+     * Absent for everything else, and the absence is the point: an SEC litigation release is not
+     * "discovered by" anything, and a field present on every finding would read as though it
+     * were. `publisher` and `url` above remain the evidence; these two are the channel that led
+     * to it, and a reviewer must be able to tell them apart.
+     */
+    discoverySource: z.string().optional(),
+    /**
+     * Every engine that surfaced this article, sorted.
+     *
+     * A list because a merged metasearch result is one article several engines returned. Three
+     * engines here is **one** document contributing **one** thing to `axes.independenceCount` —
+     * the engines are channels, not sources, and clustering never sees them. Recording them is
+     * provenance; counting them would be the independence inflation FR-10 exists to prevent.
+     */
+    discoveryEngines: z.array(z.string()).optional(),
     /** Present for records produced from a locally indexed publisher snapshot. */
     sourceRecordId: z.string().optional(),
     sourceSnapshotVersion: z.string().optional(),
@@ -207,6 +225,28 @@ export const rejectedLeadSchema = z
      * the service did.
      */
     stage: z.enum(['RELEVANCE', 'FETCH', 'EXTRACTION', 'CLASSIFICATION']),
+    /**
+     * The host this candidate would have been fetched from.
+     *
+     * Carried separately from `publisher`, which is the publisher's *name* as discovery reported
+     * it. A reviewer asking "which publishers is this deployment not approved to contact?" needs
+     * the domain, because the domain is what an approval is written against.
+     */
+    publisherDomain: z.string(),
+    /**
+     * Did a request actually leave for this candidate?
+     *
+     * `false` for everything refused before the socket — an unapproved publisher, a relevance
+     * rejection, a closed breaker. `true` once a fetch was attempted, whatever it returned. The
+     * field exists so "rejected at FETCH" can be read correctly: it distinguishes *we decided
+     * not to ask* from *we asked and it did not work out*.
+     */
+    fetchAttempted: z.boolean(),
+    /**
+     * The upstream discovery engines that surfaced this candidate, when it came from a
+     * metasearch service. Empty for a lead a publisher's own feed produced.
+     */
+    discoveredByEngines: z.array(z.string()).default([]),
   })
   .strict();
 
@@ -276,6 +316,144 @@ export const liveDiscoverySchema = z
   .strict();
 
 export type LiveDiscoverySummary = z.infer<typeof liveDiscoverySchema>;
+
+/**
+ * What one upstream search engine did for this run.
+ *
+ * # Why per engine rather than per source
+ *
+ * `liveDiscoverySourceStatSchema` above counts requests per **source**, and the metasearch layer
+ * is one source. It would report "searxng-adverse-media: 8 queries, 8 requests" and be entirely
+ * correct and entirely useless, because the failures that matter inside this source are per
+ * engine: Google blocked on a CAPTCHA while Bing and DuckDuckGo answered is the shape the whole
+ * failure-isolation claim rests on, and one number per source cannot express it.
+ *
+ * # Every configured engine appears, including the ones that were off
+ *
+ * An engine a tenant has switched off is here with `attempted: false` and
+ * `outcome: DISABLED_BY_POLICY`, carrying the decision id. It is never omitted. An absent engine
+ * would leave "what happened to Google?" unanswerable, which is the first question anybody asks
+ * of an adverse-media result.
+ *
+ * # What is NOT in here
+ *
+ * No query text, no URLs, no credentials. A planned query is the subject's name plus a conduct
+ * term. What is here is counts, engine names, durations and the instance's own failure
+ * sentences, none of which names the person searched.
+ */
+export const searxngEngineStatSchema = z
+  .object({
+    /** Our name for the engine. `GOOGLE_NEWS`, `BING_NEWS`, and so on. */
+    engine: z.string(),
+    /** What the instance calls it, so a report can be matched against its `/config`. */
+    searxngEngineName: z.string(),
+    /** False for `DISABLED_BY_POLICY` and `NOT_CONFIGURED` — nothing was put on the wire. */
+    attempted: z.boolean(),
+    /**
+     * The run-level outcome: the **worst** this engine had across the run's queries.
+     *
+     * An engine that answered nine queries and was rate-limited on the tenth reads
+     * `RATE_LIMITED`, because that is the fact that changes what a reader should do. Its nine
+     * queries' results are unaffected — this describes the engine's reliability, not what was
+     * kept. `ZERO_RESULTS` is **not** a failure: it is a working engine reporting it has nothing.
+     */
+    outcome: z.enum([
+      'RETURNED_RESULTS',
+      'ZERO_RESULTS',
+      'TIMEOUT',
+      'RATE_LIMITED',
+      'CAPTCHA',
+      'ACCESS_DENIED',
+      'CONNECTION_ERROR',
+      'DISABLED_BY_POLICY',
+      'NOT_CONFIGURED',
+      'INTERNAL_ERROR',
+    ]),
+    queriesAttempted: z.number().int().nonnegative(),
+    queriesReturnedResults: z.number().int().nonnegative(),
+    queriesFailed: z.number().int().nonnegative(),
+    /** Total wall time across this engine's own requests. */
+    durationMs: z.number().int().nonnegative(),
+    /**
+     * Results this engine returned, counted per engine.
+     *
+     * Deliberately NOT summable into a document count: one article returned by three engines
+     * counts once for each. The run's candidate count is `uniqueCandidateUrls` below.
+     */
+    resultsReturned: z.number().int().nonnegative(),
+    /**
+     * Canonical URLs **only this engine** found.
+     *
+     * The number that answers "was this engine worth querying?", which `resultsReturned` does
+     * not: an engine that returned forty articles every other engine also returned added nothing.
+     */
+    uniqueResultsContributed: z.number().int().nonnegative(),
+    /** The instance's own sentences, or the decision id for a policy skip. Deduplicated. */
+    failureReasons: z.array(z.string()),
+    /** The platform's reading of this engine's upstream terms. Never set by a tenant. */
+    governanceStatus: z.string(),
+    decisionId: z.string(),
+    /**
+     * **LOCAL DIAGNOSTIC ONLY.** Present, and true, only on an engine a local development
+     * diagnostic ran for this one search (`X-Local-Discovery-Diagnostic`). `governanceStatus`
+     * still carries the unchanged reading, and no tenant setting was changed. Absent on every
+     * normal run.
+     */
+    diagnosticOverride: z.boolean().optional(),
+    /** True alongside `diagnosticOverride`: the enablement applied to this search only. */
+    diagnosticOnly: z.boolean().optional(),
+    /** True alongside `diagnosticOverride`: the engine was executable for this search. */
+    effectiveEnabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const searxngDiscoverySchema = z
+  .object({
+    /**
+     * The source-level outcome, derived from the engine rows rather than asserted.
+     *
+     * `COMPLETED` covers "every engine answered with results" and "every engine answered with
+     * nothing" alike — a zero result is a working source reporting a fact. `PARTIAL` is some
+     * engines failing while others answered, and the results of the ones that answered are kept.
+     * `FAILED` is every attempted engine failing. `REFUSED` is nothing being attempted at all,
+     * which is not a failure: nothing was asked.
+     */
+    sourceOutcome: z.enum(['COMPLETED', 'PARTIAL', 'FAILED', 'REFUSED']),
+    /** Engines the connector integrates. Never filtered by permission. */
+    enginesConfigured: z.number().int().nonnegative(),
+    /** Of those, the ones this tenant has switched on. */
+    enginesPermitted: z.number().int().nonnegative(),
+    /** Of those, the ones a request was actually made for. */
+    enginesAttempted: z.number().int().nonnegative(),
+    enginesReturnedResults: z.number().int().nonnegative(),
+    enginesFailed: z.number().int().nonnegative(),
+    perEngine: z.array(searxngEngineStatSchema),
+    queriesIssued: z.number().int().nonnegative(),
+    /** Candidates across every query and engine, before deduplication. */
+    totalRawResults: z.number().int().nonnegative(),
+    /** Distinct canonical URLs. This is the candidate count. */
+    uniqueCandidateUrls: z.number().int().nonnegative(),
+    /**
+     * `totalRawResults - uniqueCandidateUrls`: how much of the multi-engine yield was one story.
+     *
+     * Stated rather than left to be subtracted, because it is the number that proves the merge
+     * happened. Four engines returning one Reuters article is one candidate and three collapsed
+     * duplicates — not four findings.
+     */
+    duplicatesCollapsed: z.number().int().nonnegative(),
+    /**
+     * What the pipeline did with the candidates.
+     *
+     * Null when the run did not reach those stages. Null and zero are different facts and are
+     * kept apart: zero fetched articles from forty candidates means every one was refused at the
+     * fetch gate, which is a coverage statement; null means nobody counted.
+     */
+    articlesFetched: z.number().int().nonnegative().nullable(),
+    findingsGenerated: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+
+export type SearxngDiscoverySummaryDto = z.infer<typeof searxngDiscoverySchema>;
 
 export const findingsPageSchema = z
   .object({
@@ -363,6 +541,13 @@ export const findingsPageSchema = z
      * reads back without being retro-fitted with a count nobody recorded.
      */
     liveDiscovery: liveDiscoverySchema.nullable().optional(),
+    /**
+     * Per-engine diagnostics for the rung-5 metasearch layer. Null when this run was not measured.
+     *
+     * Optional on the wire so a run stored before this field existed reads back without being
+     * retro-fitted with diagnostics nobody recorded.
+     */
+    searxngDiscovery: searxngDiscoverySchema.nullable().optional(),
   })
   .strict();
 

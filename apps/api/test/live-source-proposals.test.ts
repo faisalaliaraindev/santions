@@ -40,6 +40,12 @@ import {
   SEC_PRESS_RELEASES_SOURCE_ID,
   secPressReleasesContent,
 } from '../src/sources/registry/sec-press-releases.js';
+import {
+  SEARXNG_CONTENT,
+  SEARXNG_HOURLY_BUDGET,
+  searxngAdverseMediaContent,
+} from '../src/sources/registry/searxng-adverse-media.js';
+import { DEFAULT_SEARXNG_LIMITS } from '../src/sources/searxng/searxng-discovery.adapter.js';
 
 describe('SEC press releases is a second source, not a second URL', () => {
   it('is submittable against the FR-05 schema', () => {
@@ -210,5 +216,119 @@ describe('GDELT DOC 2.0 is proposed as a query feed and stays inert', () => {
 
   it('keeps the id the template is filed under, so the two name one source', () => {
     expect(GDELT_DOC_V2_SOURCE_ID).toBe('gdelt-doc-v2');
+  });
+});
+
+/**
+ * `searxng-adverse-media` — the internal metasearch service, proposed as a rung-5 source.
+ *
+ * A third shape again, and the contrast with the two above is where the value is. The SEC feed is
+ * a publisher we have permission to contact; GDELT is a publisher we have not. This is **not a
+ * publisher at all**, and the two fields that refuse every publisher in this registry are null
+ * and unestablished here on purpose. The tests below exist so that nobody later "fixes" them.
+ */
+describe('searxng-adverse-media is an internal service, not a publisher', () => {
+  it('is submittable against the FR-05 schema', () => {
+    expect(() => searxngAdverseMediaContent()).not.toThrow();
+  });
+
+  it('records no endpoint URL, because the address is configuration rather than an approval', () => {
+    // A loopback URL sitting in an approved record would be read by the next person as the
+    // published address of a publisher. The connector reads SEARXNG_URL and addresses nothing
+    // else; the registry has no business holding a second copy of a deployment detail.
+    expect(SEARXNG_CONTENT.accessPolicy.endpointUrl).toBeNull();
+  });
+
+  it('records no first-contact approval, and that is not an omission to fill in', () => {
+    // Everywhere else in this registry, null here means the fetch gate refuses. Here
+    // `authoriseInternalDiscoveryService` does not read the field, because there is no third
+    // party on the hop it authorises. It is null because it would be FALSE: nobody approved a
+    // first contact with a service we started ourselves.
+    expect(SEARXNG_CONTENT.accessPolicy.firstContactApproval).toBeNull();
+  });
+
+  it('records robots as NOT_ESTABLISHED, which is true and inert', () => {
+    // There is no robots.txt to establish a position from. The gate issues
+    // INTERNAL_SERVICE_NOT_A_PUBLISHER instead of reading this, and the publisher transport
+    // refuses that value — so this record cannot authorise a document fetch by any route.
+    expect(SEARXNG_CONTENT.robotsPosition).toBe('NOT_ESTABLISHED');
+  });
+
+  it('names us as the publisher, never an engine', () => {
+    // The single confusion this whole milestone is written against. A record naming Google as
+    // the publisher would put a search engine on the provenance line of a finding about a person.
+    expect(SEARXNG_CONTENT.publisher).toContain('Erly');
+    for (const engine of ['Google', 'Bing', 'Brave', 'DuckDuckGo', 'Reuters']) {
+      expect(SEARXNG_CONTENT.publisher).not.toContain(engine);
+      expect(SEARXNG_CONTENT.sourceName).not.toContain(engine);
+    }
+  });
+
+  it('is lead-only authority, because a metasearch hit is a headline', () => {
+    // Tier 5 is what stops axis D reading a discovery hit as corroboration in its own right.
+    expect(SEARXNG_CONTENT.authorityTier).toBe(5);
+  });
+
+  it('sits at rung 5 with a connector type of its own', () => {
+    expect(SEARXNG_CONTENT.cascadeRung).toBe(5);
+    expect(SEARXNG_CONTENT.connectorType).toBe('NEWS_DISCOVERY_SEARXNG');
+    // And it is NOT the Phase D placeholder, which names the `WebDiscoveryPort` seam that was
+    // never built behind. The two are different types on purpose.
+    expect(SEARXNG_CONTENT.connectorType).not.toBe('WEB_DISCOVERY_SEARX');
+  });
+
+  it('declares GLOBAL scope explicitly rather than leaving the country list empty', () => {
+    // FR-05: an empty country list never means global on its own.
+    expect(SEARXNG_CONTENT.jurisdictionScope).toBe('GLOBAL');
+    expect(SEARXNG_CONTENT.countries).toEqual([]);
+  });
+
+  it('records a budget above the connector’s own per-search bound', () => {
+    // The registry budget is a backstop against a loop, not the thing that shapes a normal run.
+    // A budget that bites during ordinary use reads as a limit and behaves as an outage.
+    expect(SEARXNG_HOURLY_BUDGET).toBeGreaterThan(DEFAULT_SEARXNG_LIMITS.maxQueriesPerSearch);
+    expect(SEARXNG_CONTENT.freeTierHourlyBudget).toBe(SEARXNG_HOURLY_BUDGET);
+  });
+
+  it('says in the record itself that activating it authorises no engine', () => {
+    // The policy summary is what an approver reads. If the separation between activating the
+    // source and approving an engine is only in a code comment, the approver never sees it.
+    const summary = SEARXNG_CONTENT.accessPolicy.policySummary;
+    expect(summary).toContain('does NOT approve any upstream search engine');
+    expect(summary).toContain('engine-governance.ts');
+    expect(summary).toContain('D20');
+  });
+
+  it('holds no credential, which is part of why the external data cost is zero', () => {
+    expect(SEARXNG_CONTENT.credentialsRef).toBeNull();
+  });
+
+  it('does not let a publisher borrow the no-endpoint exemption', () => {
+    // The exemption exists because an internal service's address is configuration. A publisher
+    // claiming it would be a QUERY_FEED with nowhere to send the query, which is exactly the
+    // guess the original rule refuses to make at somebody else's server.
+    expect(() =>
+      sourceContentSchema.parse({
+        ...SEARXNG_CONTENT,
+        connectorType: 'NEWS_DISCOVERY_GDELT',
+        jurisdictionScope: 'NAMED_COUNTRIES',
+        countries: ['US'],
+      }),
+    ).toThrow(/must record the endpoint it queries/u);
+  });
+
+  it('refuses an internal service that records an endpoint URL after all', () => {
+    // The rule in the other direction, and it matters more than it looks: a loopback URL on an
+    // approved version is the single most likely way somebody later reads this record as a
+    // publisher's published address.
+    expect(() =>
+      sourceContentSchema.parse({
+        ...SEARXNG_CONTENT,
+        accessPolicy: {
+          ...SEARXNG_CONTENT.accessPolicy,
+          endpointUrl: 'http://127.0.0.1:28888/search',
+        },
+      }),
+    ).toThrow(/must NOT record an endpoint URL/u);
   });
 });

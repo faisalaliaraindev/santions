@@ -140,12 +140,31 @@ them ACTIVE would put two unverified endpoints on the ladder of every stack.
 
 | Source id | Publisher | Endpoint | Rung | Credential | Licence | Ready? |
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
-| `google-news-rss-en-us` | Google | `https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US:en` (`q=`) | 2 | none | `UNVERIFIED` | No — steps 1–4, **endpoint not loaded by anyone** |
+| `google-news-rss-en-us` | Google | `https://news.google.com/rss/search?hl=en-US&gl=US&ceid=US:en` (`q=`) | 2 | none | **PROHIBITED — D20** | **No, and never.** Terms of Use forbid both commercial use and automated access. **Endpoint deliberately never loaded** |
 | `bing-news-rss-en-us` | Microsoft | `https://www.bing.com/news/search?format=RSS` (`q=`) | 4 | none | `UNVERIFIED` | No — steps 1–4, **endpoint not loaded by anyone** |
 
 Budgets 60/hour, 500/day each. **What we would get:** the same article-level leads as the SEC
 feeds. Note these are the two rungs where a publisher's terms most plausibly *forbid* automated
 querying — the `UNVERIFIED` licence is the substantive blocker, not a formality.
+
+> **That prediction was tested on 2026-09-22, for Google, and it was right.**
+>
+> **`google-news-rss-en-us` is closed as refused — [D20](../open-decisions.md).** The Google News
+> Terms of Use restrict the service to *"your own personal use (i.e., non-commercial use)"* and
+> separately prohibit *"any robot, spider, other device or manual process to monitor or copy any
+> content"*. Either clause alone excludes this service. It stays **PROPOSED** and no request has
+> ever been sent to `news.google.com` — the terms were read first, and loading the endpoint to
+> "check" would have been the prohibited act performed in order to decide whether it was prohibited.
+>
+> A second defect survives the licence question: since late 2024 the feed's `<item><link>` is a
+> Google redirect (`/rss/articles/CBMi…`), not the publisher's article URL, and the only ways to
+> resolve it are another request to Google or reverse-engineering a signed protobuf token. The
+> `<source url>` element yields the publisher's **domain**, never the document — so FR-09 provenance
+> cannot be met. Evidence: `evidence/google-news-rss-en-us.json`.
+>
+> **`bing-news-rss-en-us` has not been examined and must not be activated on the assumption that
+> Microsoft's position differs.** The same two questions — commercial use, and whether the link is
+> the publisher's — have to be answered for it on its own evidence.
 
 ---
 

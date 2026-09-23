@@ -34,6 +34,7 @@
     "first-contact": "pnpm build && node scripts/first-contact.mjs",
     "sec:press-contact": "pnpm build && node scripts/sec-press-first-contact.mjs",
     "gdelt:first-contact": "pnpm build && node scripts/gdelt-first-contact.mjs",
+    "wikinews:first-contact": "pnpm build && node scripts/wikinews-first-contact.mjs",
     "source:health": "node scripts/source-health.mjs",
     "sec:live-smoke": "pnpm build && node scripts/sec-live-smoke.mjs",
     "dev": "node scripts/dev.mjs",

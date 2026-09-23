@@ -17,6 +17,7 @@ import type {
   Finding,
   FindingsPage,
   LiveDiscoverySummary,
+  SearxngDiscoverySummaryDto,
   SearchSummary,
 } from '@erly/adverse-contracts';
 import {
@@ -92,9 +93,26 @@ interface SearchRecord {
    * rewritten into zero — a count nobody took is not a count of nothing.
    */
   readonly liveDiscovery?: LiveDiscoverySummary | null;
+  /**
+   * Per-engine diagnostics for the rung-5 metasearch layer (§15).
+   *
+   * Optional and nullable on the same rule as `liveDiscovery`, and the two states mean different
+   * things: absent is a run completed before this was recorded at all, `null` is a run whose
+   * process held no engine log. Neither is rewritten into an empty engine list — "nobody
+   * measured" and "governance permitted no engine" are different facts.
+   */
+  readonly searxngDiscovery?: SearxngDiscoverySummaryDto | null;
   readonly progress: SearchSummary['progress'];
   /** Optimistic concurrency for review actions and cancellation (FR-12). */
   readonly revision: number;
+  /**
+   * **LOCAL DIAGNOSTIC ONLY.** Engines this one run may execute beyond the tenant's resolved
+   * set, granted by `decideLocalDiagnostic` when the run was accepted. Absent on every normal run.
+   *
+   * A fact about this run, not a setting: nothing reads it except this run's worker, which
+   * re-checks its own environment before honouring it (`local-diagnostic.ts`).
+   */
+  readonly localDiscoveryDiagnostic?: { readonly engines: readonly string[] } | undefined;
 }
 
 @Injectable()
@@ -131,6 +149,8 @@ export class SearchesService {
     readonly principal: Principal;
     readonly data: CreateSearchInput;
     readonly now: Date;
+    /** Granted local-diagnostic engines, or null/absent for every normal search. */
+    readonly diagnosticEngines?: readonly string[] | null | undefined;
   }): Promise<SearchSummary> {
     const { principal, data, now } = input;
 
@@ -182,6 +202,7 @@ export class SearchesService {
       pinnedVersions,
       associationScope,
       subject,
+      diagnosticEngines: input.diagnosticEngines ?? null,
     });
 
     // Indexing happens after the commit and outside the transaction (section 6.3), and its
@@ -224,6 +245,7 @@ export class SearchesService {
       readonly ref: SubjectRef | null;
       readonly snapshot: CreateSearchInput['subjectSnapshot'];
     };
+    readonly diagnosticEngines: readonly string[] | null;
   }): Promise<SearchSummary> {
     const { principal, data, now, tenantId, pinnedVersions } = input;
 
@@ -261,6 +283,9 @@ export class SearchesService {
             warnings: [],
           },
           revision: 1,
+          ...(input.diagnosticEngines === null || input.diagnosticEngines.length === 0
+            ? {}
+            : { localDiscoveryDiagnostic: { engines: [...input.diagnosticEngines] } }),
         };
 
         await this.searches.insertOne(record, { session });
@@ -725,16 +750,27 @@ export class SearchesService {
               disclaimer: REVIEW_DISCLAIMER,
             },
       findings: findings.map((finding) => toFindingWire(finding, suspensionNotes)),
-      rejectedLeads: rejectedLeads.map((lead) => ({
-        leadId: lead.leadId,
-        url: lead.url,
-        title: lead.title,
-        publisher: lead.publisher,
-        cascadeRung: lead.cascadeRung,
-        queryId: lead.queryId,
-        reason: lead.reason,
-        stage: lead.stage,
-      })),
+      rejectedLeads: rejectedLeads.map((lead) => {
+        // Read defensively at the storage boundary. `publisherDomain`, `fetchAttempted` and
+        // `discoveredByEngines` were added after rows had already been written, and the stored
+        // shape of an older run does not change because today's type says it should. Asserting
+        // the type here instead would turn "read a search from last week" into a validation
+        // failure, which is a worse answer than an empty domain.
+        const stored = lead as Partial<typeof lead>;
+        return {
+          leadId: lead.leadId,
+          url: lead.url,
+          title: lead.title,
+          publisher: lead.publisher,
+          publisherDomain: stored.publisherDomain ?? '',
+          cascadeRung: lead.cascadeRung,
+          queryId: lead.queryId,
+          reason: lead.reason,
+          stage: lead.stage,
+          fetchAttempted: stored.fetchAttempted ?? false,
+          discoveredByEngines: [...(stored.discoveredByEngines ?? [])],
+        };
+      }),
       sourceOutcomes: sourceOutcomes.map((outcome) => ({
         sourceId: outcome.sourceId,
         sourceName: outcome.sourceName,
@@ -761,6 +797,7 @@ export class SearchesService {
       })),
       mode: this.mode === 'live' ? 'LIVE' : 'MOCK',
       liveDiscovery: run.liveDiscovery ?? null,
+      searxngDiscovery: run.searxngDiscovery ?? null,
     };
   }
 
@@ -977,6 +1014,15 @@ function toFindingWire(record: FindingRecord, suspensionNotes: Record<string, st
       ...(record.document.rawEvidenceHash === undefined
         ? {}
         : { rawEvidenceHash: record.document.rawEvidenceHash }),
+      // How a metasearch layer found this document, where one did. Absent for everything else —
+      // an SEC litigation release is not "discovered by" anything, and a field present on every
+      // finding would read as though it were.
+      ...(record.document.discoverySource === undefined
+        ? {}
+        : { discoverySource: record.document.discoverySource }),
+      ...(record.document.discoveryEngines === undefined
+        ? {}
+        : { discoveryEngines: [...record.document.discoveryEngines] }),
     },
     subjectMentionSpans: record.subjectMentionSpans.map((span) => ({
       start: span.start,

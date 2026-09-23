@@ -152,6 +152,38 @@ export interface ActiveSourceVersion {
  */
 export interface SourceVersionReader {
   loadActive(sourceId: string): Promise<ActiveSourceVersion | null>;
+  /**
+   * The active source version that covers a **publisher domain**, or null when none does.
+   *
+   * The lookup that keeps discovery permission and publisher-fetch permission apart. A lead
+   * discovered through a metasearch service names a publisher nobody has approved yet; asking
+   * the *discovery* source's approval whether we may fetch it would let one signature on our own
+   * SearXNG record authorise contacting every publisher on the open web. So the document fetch is
+   * authorised against the registry record for the domain actually being contacted, and a domain
+   * with no such record is refused — visibly, per candidate, without stopping the others.
+   */
+  loadActiveByDomain(domain: string): Promise<ActiveSourceVersion | null>;
+}
+
+/**
+ * The domains to try for a publisher lookup, most specific first.
+ *
+ * `news.example.co.uk` yields `news.example.co.uk`, `example.co.uk`, `co.uk` — and the last is
+ * dropped, because a registry record must never be matched on a public suffix alone. Matching is
+ * on whole labels, so `notsec.gov` cannot match a record for `sec.gov`.
+ */
+export function domainMatchCandidates(domain: string): readonly string[] {
+  const clean = domain.trim().toLowerCase().replace(/\.$/u, '');
+  if (clean === '') {
+    return [];
+  }
+  const labels = clean.split('.');
+  const candidates: string[] = [];
+  // Stop before the final label: a bare TLD is never a publisher.
+  for (let i = 0; i < labels.length - 1; i += 1) {
+    candidates.push(labels.slice(i).join('.'));
+  }
+  return candidates;
 }
 
 @Injectable()
@@ -177,39 +209,96 @@ export class SourceVersionService implements SourceVersionReader {
     if (document === null) {
       return null;
     }
-
-    const content = (document['content'] as Record<string, unknown> | undefined) ?? document;
-    const version = numberOr(document['version'], 1);
-    const robots = stringOrNull(content['robotsPosition']);
-
-    return {
-      sourceId,
-      versionId: stringOrNull(document['versionId']) ?? `${sourceId}:v${String(version)}`,
-      version,
-      sourceName: stringOrNull(content['sourceName']) ?? sourceId,
-      publisher: stringOrNull(content['publisher']) ?? sourceId,
-      connectorType: stringOrNull(content['connectorType']) ?? 'UNKNOWN',
-      canonicalDomains: stringArray(content['canonicalDomains']),
-      jurisdictionScope: content['jurisdictionScope'] === 'GLOBAL' ? 'GLOBAL' : 'NAMED_COUNTRIES',
-      countries: stringArray(content['countries']),
-      languages: stringArray(content['languages']),
-      // An unrecognised or absent value reads as `NOT_ESTABLISHED`, which the gate refuses. A
-      // record whose robots field cannot be interpreted has not established a position.
-      robotsPosition:
-        robots === 'HONOURED' || robots === 'EXCEPTION_APPROVED' ? robots : 'NOT_ESTABLISHED',
-      licenceTermsVersion: stringOrNull(content['licenceTermsVersion']),
-      licenceExpiresAt: stringOrNull(content['licenceExpiresAt']),
-      cascadeRung: numberOr(content['cascadeRung'], 0),
-      authorityTier: numberOr(content['authorityTier'], 5),
-      firstContactApproval: readFirstContactApproval(content['accessPolicy']),
-      robotsException: readRobotsException(content['accessPolicy']),
-      endpointUrl: readEndpointUrl(content['accessPolicy']),
-      endpointKind: readEndpointKind(content['accessPolicy']),
-      queryParam: readQueryParam(content['accessPolicy']),
-      pollFloorMs: readPollFloorMs(content['accessPolicy']),
-      requestCeilingPerSecond: readRequestCeiling(content['accessPolicy']),
-    };
+    return mapActiveVersion(sourceId, document);
   }
+
+  /**
+   * The active version covering a publisher domain, most specific match first.
+   *
+   * Candidate domains are matched as whole labels against `canonicalDomains`, so a record for
+   * `sec.gov` covers `www.sec.gov` but nothing covers `notsec.gov` by accident. When two records
+   * both match, the more specific domain wins — a record for `news.example.com` beats one for
+   * `example.com`, because the narrower approval is the one somebody thought about.
+   */
+  async loadActiveByDomain(domain: string): Promise<ActiveSourceVersion | null> {
+    const candidates = domainMatchCandidates(domain);
+    if (candidates.length === 0) {
+      return null;
+    }
+    // The domain list lives at `content.canonicalDomains`, which is where the matching loop
+    // below reads it from. Querying a bare top-level `canonicalDomains` matched **nothing**, so
+    // this returned null for every publisher and every discovered candidate was refused
+    // PUBLISHER_NOT_APPROVED — including ones with a perfectly good ACTIVE record. The refusal
+    // message said "no approved source record covers <domain>", which is the one sentence
+    // guaranteed to send the reader off to check the registry rather than this query.
+    //
+    // Both paths are matched because `mapActiveVersion` tolerates both shapes
+    // (`document['content'] ?? document`); narrowing the query to one while the mapper accepts
+    // two is how the two drifted apart in the first place.
+    const documents = await this.versions
+      .find({
+        status: 'ACTIVE',
+        $or: [
+          { 'content.canonicalDomains': { $in: [...candidates] } },
+          { canonicalDomains: { $in: [...candidates] } },
+        ],
+      })
+      .toArray();
+    if (documents.length === 0) {
+      return null;
+    }
+    for (const candidate of candidates) {
+      const match = documents.find((document) => {
+        const content = (document['content'] as Record<string, unknown> | undefined) ?? document;
+        return stringArray(content['canonicalDomains']).includes(candidate);
+      });
+      if (match !== undefined) {
+        const sourceId = stringOrNull(match['sourceId']);
+        if (sourceId !== null) {
+          return mapActiveVersion(sourceId, match);
+        }
+      }
+    }
+    return null;
+  }
+}
+
+/** Shared by both lookups, so neither can drift into reading a version differently. */
+function mapActiveVersion(
+  sourceId: string,
+  document: Record<string, unknown>,
+): ActiveSourceVersion {
+  const content = (document['content'] as Record<string, unknown> | undefined) ?? document;
+  const version = numberOr(document['version'], 1);
+  const robots = stringOrNull(content['robotsPosition']);
+
+  return {
+    sourceId,
+    versionId: stringOrNull(document['versionId']) ?? `${sourceId}:v${String(version)}`,
+    version,
+    sourceName: stringOrNull(content['sourceName']) ?? sourceId,
+    publisher: stringOrNull(content['publisher']) ?? sourceId,
+    connectorType: stringOrNull(content['connectorType']) ?? 'UNKNOWN',
+    canonicalDomains: stringArray(content['canonicalDomains']),
+    jurisdictionScope: content['jurisdictionScope'] === 'GLOBAL' ? 'GLOBAL' : 'NAMED_COUNTRIES',
+    countries: stringArray(content['countries']),
+    languages: stringArray(content['languages']),
+    // An unrecognised or absent value reads as `NOT_ESTABLISHED`, which the gate refuses. A
+    // record whose robots field cannot be interpreted has not established a position.
+    robotsPosition:
+      robots === 'HONOURED' || robots === 'EXCEPTION_APPROVED' ? robots : 'NOT_ESTABLISHED',
+    licenceTermsVersion: stringOrNull(content['licenceTermsVersion']),
+    licenceExpiresAt: stringOrNull(content['licenceExpiresAt']),
+    cascadeRung: numberOr(content['cascadeRung'], 0),
+    authorityTier: numberOr(content['authorityTier'], 5),
+    firstContactApproval: readFirstContactApproval(content['accessPolicy']),
+    robotsException: readRobotsException(content['accessPolicy']),
+    endpointUrl: readEndpointUrl(content['accessPolicy']),
+    endpointKind: readEndpointKind(content['accessPolicy']),
+    queryParam: readQueryParam(content['accessPolicy']),
+    pollFloorMs: readPollFloorMs(content['accessPolicy']),
+    requestCeilingPerSecond: readRequestCeiling(content['accessPolicy']),
+  };
 }
 
 function stringOrNull(value: unknown): string | null {

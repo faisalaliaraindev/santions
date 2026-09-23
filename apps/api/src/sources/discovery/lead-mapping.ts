@@ -18,7 +18,7 @@
 
 import { canonicalise, screenUrl, type PreciseDate } from '@erly/adverse-domain';
 
-import type { CascadeRung, Lead } from '../lead.js';
+import type { CascadeRung, DiscoveryAttribution, Lead } from '../lead.js';
 import type { AdapterProvenance } from '../source-adapter.js';
 
 /** What a connector extracted from one entry, before it is a lead. */
@@ -30,6 +30,13 @@ export interface RawCandidate {
   readonly publishedAtRaw: string | null;
   /** The source's declared language for this item, if it declared one. Never guessed. */
   readonly language: string | null;
+  /**
+   * How a metasearch source found this, when one did. Absent for a publisher's own feed.
+   *
+   * Optional rather than nullable so that a connector which has nothing to say about a discovery
+   * channel says nothing, and `exactOptionalPropertyTypes` keeps the two apart.
+   */
+  readonly attribution?: DiscoveryAttribution | undefined;
 }
 
 /**
@@ -84,6 +91,10 @@ export function leadsFrom(input: {
       rung: input.rung,
       queryId: input.queryId,
       provenance: input.provenance,
+      // Absent, not null, when the connector supplied none. A feed has no discovery channel and
+      // a record claiming an empty one would read as "found by no engine" rather than as "not
+      // the kind of source that has engines".
+      ...(candidate.attribution === undefined ? {} : { discovery: candidate.attribution }),
     });
   }
 

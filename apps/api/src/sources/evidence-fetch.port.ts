@@ -70,9 +70,23 @@ export interface FetchAttribution {
  * fixture — there is no publisher here, so there is no robots.txt position to honour — instead
  * of the pipeline claiming `HONOURED` for a local fixture, which is what it used to do.
  * `HttpEvidenceFetchAdapter` refuses it outright, so the value cannot reach a real publisher.
+ *
+ * `INTERNAL_SERVICE_NOT_A_PUBLISHER` is the same idea for the other non-publisher we address:
+ * our own SearXNG instance. It is issued only by
+ * `FetchGateService.authoriseInternalDiscoveryService`, only for a `NEWS_DISCOVERY_SEARXNG`
+ * connector, and it is refused by the publisher transport for the same reason the fixture value
+ * is — a live fetch of a real host must never proceed under a record that says no publisher was
+ * involved. The difference from the fixture case is only which non-publisher it names, and
+ * naming them apart matters: one means "this data is synthetic" and the other means "this hop
+ * was to a service we run". Collapsing them would make a live SearXNG query indistinguishable
+ * from a fixture read in the audit record.
  */
 export type RobotsPosition =
-  'HONOURED' | 'EXCEPTION_APPROVED' | 'NOT_ESTABLISHED' | 'FIXTURE_NOT_A_PUBLISHER';
+  | 'HONOURED'
+  | 'EXCEPTION_APPROVED'
+  | 'NOT_ESTABLISHED'
+  | 'FIXTURE_NOT_A_PUBLISHER'
+  | 'INTERNAL_SERVICE_NOT_A_PUBLISHER';
 
 export interface FetchAuthorisation {
   /** The active source version that approved this domain. */

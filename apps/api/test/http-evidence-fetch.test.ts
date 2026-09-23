@@ -597,6 +597,57 @@ describe('challenges are abandoned, never solved (T87)', () => {
     expect(transport.calls.filter((c) => !c.url.endsWith('/robots.txt'))).toHaveLength(1);
   });
 
+  it('does not mistake a MediaWiki config blob for a served challenge', () => {
+    // THE REGRESSION, 2026-09-23. Every MediaWiki page embeds a config object in <head> naming
+    // its edit-captcha extension. This is the real shape, from the Wikinews article the rung-5
+    // acceptance chain runs on: a 200, 85KB, fully-served article. The detector matched the bare
+    // substring inside that script and reported the publisher as serving a bot challenge, which
+    // blocked en.wikinews.org entirely — and would block every other wiki the same way.
+    const mediawiki =
+      '<!DOCTYPE html><html><head><title>Madoff jailed after pleading guilty to $50 billion ' +
+      'fraud scheme - Wikinews, the free news source</title>' +
+      '<script>document.documentElement.className="client-js";' +
+      'RLCONF={"wgRelevantArticleId":122401,"wgIsProbablyEditable":false,' +
+      '"wgConfirmEditCaptchaNeededForGenericEdit":"hcaptcha",' +
+      '"wgConfirmEditForceShowCaptcha":false,' +
+      '"wgConfirmEditHCaptchaSiteKey":"5d0c670e-aaaa-bbbb-cccc-ddddddddddd"};</script>' +
+      '</head><body><h1>Madoff jailed after pleading guilty to $50 billion fraud scheme</h1>' +
+      '<p>Bernard Madoff was jailed today.</p></body></html>';
+    expect(detectChallenge(new TextEncoder().encode(mediawiki), 'text/html')).toBeNull();
+  });
+
+  it('still catches a real interstitial, whose text is in the markup rather than a script', () => {
+    // The other half, and the one that must not regress: excluding scripts is not a loosening.
+    // A real challenge page exists to be read by a person, so its text is in the title and the
+    // visible body, and all of that survives script-stripping.
+    const challenge =
+      '<!DOCTYPE html><html><head><title>Just a moment...</title>' +
+      '<script>window.__cf={};</script></head>' +
+      '<body><h1>Verifying you are human</h1><p>Enable JavaScript and cookies to continue</p>' +
+      '</body></html>';
+    const detected = detectChallenge(new TextEncoder().encode(challenge), 'text/html');
+    expect(detected).not.toBeNull();
+    expect(detected).toMatch(/verifying you are human|enable javascript and cookies/iu);
+
+    // And one whose marker is in an attribute rather than text — also outside any script.
+    const cf =
+      '<!DOCTYPE html><html><body><div id="cf-challenge-running">Checking your browser</div>' +
+      '</body></html>';
+    expect(detectChallenge(new TextEncoder().encode(cf), 'text/html')).not.toBeNull();
+  });
+
+  it('does not let a marker hide in a script the read window cut in half', () => {
+    // An unterminated <script> at the end of the window is dropped whole, so a page cannot
+    // smuggle a challenge past the check by making its scripts long.
+    const truncated = `<html><head><script>${'x'.repeat(200)}` + 'captcha';
+    expect(detectChallenge(new TextEncoder().encode(truncated), 'text/html')).toBeNull();
+
+    // But the same marker in the body, after a properly closed script, is still caught.
+    const afterScript = `<html><head><script>${'x'.repeat(200)}</script></head>` +
+      '<body>Are you a robot</body></html>';
+    expect(detectChallenge(new TextEncoder().encode(afterScript), 'text/html')).not.toBeNull();
+  });
+
   it('does not mistake an article that discusses captchas for a challenge page', () => {
     // A false positive costs one lead; a false negative stores a challenge page as evidence
     // about a person. The check is deliberately confined to the head of an HTML body.

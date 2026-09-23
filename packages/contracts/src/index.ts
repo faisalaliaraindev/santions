@@ -15,6 +15,7 @@ export * from './searches/screen.js';
 export * from './admin/admin.js';
 export * from './auth/session.js';
 export * from './tenancy/api-keys.js';
+export * from './tenancy/discovery-engines.js';
 export * from './tenancy/signup.js';
 export * from './tenancy/account.js';
 export * from './tenancy/login.js';

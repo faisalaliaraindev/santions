@@ -119,8 +119,27 @@ export type FetchGateRefusal =
   | 'ROBOTS_EXCEPTION_NOT_APPROVABLE'
   | 'FIXTURE_SOURCE_IN_LIVE_MODE'
   | 'NO_FIRST_CONTACT_APPROVAL'
+  | 'PUBLISHER_NOT_APPROVED'
   | 'NO_ENDPOINT_RECORDED'
-  | 'NO_EGRESS_IDENTITY';
+  | 'NO_EGRESS_IDENTITY'
+  /**
+   * The source is recorded as an internal discovery service and this process has no base URL
+   * configured for it, or the configured one was refused.
+   *
+   * Source-level: it costs every lead the service would have produced.
+   */
+  | 'INTERNAL_SERVICE_NOT_CONFIGURED'
+  /**
+   * The source is recorded as an internal discovery service and something asked for it on the
+   * publisher path, or asked for a publisher on this path. Source-level, and a programming
+   * error rather than a configuration one — see `authoriseInternalDiscoveryService`.
+   */
+  | 'NOT_AN_INTERNAL_DISCOVERY_SERVICE'
+  /**
+   * Every upstream engine the internal discovery service could use is withheld by engine
+   * governance, so the request could only have been empty. Source-level.
+   */
+  | 'NO_ENGINE_PERMITTED';
 
 /**
  * Is this refusal about the source, or about this one URL?
@@ -142,7 +161,17 @@ export function isSourceLevelRefusal(refusal: FetchGateRefusal): boolean {
     case 'NO_FIRST_CONTACT_APPROVAL':
     case 'NO_ENDPOINT_RECORDED':
     case 'NO_EGRESS_IDENTITY':
+    case 'INTERNAL_SERVICE_NOT_CONFIGURED':
+    case 'NOT_AN_INTERNAL_DISCOVERY_SERVICE':
+    case 'NO_ENGINE_PERMITTED':
       return true;
+    // `PUBLISHER_NOT_APPROVED` is **per candidate, never per source.** An unapproved publisher
+    // is a fact about one domain the discovery service happened to name. Treating it as
+    // source-level would report the discovery service as a coverage gap the first time it
+    // returned an unknown publisher — which is every run — and would hide the engines that
+    // worked behind a whole-source exclusion. The candidate is refused, reported, and the run
+    // continues.
+    case 'PUBLISHER_NOT_APPROVED':
     case 'JURISDICTION_NOT_IN_RUN_SCOPE':
     case 'JURISDICTION_NOT_ENABLED':
     case 'LANGUAGE_NOT_DECLARED_BY_LEAD':
@@ -169,8 +198,20 @@ export type FetchGateDecision =
     };
 
 export interface FetchGateInput {
-  /** The source whose approval would permit this fetch — for a lead, the discovery source. */
+  /**
+   * The source this lead came from. For a discovered lead this is the **discovery** source, and
+   * it is used for provenance, health and budget — not to authorise contacting the publisher.
+   */
   readonly sourceId: string;
+  /**
+   * The publisher domain this fetch would contact, when the caller is fetching a **discovered
+   * document** rather than a source's own endpoint.
+   *
+   * Present means "authorise this against the registry record for this domain". Absent keeps the
+   * older behaviour, where the source being fetched is the source named by `sourceId` — which is
+   * still correct for a source fetching its own pages.
+   */
+  readonly publisherDomain?: string | undefined;
   readonly url: string;
   /** The planned query's jurisdiction. */
   readonly jurisdiction: string;
@@ -213,6 +254,40 @@ export interface EndpointGateInput {
 export interface ScheduledArtifactGateInput {
   readonly sourceId: string;
   readonly url: string;
+  readonly now: Date;
+}
+
+/**
+ * What a query to an **internal** discovery service needs authorising.
+ *
+ * The same shape as `EndpointGateInput`, minus the URL: the address of an internal service comes
+ * from this deployment's configuration and is not a field an approver signs, so there is nothing
+ * for a caller to supply and nothing for the gate to compare.
+ */
+export interface InternalDiscoveryGateInput {
+  readonly sourceId: string;
+  readonly jurisdiction: string;
+  /** The language this query is for — one the source declares, never one inferred. */
+  readonly language: string;
+  readonly runJurisdictions: readonly string[];
+  readonly runLanguages: readonly string[];
+  readonly taxonomy: TaxonomyVersion;
+  /**
+   * Whether this process holds a validated base URL for the service.
+   *
+   * Passed in rather than read here, because the gate does not own configuration and a gate that
+   * reached for an environment variable would be a gate whose decision depends on something no
+   * test can set through its arguments.
+   */
+  readonly serviceConfigured: boolean;
+  /**
+   * How many upstream engines engine governance currently permits.
+   *
+   * Zero is a refusal rather than an empty request. A request naming no engine would be served
+   * by the instance's defaults, which is exactly the widening the governance table exists to
+   * prevent — so "nothing is permitted" must stop the request, not shape it.
+   */
+  readonly permittedEngineCount: number;
   readonly now: Date;
 }
 
@@ -310,6 +385,224 @@ export class FetchGateService {
       },
       () => ({ score: null, method: ENDPOINT_POLL_RELEVANCE_METHOD }),
     );
+  }
+
+  /**
+   * Authorise one query to an **internal** discovery service — our own SearXNG instance.
+   *
+   * # Why this is a third gate method rather than a parameter on `authoriseEndpoint`
+   *
+   * Three of the controls `authoriseEndpoint` applies are controls about **a publisher**, and
+   * none of them has a meaning here:
+   *
+   * - **The SEC-02 URL policy** refuses anything that is not https on 443 and refuses loopback.
+   *   It is right to, because it exists to stop this service dialling an address a *third party*
+   *   named. An internal service's address is one we named, in our own configuration, and it
+   *   cannot be influenced by any input to any search. Running it through a rule written for
+   *   discovered URLs would mean punching a loopback exception into the one function that stops
+   *   a news feed reaching our database — which would weaken the control for every caller in
+   *   order to permit one that never needed it.
+   * - **robots.txt** is a publisher's instruction to crawlers. We are not crawling a publisher;
+   *   we are calling a service we run.
+   * - **A named first-contact approval** (D-042) records that somebody accepted this service
+   *   beginning to make requests to a third party who did not ask to hear from us. There is no
+   *   third party on this hop.
+   *
+   * A boolean parameter that switched three security controls off is precisely the "weaker of
+   * two paths" this codebase keeps warning about, and it would be reachable from the publisher
+   * path by a caller passing the wrong argument. A separate method with a `connectorType` check
+   * is not: `NEWS_DISCOVERY_SEARXNG` cannot reach `authoriseUrl`, and nothing else can reach
+   * this.
+   *
+   * # What it does NOT relax
+   *
+   * Everything that is about **our** obligations rather than a publisher's is applied unchanged,
+   * and read from the same active version through the same reader:
+   *
+   * - an ACTIVE approved version, through the four-eyes lifecycle;
+   * - recorded licence terms, and the licence clock (T36);
+   * - the fixture/live separation (T55);
+   * - the run's pinned jurisdiction and language scope, and the source's own;
+   * - the pinned taxonomy's effective scope (FR-03, D6);
+   * - an attributable egress identity.
+   *
+   * Two controls are added that the publisher path has no need of: the service must be
+   * configured, and engine governance must permit at least one upstream engine.
+   *
+   * # What the authorisation it issues says about SSRF
+   *
+   * `urlPolicyPassed` and `ssrfValidated` are **false**, and that is the honest value. They
+   * assert that `screenUrl` and the resolved-address screening ran, and neither did — the
+   * transport that serves this path addresses one configured host and does no DNS screening,
+   * because there is no untrusted hostname in play. Recording `true` would put a claim on the
+   * record that nothing performed. Nothing downstream reads this authorisation to fetch a
+   * document: the articles SearXNG names go through `authorise` like any other lead, where both
+   * halves do run.
+   */
+  async authoriseInternalDiscoveryService(
+    input: InternalDiscoveryGateInput,
+  ): Promise<FetchGateDecision> {
+    const version = await this.sourceVersions.loadActive(input.sourceId);
+    if (version === null) {
+      return this.refuse(
+        'NO_ACTIVE_SOURCE_VERSION',
+        `Source ${input.sourceId} has no active approved version, so nothing authorises a query ` +
+          `to it. That the service runs on our own infrastructure does not approve it: the ` +
+          `registry entry is what records the rung, the budget, the scope and who signed them.`,
+        null,
+      );
+    }
+
+    if (version.connectorType !== 'NEWS_DISCOVERY_SEARXNG') {
+      return this.refuse(
+        'NOT_AN_INTERNAL_DISCOVERY_SERVICE',
+        `${version.sourceName} is recorded as ${version.connectorType} and this gate authorises ` +
+          `internal discovery services only. A publisher must go through authoriseEndpoint, ` +
+          `which applies the SEC-02 address policy, robots and the named first-contact ` +
+          `approval — none of which this path applies, because none of them is about a service ` +
+          `we run ourselves.`,
+        version,
+      );
+    }
+
+    if (version.licenceTermsVersion === null) {
+      return this.refuse(
+        'LICENCE_TERMS_NOT_RECORDED',
+        `The active version of ${version.sourceName} records no licence terms version.`,
+        version,
+      );
+    }
+    if (
+      version.licenceExpiresAt !== null &&
+      Date.parse(version.licenceExpiresAt) <= input.now.getTime()
+    ) {
+      return this.refuse(
+        'LICENCE_EXPIRED',
+        `The recorded licence terms for ${version.sourceName} (${version.licenceTermsVersion}) ` +
+          `expired at ${version.licenceExpiresAt} (T36).`,
+        version,
+      );
+    }
+
+    // The fixture separation, both directions, exactly as the publisher path applies it. An
+    // internal service is not a fixture and must never be one: the whole point of T55 is that a
+    // live process cannot serve fixture data, and "it is internal" would be the most persuasive
+    // wrong reason to make an exception.
+    if (version.connectorType === ('FIXTURE_MOCK' as string)) {
+      return this.refuse(
+        'FIXTURE_SOURCE_IN_LIVE_MODE',
+        `${version.sourceName} is a FIXTURE_MOCK connector (T55).`,
+        version,
+      );
+    }
+
+    if (!input.serviceConfigured) {
+      return this.refuse(
+        'INTERNAL_SERVICE_NOT_CONFIGURED',
+        `${version.sourceName} is approved and this process holds no validated base URL for it, ` +
+          `so there is no instance to query. Set SEARXNG_URL. The rung reports as unsearched, ` +
+          `which is the truth — it is not evidence that nothing exists.`,
+        version,
+      );
+    }
+
+    if (input.permittedEngineCount === 0) {
+      return this.refuse(
+        'NO_ENGINE_PERMITTED',
+        `${version.sourceName} is approved and engine governance permits no upstream engine, so ` +
+          `there is nothing to ask. A query naming no engine would be served by the instance's ` +
+          `own defaults, which is exactly the widening the governance table exists to prevent, ` +
+          `so this refuses rather than sending one. Enabling an engine is a named human ` +
+          `decision in engine-governance.ts, not a configuration change.`,
+        version,
+      );
+    }
+
+    if (!input.runJurisdictions.includes(input.jurisdiction)) {
+      return this.refuse(
+        'JURISDICTION_NOT_IN_RUN_SCOPE',
+        `This search was scoped to ${input.runJurisdictions.join(', ') || 'no jurisdiction'} and ` +
+          `this query is attributed to ${input.jurisdiction}, which it never asked for.`,
+        version,
+      );
+    }
+    if (version.jurisdictionScope !== 'GLOBAL' && !version.countries.includes(input.jurisdiction)) {
+      return this.refuse(
+        'SOURCE_DOES_NOT_COVER_JURISDICTION',
+        `${version.sourceName} is approved for ${version.countries.join(', ') || 'no country'} ` +
+          `and this query is attributed to ${input.jurisdiction}. Out-of-jurisdiction coverage ` +
+          `is never inferred (FR-05).`,
+        version,
+      );
+    }
+
+    const scope = resolveEffectiveScope({
+      taxonomy: input.taxonomy,
+      country: input.jurisdiction,
+      requestedLanguages: input.runLanguages,
+    });
+    if (scope.categories.length === 0) {
+      return this.refuse(
+        'JURISDICTION_NOT_ENABLED',
+        `The taxonomy version pinned to this run enables no category for ${input.jurisdiction}, ` +
+          `so there is nothing this query could be looking for there.`,
+        version,
+      );
+    }
+    if (!scope.languages.includes(input.language)) {
+      return this.refuse(
+        'LANGUAGE_NOT_ENABLED',
+        `The taxonomy version pinned to this run declares no terms in ${input.language} (FR-03).`,
+        version,
+      );
+    }
+    if (!version.languages.includes(input.language)) {
+      return this.refuse(
+        'SOURCE_DOES_NOT_COVER_LANGUAGE',
+        `${version.sourceName} is approved for ${version.languages.join(', ') || 'no language'} ` +
+          `and this query is in ${input.language}.`,
+        version,
+      );
+    }
+
+    if (this.egressIdentity === null) {
+      return this.refuse(
+        'NO_EGRESS_IDENTITY',
+        `This process has no egress identity, so a request could not be attributed to anyone. ` +
+          `It applies here as much as on the publisher path: the upstream engines this instance ` +
+          `queries see traffic that originated with us, and an unattributable outbound request ` +
+          `is a defect (FR-06).`,
+        version,
+      );
+    }
+
+    return {
+      authorised: true,
+      sourceVersion: version,
+      egressIdentity: this.egressIdentity,
+      authorisation: {
+        sourceVersionId: version.versionId,
+        licenceTermsVersion: version.licenceTermsVersion,
+        // An internal service publishes no robots.txt and is not a publisher. `NOT_APPLICABLE`
+        // rather than `HONOURED`, because `HONOURED` asserts that a robots file was read and
+        // obeyed, and none was.
+        robotsPosition: 'INTERNAL_SERVICE_NOT_A_PUBLISHER',
+        robotsExceptionApprovedBy: null,
+        robotsExceptionDeliveryHosts: [],
+        requestCeilingPerSecond: version.requestCeilingPerSecond,
+        jurisdictionEnabled: true,
+        languageEnabled: true,
+        // Both false, and honestly so. See the method header: neither half of SEC-02 ran,
+        // because there is no untrusted address on this hop. The articles this query names go
+        // through `authorise`, where both halves do run.
+        urlPolicyPassed: false,
+        ssrfValidated: false,
+        relevanceScore: null,
+        relevanceMethod: ENDPOINT_POLL_RELEVANCE_METHOD,
+        issuedBy: FETCH_GATE_ISSUER,
+        issuedAt: input.now.toISOString(),
+      },
+    };
   }
 
   /**
@@ -432,8 +725,39 @@ export class FetchGateService {
       );
     }
 
-    const version = await this.sourceVersions.loadActive(input.sourceId);
+    // **Discovery permission and publisher-fetch permission are separate decisions.**
+    //
+    // When a lead names a publisher, the approval that matters is the one for **the domain about
+    // to be contacted**, not the one for the service that mentioned it. Reading the discovery
+    // source's approval here would let a single signature on our own SearXNG record authorise
+    // contacting every publisher on the open web — which is the opposite of what D-042 is for,
+    // and is precisely what `searxng-adverse-media`'s own policy summary says must not happen:
+    // "Every article this service names is a LEAD: it is fetched from its original publisher
+    // ... under that publisher's own approval, robots position and first-contact approval."
+    //
+    // A domain no registry record covers is refused **per candidate**. It is not a source-level
+    // failure and it never stops the other candidates: see `isSourceLevelRefusal`.
+    // Mock mode is exempt, on exactly the rule D-042 already uses below: no publisher is
+    // involved. A fixture lead names an invented domain (`nacion-example.cr`) while the fixture
+    // source is registered against `fixtures.local`, so resolving by publisher in mock mode
+    // would refuse every fixture — and would be refusing a publisher that does not exist. The
+    // fixture gate further down still guarantees a fixture cannot authorise a live request.
+    const resolveByPublisher = input.publisherDomain !== undefined && this.mode === 'LIVE';
+    const version = resolveByPublisher
+      ? await this.sourceVersions.loadActiveByDomain(input.publisherDomain)
+      : await this.sourceVersions.loadActive(input.sourceId);
     if (version === null) {
+      if (resolveByPublisher) {
+        return this.refuse(
+          'PUBLISHER_NOT_APPROVED',
+          `No approved source record covers ${input.publisherDomain}, so nobody has accepted ` +
+            `that this service would contact that publisher. The candidate was discovered by ` +
+            `${input.sourceId} and is reported with its publisher and URL rather than dropped, ` +
+            `but it is not fetched: a discovery service's approval authorises querying that ` +
+            `service, never fetching from whatever it happens to name (D-042).`,
+          null,
+        );
+      }
       return this.refuse(
         'NO_ACTIVE_SOURCE_VERSION',
         `Source ${input.sourceId} has no active approved version, so nothing authorises a ` +

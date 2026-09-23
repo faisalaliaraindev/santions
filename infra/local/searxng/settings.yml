@@ -1,20 +1,97 @@
-# Minimal SearXNG configuration for local development (cascade rung 5).
-# The engine mix is deliberately narrow: an approved engine list, not "everything SearXNG
-# supports". Adding an engine is a source-registry decision, not a config convenience.
-use_default_settings: true
+# SearXNG configuration for this deployment — FR-05 rung 5, the adverse-media discovery layer.
+#
+# # The engine list here is an allowlist, and it did not used to be one
+#
+# `use_default_settings: true` **merges** an `engines:` block with the upstream defaults rather
+# than replacing them. Before 2026-09-22 this file listed two engines under `engines:` and
+# carried a comment claiming "an approved engine list, not everything SearXNG supports". The
+# audit in `docs/sources/evidence/searxng-adverse-media.json` read `GET /config` and found **267
+# engines enabled**, every one of them reachable by a request carrying `categories=news`. The
+# comment was true about the intent and false about the deployment.
+#
+# `use_default_settings.engines.keep_only` is the mechanism that makes it true: everything not
+# named below is removed from the instance entirely. Adding an engine back is an edit to this
+# file plus an engine-governance decision in
+# `apps/api/src/sources/searxng/engine-governance.ts` — two acts, in two repositories' worth of
+# review, rather than a URL parameter.
+#
+# # Why `google news` is present and disabled
+#
+# D20 refused Google as a discovery source: their Terms of Use permit "your own personal use
+# (i.e., non-commercial use)" and forbid "any robot, spider, other device or manual process to
+# monitor or copy any content from the Service". SearXNG's `google_news` engine scrapes
+# `google.com/search?tbm=nws`, which is the prohibited mechanism aimed at the prohibited
+# service. Routing it through an instance we host does not change whose terms apply.
+#
+# It stays in `keep_only` so that the engine exists technically and a future governance decision
+# is a one-word edit rather than a rediscovery. It is `disabled: true` so that no request can
+# reach it without naming it, and `enabledForDiscovery: false` in the engine-governance record
+# so that our connector refuses to name it. Two independent refusals, as with every other source
+# in this project.
+use_default_settings:
+  engines:
+    keep_only:
+      # News-category engines. Every one of them is governed individually in
+      # `engine-governance.ts`; presence here is capability, never authorisation.
+      - google news
+      - bing news
+      - brave.news
+      - duckduckgo news
+      - reuters
+      - wikinews
+      # General-category engines retained from the original file.
+      - duckduckgo
+      - wikipedia
+      # Kept for a mechanical reason, not a discovery one, and all three are disabled below.
+      #
+      # SearXNG groups engines into named outgoing **networks**, and a news engine inherits the
+      # network its general-category sibling defines: `brave.news` reads the `brave` network,
+      # `bing news` the `bing` one, `google news` the `google` one. Removing the sibling removes
+      # the network, and the instance then refuses to start with `KeyError: 'brave'` rather than
+      # with anything that names the cause. They are listed so the networks exist and disabled so
+      # nothing reaches them.
+      - google
+      - bing
+      - brave
 
 server:
   secret_key: 'local-development-only-change-me'
+  # No limiter: the only client is this service, on the loopback interface, and the bound that
+  # matters is the one the connector applies to itself (`maxQueriesPerSearch` and the rest).
   limiter: false
   image_proxy: false
 
 search:
   safe_search: 0
+  # JSON only. The connector parses the documented JSON interface and never the HTML UI, so
+  # serving the UI format would only widen what an accidental request could reach.
   formats:
     - json
 
 engines:
+  # Refused by D20. See the header. `disabled: true` means it never runs for a request that
+  # merely names `categories=news`; only a request naming the engine explicitly could reach it,
+  # and our connector's allowlist will not name it.
+  - name: google news
+    disabled: true
+  - name: bing news
+    disabled: false
+  - name: brave.news
+    disabled: false
+  - name: duckduckgo news
+    disabled: false
+  - name: reuters
+    disabled: false
+  - name: wikinews
+    disabled: false
   - name: duckduckgo
     disabled: false
   - name: wikipedia
     disabled: false
+  # Network owners only. See `keep_only` above.
+  - name: google
+    disabled: true
+  - name: bing
+    disabled: true
+  - name: brave
+    disabled: true

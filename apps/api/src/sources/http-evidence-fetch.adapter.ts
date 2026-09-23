@@ -733,18 +733,49 @@ export function interpretRobotsResponse(result: TransportResult): RobotsFile {
 }
 
 /**
+ * Script blocks, removed before the markers are looked for.
+ *
+ * A page's inline JavaScript is configuration, not something the publisher served *to us as a
+ * challenge*, and scanning it produced a false positive that blocked a whole publisher. Every
+ * MediaWiki page embeds a config blob in `<head>` naming its edit-captcha extension
+ * (`wgConfirmEditCaptchaNeededForGenericEdit`, `wgConfirmEditHCaptchaSiteKey`) — a statement
+ * about what *editing* would require, on a page that was served to us in full, 200, 85KB of
+ * article. Matching the bare substring there meant `en.wikinews.org` was reported as serving a
+ * bot challenge while it was serving the article, and the same would happen on every other wiki.
+ *
+ * An unterminated `<script` at the end of the window is dropped too, so a marker cannot hide in
+ * the tail of a script the window happened to cut in half.
+ */
+function withoutScripts(html: string): string {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script\s*>/giu, ' ')
+    .replace(/<script\b[\s\S]*$/iu, ' ');
+}
+
+/**
  * Recognise a challenge or interstitial in a body that came back 200.
  *
  * Deliberately conservative and deliberately dumb: it looks at the first few kilobytes of an HTML
  * body for well-known markers. A false positive costs one lead and is reported honestly; a false
- * negative stores a CAPTCHA page as evidence about a person, which is much worse.
+ * negative stores a CAPTCHA page as evidence about a person, which is much worse. That asymmetry
+ * is unchanged — what changed is *where* it looks.
+ *
+ * **Inline scripts are excluded** (see `withoutScripts`). That is not a loosening of the check: a
+ * real interstitial puts its text in the title and the visible body, because its whole purpose is
+ * to be read by a person, and all of that survives script-stripping. What does not survive is a
+ * publisher's JavaScript configuration mentioning a captcha it would use somewhere else.
+ *
+ * The window is read larger than it is scanned so that removing a script cannot pull unscanned
+ * markup into view and change the answer depending on how long the page's scripts happen to be.
  */
 export function detectChallenge(body: Uint8Array, contentType: string | null): string | null {
   if (contentType !== null && !contentType.toLowerCase().includes('html')) {
     return null;
   }
-  const head = new TextDecoder('utf-8', { fatal: false })
-    .decode(body.subarray(0, 4096))
+  const head = withoutScripts(
+    new TextDecoder('utf-8', { fatal: false }).decode(body.subarray(0, 16384)),
+  )
+    .slice(0, 4096)
     .toLowerCase();
   const marker = CHALLENGE_MARKERS.find((candidate) => head.includes(candidate));
   return marker === undefined

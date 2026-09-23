@@ -52,6 +52,8 @@ interface SearchRunShape {
     readonly policyVersion: number;
   };
   readonly revision: number;
+  /** Local diagnostic only; absent on every normal run. See `local-diagnostic.ts`. */
+  readonly localDiscoveryDiagnostic?: { readonly engines: readonly string[] } | undefined;
 }
 
 export const SEARCH_QUEUED_EVENT = 'search.queued';
@@ -113,6 +115,9 @@ export class SearchJobHandler implements JobHandler {
       languages: run.requestedScope.languages,
       taxonomyVersion: run.pinnedVersions.taxonomyVersion,
       policyVersion: run.pinnedVersions.policyVersion,
+      // Read from the persisted run, like the scope. The connector re-checks this process's
+      // environment before it honours any of it.
+      diagnosticEngines: run.localDiscoveryDiagnostic?.engines ?? [],
       now,
       heartbeat: context.heartbeat,
     });
@@ -162,6 +167,11 @@ export class SearchJobHandler implements JobHandler {
               // is a fact about this execution, not about the source registry: re-reading the
               // registry later cannot reconstruct how many requests this particular run made.
               liveDiscovery: result.liveDiscovery,
+              // Per-engine diagnostics for the rung-5 metasearch layer (§15). Stored on the run
+              // for the same reason the request counts are: which engines answered is a fact
+              // about this execution, and re-reading the governance table later says only which
+              // engines were *permitted*, never which ones actually came back.
+              searxngDiscovery: result.searxngDiscovery,
               completedAt: now,
               progress: {
                 // Six: associations, plan, discovery, fetch, extraction, banding.
@@ -185,7 +195,10 @@ export class SearchJobHandler implements JobHandler {
         `${String(aggregate.findingCounts.other)} other finding(s), ` +
         `${String(result.rejectedLeads.length)} rejected lead(s). ` +
         `Sources: ${result.sourceOutcomes
-          .map((o) => `${o.sourceId}=${o.outcome}${o.failureClass == null ? '' : `/${o.failureClass}`}`)
+          .map(
+            (o) =>
+              `${o.sourceId}=${o.outcome}${o.failureClass == null ? '' : `/${o.failureClass}`}`,
+          )
           .join(', ')}`,
     );
   }

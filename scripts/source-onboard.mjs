@@ -64,22 +64,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { URL, fileURLToPath, pathToFileURL } from 'node:url';
 
+import {
+  firstContactApprovalFor,
+  firstContactBannerFor,
+} from './lib/first-contact-approvals.mjs';
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const evidenceDir = join(repoRoot, 'docs/sources/evidence');
-
-/**
- * D19 — first contact with the ten indexed publishers.
- *
- * Recorded on `accessPolicy.firstContactApproval` for every source this script proposes. It is a
- * named person accepting that this service will start making requests to a publisher who did not
- * ask to hear from us, and it is not the same act as approving the registry entry.
- */
-const FIRST_CONTACT_APPROVAL = {
-  approvedBy: 'Faisal Ali',
-  role: 'Source admin',
-  approvedOn: '2026-09-21',
-  decision: 'D19',
-};
 
 /**
  * D6 — the narrow robots exception, closed 2026-09-21.
@@ -145,7 +136,7 @@ function arg(name, fallback = undefined) {
   return index === -1 || index === process.argv.length - 1 ? fallback : process.argv[index + 1];
 }
 
-/** The ten sources, from the compiled registry — never a second copy of an endpoint URL. */
+/** Every source this script onboards, from the compiled registry — never a second copy of a URL. */
 async function loadRegistryContent() {
   const registry = async (file) =>
     import(pathToFileURL(join(repoRoot, 'apps/api/dist/sources/registry', file)).href);
@@ -153,13 +144,40 @@ async function loadRegistryContent() {
   const global = await registry('global-indexed-sources.js');
   const regulators = await registry('regulator-indexed-sources.js');
   const worldBank = await registry('world-bank-indexed-source.js');
+  const searxng = await registry('searxng-adverse-media.js');
+  const wikinews = await registry('wikinews-en.js');
 
   return new Map([
     ...Object.entries(global.GLOBAL_INDEXED_SOURCE_CONTENT),
     ...Object.entries(regulators.REGULATOR_INDEXED_SOURCE_CONTENT),
     [worldBank.WORLD_BANK_DEBARRED_SOURCE_ID, worldBank.WORLD_BANK_DEBARRED_CONTENT],
+    // The rung-5 metasearch layer. Not an indexed source, and it goes through this script
+    // anyway, because the lifecycle is the point: propose -> submit -> approve -> activate, with
+    // four eyes, over the public Admin API. A second onboarding path for one source would be a
+    // second place the lifecycle could be got wrong.
+    [searxng.SEARXNG_SOURCE_ID, searxng.SEARXNG_CONTENT],
+    // The first PUBLISHER approved for rung-5 fetching, and the reason it is a separate entry
+    // from the line above rather than covered by it: approving the metasearch layer approves
+    // querying our own instance, never fetching from whatever that instance names. One domain,
+    // one record, one approval (D22).
+    [wikinews.WIKINEWS_EN_SOURCE_ID, wikinews.WIKINEWS_EN_CONTENT],
   ]);
 }
+
+/**
+ * Sources that are a service this deployment runs rather than a third-party publisher.
+ *
+ * They take a different governance shape at three points, and each one is checked below rather
+ * than branched on ad hoc:
+ *
+ * - **no first-contact approval**, because there is no third party on the hop to consent to
+ *   being contacted. Injecting D19's approval here would be a signature on a record nobody gave;
+ * - **no robots position**, because there is no robots.txt to establish one from;
+ * - **no endpoint URL in the registry**, because the address is deployment configuration.
+ *
+ * `jurisdictionFor` also has to stop reading the endpoint URL for these, since there is none.
+ */
+const INTERNAL_SERVICE_SOURCES = new Set(['searxng-adverse-media']);
 
 function readEvidence(sourceId) {
   try {
@@ -180,6 +198,12 @@ function readEvidence(sourceId) {
  * are set **here**, from the evidence file, by the run that a named person authorised.
  */
 function contentFor(sourceId, template, evidence) {
+  if (INTERNAL_SERVICE_SOURCES.has(sourceId)) {
+    // Proposed exactly as the registry module wrote it. Nothing is injected: the two governance
+    // fields this script normally fills are the two that must stay empty here, and the reasons
+    // are in `INTERNAL_SERVICE_SOURCES` and in the module's own header.
+    return { ...template };
+  }
   const exception = DELIVERY_HOSTS[sourceId];
   const robotsFromEvidence = evidence?.conclusion?.robotsPosition ?? 'NOT_ESTABLISHED';
   const robotsPosition = exception === undefined ? robotsFromEvidence : 'EXCEPTION_APPROVED';
@@ -189,7 +213,7 @@ function contentFor(sourceId, template, evidence) {
     robotsPosition,
     accessPolicy: {
       ...template.accessPolicy,
-      firstContactApproval: FIRST_CONTACT_APPROVAL,
+      firstContactApproval: firstContactApprovalFor(sourceId),
       ...(exception === undefined
         ? {}
         : { robotsException: { ...ROBOTS_EXCEPTION, deliveryHosts: exception } }),
@@ -199,6 +223,19 @@ function contentFor(sourceId, template, evidence) {
 
 /** Bulk files are downloaded; RSS is a published feed. The distinction is what the policy clears. */
 function collectionMethodFor(template) {
+  if (template.connectorType === 'NEWS_DISCOVERY_SEARXNG') {
+    // The metasearch instance serves a published JSON API and we read it as one. Not
+    // BULK_DOWNLOAD, which would describe pulling a file, and not HTML_FETCH, which would
+    // describe scraping a page — the connector does neither and the record should not say it does.
+    return 'PUBLISHED_API';
+  }
+  if (template.connectorType === 'EVIDENCE_FETCH_HTTP') {
+    // One article page at a time, over HTTP, because a discovery service named that URL. That is
+    // HTML_FETCH and nothing else. Letting this fall through to the BULK_DOWNLOAD default below
+    // would put a false declaration on an approved version — the rights policy would clear a
+    // collection method this source never performs, and would not clear the one it does.
+    return 'HTML_FETCH';
+  }
   return template.connectorType === 'INDEXED_RSS' ? 'PUBLISHED_FEED' : 'BULK_DOWNLOAD';
 }
 
@@ -232,7 +269,11 @@ function rightsFor(sourceId, template) {
       // A designation list is a public record: the publishing authority publishes it precisely so
       // that it is acted on. Not BULK_PERSONAL_DATA, which would be the right reading of a
       // population register and the wrong one of a sanctions list.
-      classification: 'PUBLIC_RECORD',
+      // A designation list is a public record. A news article a metasearch instance surfaced is
+      // not: it is published content, written by a publisher, and calling it a public record
+      // would overstate what it is on every finding it supports.
+      classification:
+        template.connectorType === 'NEWS_DISCOVERY_SEARXNG' ? 'PUBLISHED_CONTENT' : 'PUBLIC_RECORD',
       collectionMethod: method,
       intendedUse: 'ADVERSE_SCREENING',
       operations: ['COLLECT', 'PROCESS', 'STORE', 'DISPLAY'],
@@ -252,6 +293,15 @@ function rightsFor(sourceId, template) {
  * are not "global law", they are the terms of a body headquartered somewhere.
  */
 function jurisdictionFor(template) {
+  if (template.accessPolicy.endpointUrl === null) {
+    // Two kinds of source record no endpoint: an internal service (the address is deployment
+    // configuration) and a fetch-only publisher reached solely by following a discovered link
+    // (D-043 — a recorded endpoint would be a second way in that the discovery path never goes
+    // through). Either way there is no host to read a jurisdiction off, and the rights policy is
+    // written under the law this deployment operates under, which is where the processing
+    // actually happens.
+    return 'GB';
+  }
   const host = new URL(template.accessPolicy.endpointUrl).host;
   if (host.endsWith('.gov.uk') || host.endsWith('.fca.org.uk')) {
     return 'GB';
@@ -264,10 +314,35 @@ function jurisdictionFor(template) {
 
 /** Whether the gathered evidence supports taking this source all the way to ACTIVE. */
 function activationSupport(sourceId, template, evidence) {
+  if (INTERNAL_SERVICE_SOURCES.has(sourceId)) {
+    // The evidence file for an internal service records what the instance IS, not whether a
+    // publisher permits contact — so `activationSupported` is read from it the same way, and its
+    // absence blocks activation the same way. What activation does NOT do is authorise any
+    // upstream engine: that is `engine-governance.ts`, and it is a code change under review.
+    if (evidence === null) {
+      return {
+        supported: false,
+        blocker:
+          `No evidence file at docs/sources/evidence/${sourceId}.json. Audit the instance ` +
+          `first: read GET {SEARXNG_URL}/config and record what it has enabled.`,
+      };
+    }
+    return evidence.conclusion?.activationSupported === true
+      ? { supported: true, blocker: null }
+      : {
+          supported: false,
+          blocker: evidence.conclusion?.blocker ?? 'Evidence does not support activation.',
+        };
+  }
   if (evidence === null) {
     return {
       supported: false,
-      blocker: `No evidence file at docs/sources/evidence/${sourceId}.json. Run pnpm indexed:first-contact.`,
+      blocker:
+        `No evidence file at docs/sources/evidence/${sourceId}.json. Run ` +
+        // Not every publisher's evidence comes from the same script: a fetch-only source has no
+        // endpoint for `indexed:first-contact` to verify, so naming that script here would send
+        // the reader to one that cannot gather it.
+        `${sourceId === 'wikinews-en' ? 'pnpm wikinews:first-contact' : 'pnpm indexed:first-contact'}.`,
     };
   }
   if (DELIVERY_HOSTS[sourceId] !== undefined) {
@@ -390,7 +465,7 @@ async function main() {
   API              ${baseUrl}
   Sources          ${sourceIds.length}
   Mode             ${apply ? 'APPLY — this will change registry state' : 'PLAN — nothing is sent'}
-  First contact    ${FIRST_CONTACT_APPROVAL.decision}, ${FIRST_CONTACT_APPROVAL.approvedBy}, ${FIRST_CONTACT_APPROVAL.approvedOn}
+  First contact    ${firstContactBannerFor(sourceIds, (id) => INTERNAL_SERVICE_SOURCES.has(id))}
 `);
 
   const plan = [];
@@ -528,6 +603,13 @@ async function onboardOne(api, proposerKey, approverKey, row) {
   }
 
   const evidenceRef = `docs/sources/evidence/${sourceId}.json`;
+  // The decision covering THIS source, not a fixed D19. These two strings become the reason on
+  // the audit entry for the submit and the approval, and an audit entry naming the wrong decision
+  // is worse than one naming none: it is a specific, checkable, false claim about who authorised
+  // contacting this publisher. An internal service has no such decision and says so.
+  const firstContact = INTERNAL_SERVICE_SOURCES.has(sourceId)
+    ? null
+    : firstContactApprovalFor(sourceId);
 
   // SUBMIT — the proposer's act.
   if (target.status === 'PROPOSED') {
@@ -538,8 +620,10 @@ async function onboardOne(api, proposerKey, approverKey, row) {
       {
         action: 'SUBMIT',
         reason:
-          `Submitted for approval under ${FIRST_CONTACT_APPROVAL.decision}. Publisher evidence: ` +
-          `${evidenceRef}.`,
+          (firstContact === null
+            ? 'Submitted for approval. Internal service — no publisher first contact applies. '
+            : `Submitted for approval under ${firstContact.decision}. `) +
+          `Publisher evidence: ${evidenceRef}.`,
       },
       target.revision,
     );
@@ -567,8 +651,10 @@ async function onboardOne(api, proposerKey, approverKey, row) {
       {
         action: 'APPROVE',
         reason:
-          `Approved by ${FIRST_CONTACT_APPROVAL.approvedBy}, ${FIRST_CONTACT_APPROVAL.role}. ` +
-          `Robots position ${content.robotsPosition}; first contact ${FIRST_CONTACT_APPROVAL.decision}. ` +
+          (firstContact === null
+            ? 'Internal service — no publisher first contact applies. '
+            : `Approved by ${firstContact.approvedBy}, ${firstContact.role}. ` +
+              `Robots position ${content.robotsPosition}; first contact ${firstContact.decision}. `) +
           (exception === undefined
             ? ''
             : `Robots exception ${exception.decision} scoped to ${exception.deliveryHosts.join(', ')}. `) +

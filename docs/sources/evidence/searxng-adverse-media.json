@@ -1,0 +1,239 @@
+{
+  "evidenceId": "searxng-adverse-media",
+  "subject": "The self-hosted SearXNG instance this deployment runs, as the adverse-media discovery layer (FR-05 rung 5)",
+  "recordedOn": "2026-09-22",
+  "recordedBy": "Phase E SearXNG milestone, audit step 1",
+  "whatThisIsNot": "This is not a source approval and it is not an engine governance decision. It records what the instance IS, mechanically, on the date above. The platform's reading of each upstream engine's terms lives in apps/api/src/sources/searxng/engine-governance.ts and in D21; whether a given tenant uses a given engine is a per-tenant switch set through GET/PUT /v1/tenant/discovery/engines.",
+  "deployment": {
+    "definedIn": "infra/local/docker-compose.yml, service `searxng`",
+    "image": "searxng/searxng:latest",
+    "resolvedVersion": "2026.9.10+931fd9787",
+    "settingsFile": "infra/local/searxng/settings.yml (bind-mounted at /etc/searxng)",
+    "baseUrl": "http://127.0.0.1:28888",
+    "boundTo": "127.0.0.1 only — the published port is 127.0.0.1:28888:8080, so the instance is not reachable from another host",
+    "publicInstance": false,
+    "limiter": false,
+    "redisOrValkey": "NOT CONFIGURED. No redis/valkey service exists in the compose file and SearXNG reports no cache backend. The limiter is off, which is the only feature that would have required one. Nothing in this milestone adds one: the request bound that matters is applied by our own connector, per search, and a bound enforced inside the metasearch instance would be a second, weaker copy of it.",
+    "secondDeployment": "NONE CREATED. This milestone used the instance that already existed."
+  },
+  "jsonOutput": {
+    "enabledBefore": true,
+    "configuredAt": "search.formats: [json]",
+    "note": "JSON was already the only enabled format, so nothing had to be turned on. The HTML UI is deliberately not served, so there is no HTML surface for a connector to scrape even by mistake."
+  },
+  "requestsMade": [
+    {
+      "at": "2026-09-22",
+      "request": "GET http://127.0.0.1:28888/config",
+      "httpStatus": 200,
+      "bytes": 108951,
+      "finding": "267 engines enabled."
+    },
+    {
+      "at": "2026-09-22",
+      "request": "GET http://127.0.0.1:28888/search?q=test&categories=news&language=en&format=json",
+      "httpStatus": 200,
+      "finding": "JSON parses. Results carried engine, engines, score, category, publishedDate, content, url and title. The engines that answered were bing news and duckduckgo news."
+    },
+    {
+      "at": "2026-09-22",
+      "request": "GET http://127.0.0.1:28888/search?q=%22fraud%22+trial&categories=news&language=en&format=json&engines=wikinews&pageno=1",
+      "httpStatus": 200,
+      "finding": "engines= is a UNION with categories=, not a filter on it. Naming one engine while also naming the news category ran the whole news category. unresponsive_engines reported brave.news = HTTP connection error and google news = Suspended: CAPTCHA."
+    },
+    {
+      "at": "2026-09-22",
+      "request": "GET http://127.0.0.1:28888/search?q=fraud+trial&language=en&format=json&engines=wikinews&pageno=1",
+      "httpStatus": 200,
+      "finding": "Naming engines= and NOT naming categories= restricts execution to exactly the named engines. Five results, all engine: wikinews, category: news, with real publishedDate values. This is the request contract the connector uses."
+    }
+  ],
+  "findingsThatChangedTheDeployment": [
+    {
+      "finding": "The instance ran 267 engines, not the two its own settings file claimed.",
+      "why": "use_default_settings: true MERGES an engines: block with the upstream defaults rather than replacing them. The file listed duckduckgo and wikipedia under a comment reading 'an approved engine list, not everything SearXNG supports'. The comment described the intent; the deployment did the opposite.",
+      "fix": "use_default_settings.engines.keep_only now removes every engine not named. The instance reports 11 engines after the change, down from 267.",
+      "verifiedBy": "GET /config after restart — 11 engines."
+    },
+    {
+      "finding": "google news was enabled and reachable by any request carrying categories=news.",
+      "why": "D20 refused Google as a discovery source. SearXNG's google_news engine scrapes google.com/search?tbm=nws, which is the mechanism Google's Terms of Use name ('any robot, spider, other device or manual process to monitor or copy any content from the Service') aimed at the service those terms cover. Hosting the metasearch instance ourselves does not change whose terms apply.",
+      "fix": "google news is disabled: true on the instance and enabledForDiscovery: false in the engine-governance record. Two independent refusals. It remains in keep_only so the capability exists technically and a future governance decision is an edit rather than a rediscovery.",
+      "verifiedBy": "GET /config after restart — google news enabled=false."
+    },
+    {
+      "finding": "Removing a news engine's general-category sibling breaks instance startup.",
+      "why": "SearXNG groups outgoing connections into named networks and a news engine inherits its sibling's: brave.news reads the brave network. A keep_only list without brave fails at boot with KeyError: 'brave' and nothing that names the cause.",
+      "fix": "google, bing and brave are in keep_only and all three are disabled: true. They own networks; they do not serve queries."
+    }
+  ],
+  "engineContactDuringThisAudit": {
+    "statement": "Two of the four requests above carried categories=news against the pre-fix instance, so bing news, duckduckgo news, reuters, brave.news and google news were each asked one query. This is recorded rather than omitted.",
+    "whatReachedWhom": "bing news and duckduckgo news answered. reuters answered on the third request. brave.news returned an HTTP connection error. google news returned SearXNG's own 'Suspended: CAPTCHA' — SearXNG's breaker had already suspended that engine, so whether a request left the instance on those two attempts cannot be asserted from here.",
+    "whyItHappened": "Audit step 1 of the milestone brief specifies GET {SEARXNG_URL}/search?q=test&categories=news&language=en&format=json as the verification request. It was run as specified, against an instance whose engine list had not yet been read.",
+    "whatChanged": "The instance allowlist and the connector's own engine allowlist both landed immediately afterwards. No further request has carried categories=news; the connector never sends that parameter at all.",
+    "whatIsNotClaimed": "This does not make any engine approved, and it is not treated as a first contact that authorises later ones. Every engine's governance stands exactly where it stood before the audit."
+  },
+  "newsEnginesPresentAfterTheFix": [
+    {
+      "name": "google news",
+      "enabledOnInstance": false,
+      "timeoutSeconds": 3,
+      "paging": true
+    },
+    {
+      "name": "bing news",
+      "enabledOnInstance": true,
+      "timeoutSeconds": 3,
+      "paging": true
+    },
+    {
+      "name": "brave.news",
+      "enabledOnInstance": true,
+      "timeoutSeconds": 3,
+      "paging": false
+    },
+    {
+      "name": "duckduckgo news",
+      "enabledOnInstance": true,
+      "timeoutSeconds": 3,
+      "paging": true
+    },
+    {
+      "name": "reuters",
+      "enabledOnInstance": true,
+      "timeoutSeconds": 3,
+      "paging": true
+    },
+    {
+      "name": "wikinews",
+      "enabledOnInstance": true,
+      "timeoutSeconds": 3,
+      "paging": true
+    }
+  ],
+  "upstreamApiStatusReadFromTheEngineModules": {
+    "why": "SearXNG records, per engine, whether it uses the publisher's official API. It is the single most governance-relevant fact about an engine and it lives in the source rather than in /config, so it was read from the running container.",
+    "engines": {
+      "google news": {
+        "useOfficialApi": false,
+        "results": "XML",
+        "reads": "google.com/search?tbm=nws (HTML scrape)"
+      },
+      "bing news": {
+        "useOfficialApi": false,
+        "results": "RSS",
+        "reads": "bing.com/news/infinitescrollajax (undocumented endpoint)"
+      },
+      "brave.news": {
+        "useOfficialApi": false,
+        "results": "HTML",
+        "reads": "search.brave.com (HTML scrape)"
+      },
+      "duckduckgo news": {
+        "useOfficialApi": false,
+        "results": "JSON",
+        "reads": "duckduckgo.com internal endpoint"
+      },
+      "reuters": {
+        "useOfficialApi": false,
+        "results": "JSON",
+        "reads": "reuters.com/pf/api/v3/content/fetch/articles-by-search-v2 (undocumented internal API)"
+      },
+      "wikinews": {
+        "useOfficialApi": true,
+        "results": "JSON",
+        "reads": "{lang}.wikinews.org MediaWiki Action API, via SearXNG's generic mediawiki engine"
+      }
+    },
+    "consequence": "Five of the six read an endpoint the publisher does not document for this use. One reads a published API. That asymmetry is what the engine-governance table is built around, and it is why five engines start enabledForDiscovery: false."
+  },
+  "networkAccessibility": {
+    "fromApiAndWorker": "Both run on the host and reach 127.0.0.1:28888 directly. Verified by tests/live/searxng-live-smoke.test.ts.",
+    "note": "The connector reaches the instance through a dedicated internal transport, NOT through EvidenceFetchPort. EvidenceFetchPort enforces SEC-02, which refuses http and refuses loopback — correctly, because it exists to stop this service dialling an address a third party chose. The SearXNG base URL is an address WE chose, from our own configuration, and it is validated as such. See apps/api/src/sources/searxng/searxng-client.ts."
+  },
+  "conclusion": {
+    "activationSupported": true,
+    "blocker": null,
+    "whatActivationAuthorises": "Querying the SearXNG instance this deployment runs, at the address in SEARXNG_URL, at rung 5, within the recorded budgets and the connector's own per-search bounds.",
+    "whatActivationDoesNotAuthorise": "Any particular upstream engine's terms of use. Activation puts the source on the ladder; which engines run is the per-tenant switch, and what is known about each engine's terms is the governance reading in engine-governance.ts. D21 remains open on five of the six readings.",
+    "robotsPosition": "NOT_ESTABLISHED",
+    "robotsNote": "True and inert. There is no publisher and no robots.txt. The gate issues INTERNAL_SERVICE_NOT_A_PUBLISHER rather than reading this field, and the publisher transport refuses that value, so it cannot authorise a document fetch.",
+    "firstContactApproval": null,
+    "firstContactNote": "Null because it would be false. Nobody approved a first contact with a service we started ourselves. authoriseInternalDiscoveryService does not read the field; authoriseUrl, which every publisher goes through, still does."
+  },
+  "engineModel": {
+    "twoAxes": "Each engine carries `integrated` (can our connector query and report it — true for all six) and a separate switch (may we query it for this tenant right now). They are never computed from one another. A switched-off engine is reported as DISABLED_BY_POLICY with its decision id, never omitted.",
+    "defaultIsOn": "All six engines default to ON, by the product owner's decision on 2026-09-22 recorded under D21. That is NOT a claim that any engine's terms permit the use: five readings were closed as PERMITTED under D21 on 2026-09-22 as a recorded product-owner acceptance of residual risk rather than a completed legal review, with each engine's limitation retained verbatim in its evidenceNote, and one (Google, D20) is REFUSED, and every one of those readings is carried unchanged into the control API response and the per-engine diagnostics beside the switch.",
+    "googleDisagreement": "GOOGLE_NEWS is integrated and defaults ON while its governance reading is REFUSED under D20. The disagreement is deliberate and loud rather than resolved by rewriting the reading: `overridesRefusal: true` appears on every control-API response for it, and enabling it is logged and audited. It is additionally `disabled: true` on the instance, so a request naming it returns CAPTCHA/suspended rather than results.",
+    "perEngineOutcomes": [
+      "RETURNED_RESULTS",
+      "ZERO_RESULTS",
+      "TIMEOUT",
+      "RATE_LIMITED",
+      "CAPTCHA",
+      "ACCESS_DENIED",
+      "CONNECTION_ERROR",
+      "DISABLED_BY_POLICY",
+      "NOT_CONFIGURED",
+      "INTERNAL_ERROR"
+    ],
+    "sourceOutcome": "Derived from the engine rows: COMPLETED (everything attempted answered, with or without results), PARTIAL (some answered, some failed — the successes are kept), FAILED (every attempted engine failed), REFUSED (nothing was attempted). Zero results is never a failure."
+  },
+  "liveSmoke_2026_09_22": {
+    "request": "GET /search?q=%22Bernard+Madoff%22+fraud&format=json&engines=<one engine>&pageno=1&language=en, once per engine",
+    "note": "One request per engine. Upstream volume is identical to a merged request, which forwards to every named engine anyway; only loopback traffic multiplies. What it buys is per-engine timing and per-engine failure isolation.",
+    "perEngine": [
+      {
+        "engine": "GOOGLE_NEWS",
+        "outcome": "CAPTCHA",
+        "results": 0,
+        "durationMs": 3,
+        "detail": "Suspended: CAPTCHA"
+      },
+      {
+        "engine": "BING_NEWS",
+        "outcome": "RETURNED_RESULTS",
+        "results": 7,
+        "durationMs": 325,
+        "detail": ""
+      },
+      {
+        "engine": "BRAVE_NEWS",
+        "outcome": "CONNECTION_ERROR",
+        "results": 0,
+        "durationMs": 84,
+        "detail": "HTTP connection error"
+      },
+      {
+        "engine": "DUCKDUCKGO_NEWS",
+        "outcome": "RETURNED_RESULTS",
+        "results": 17,
+        "durationMs": 326,
+        "detail": ""
+      },
+      {
+        "engine": "REUTERS",
+        "outcome": "CONNECTION_ERROR",
+        "results": 0,
+        "durationMs": 622,
+        "detail": "HTTP error"
+      },
+      {
+        "engine": "WIKINEWS",
+        "outcome": "RETURNED_RESULTS",
+        "results": 4,
+        "durationMs": 831,
+        "detail": ""
+      }
+    ],
+    "totals": {
+      "totalRawResults": 28,
+      "uniqueUrls": 22,
+      "duplicatesCollapsed": 6,
+      "sourceOutcome": "PARTIAL"
+    },
+    "whatThisProves": "Three engines returned results and three failed in three different ways, in one run, and every candidate from the three that worked was retained. That is the failure-isolation claim demonstrated against the real instance rather than asserted.",
+    "whatThisIsNot": "Not a finding. Every URL here is a LEAD; none has been fetched from its publisher, extracted, identity-resolved or classified."
+  }
+}

@@ -125,6 +125,10 @@ import {
   type DiscoveryRequestLog,
   type DiscoveryRequestSummary,
 } from '../sources/discovery-request-log.js';
+import type {
+  SearxngDiscoverySummary,
+  SearxngEngineLog,
+} from '../sources/searxng/engine-health.js';
 import { EvidenceStagingService } from '../storage/evidence-staging.service.js';
 import { SubjectsService } from '../subjects/subjects.service.js';
 import { PolicyService } from '../tenancy/policy.service.js';
@@ -147,6 +151,16 @@ export interface PipelineResult {
    * cannot tell you", empty is "no live connector made an attempt".
    */
   readonly liveDiscovery: DiscoveryRequestSummary | null;
+  /**
+   * What the rung-5 metasearch layer's upstream engines did (§15).
+   *
+   * Null when this run has nothing to say about engines — a mock run, a process holding no
+   * engine log, or a run whose ladder never reached the connector. Null and an empty engine list
+   * are different statements and are kept different, exactly as `liveDiscovery` keeps them: null
+   * is "this run cannot tell you", and a summary with `enginesRequested: []` is "governance
+   * permitted no engine, so none was asked".
+   */
+  readonly searxngDiscovery: SearxngDiscoverySummary | null;
 }
 
 /** A lead paired with the query that found it, so provenance survives deduplication. */
@@ -206,7 +220,10 @@ function clampTier(tier: number): AuthorityTier {
 }
 
 function attributeKindMatches(kind: string, accepted: readonly string[]): boolean {
-  const folded = kind.trim().toUpperCase().replace(/[^A-Z]/gu, '_');
+  const folded = kind
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/gu, '_');
   return accepted.includes(folded);
 }
 
@@ -294,6 +311,16 @@ export class SearchPipeline {
     private readonly requestLog: DiscoveryRequestLog | null = null,
     /** Shared publisher snapshots queried locally once per subject, never once per plan query. */
     private readonly indexedSources: IndexedSourceSearchService | null = null,
+    /**
+     * Per-engine diagnostics for the rung-5 metasearch layer.
+     *
+     * Separate from `requestLog` rather than folded into it because they answer different
+     * questions at different grains: the request log says what the instance cost, this says what
+     * the engines did. One number per source cannot express "Google was suspended on CAPTCHA
+     * while Bing and DuckDuckGo answered", which is the exact shape the failure-isolation claim
+     * rests on.
+     */
+    private readonly engineLog: SearxngEngineLog | null = null,
   ) {}
 
   async execute(input: {
@@ -305,6 +332,8 @@ export class SearchPipeline {
     readonly languages: readonly string[];
     readonly taxonomyVersion: number;
     readonly policyVersion: number;
+    /** Local-diagnostic engines granted to this run. Empty or absent on every normal run. */
+    readonly diagnosticEngines?: readonly string[] | undefined;
     readonly now: Date;
     /** Extends the lease between stages. Returns false when the work has been taken over. */
     readonly heartbeat: () => Promise<boolean>;
@@ -322,7 +351,10 @@ export class SearchPipeline {
 
     const indexed =
       this.indexedSources === null
-        ? { findings: [] as readonly FindingRecord[], sourceOutcomes: [] as readonly SourceCoverageOutcome[] }
+        ? {
+            findings: [] as readonly FindingRecord[],
+            sourceOutcomes: [] as readonly SourceCoverageOutcome[],
+          }
         : await this.indexedSources.search({
             tenantId: input.tenantId,
             searchId: input.searchId,
@@ -462,6 +494,15 @@ export class SearchPipeline {
     // a missing extractor, an undeclared encoding, a rule-based extraction (D-048).
     warnings.push(...assessWarnings);
 
+    // Leads that never reached the publisher: filtered out before a socket opened, or refused at
+    // the fetch gate. Everything else was fetched, so this is the complement rather than a second
+    // counter that could disagree with the rejection records.
+    const unfetchedLeadUrls = new Set(
+      rejected
+        .filter((lead) => lead.stage === 'RELEVANCE' || lead.stage === 'FETCH')
+        .map((lead) => lead.url),
+    );
+
     // ---- 7. Cluster (FR-10) ----------------------------------------------------------------
     // Indexed and discovered findings are clustered together, then Axis D is recomputed per
     // cluster and the discovery findings re-banded against it. Until this call existed, every
@@ -482,7 +523,44 @@ export class SearchPipeline {
       warnings,
       unmeasuredLanguages: unmeasured,
       liveDiscovery: this.readRequestLog(input.searchId),
+      // Read **after** the pipeline totals are attached, so the diagnostic reports what the run
+      // actually did with the candidates rather than only what discovery produced. The connector
+      // cannot supply either number: it makes leads and stops, and whether a lead became a
+      // fetched article or a finding is decided several stages later.
+      searxngDiscovery: this.readEngineLog(input.searchId, {
+        // Documents that reached the fetch stage and produced evidence, counted from the leads
+        // this metasearch layer contributed rather than from the run's total: an SEC feed's
+        // documents are not this source's articles.
+        articlesFetched: leads.filter(
+          (sourced) =>
+            sourced.lead.discovery !== undefined && !unfetchedLeadUrls.has(sourced.lead.url),
+        ).length,
+        findingsGenerated: clustered.findings.filter(
+          (finding) => finding.document.discoverySource !== undefined,
+        ).length,
+      }),
     };
+  }
+
+  /**
+   * Read this run's engine diagnostics and drop them.
+   *
+   * Read once, at the end, and forgotten immediately — the same lifecycle as the request log,
+   * and for the same reason: the log is process-global, and a run that read its summary and left
+   * the entries behind would be the leak the bounds in `SearxngEngineLog` exist to catch rather
+   * than to rely on.
+   */
+  private readEngineLog(
+    searchId: string,
+    totals: { readonly articlesFetched: number; readonly findingsGenerated: number },
+  ): SearxngDiscoverySummary | null {
+    if (this.engineLog === null) {
+      return null;
+    }
+    this.engineLog.recordPipelineTotals({ jobId: searchId, ...totals });
+    const summary = this.engineLog.summaryFor(searchId);
+    this.engineLog.forget(searchId);
+    return summary;
   }
 
   /**
@@ -519,6 +597,9 @@ export class SearchPipeline {
       // An abandoned run is not told what it cost. The entries are dropped by the next run's
       // eviction rather than reported against a result that wrote nothing.
       liveDiscovery: null,
+      // An abandoned run is not told what it cost. Entries are dropped by the next run's eviction
+      // rather than reported against a result that wrote nothing.
+      searxngDiscovery: null,
     };
   }
 
@@ -540,6 +621,7 @@ export class SearchPipeline {
       readonly jurisdictions: readonly string[];
       readonly languages: readonly string[];
       readonly taxonomy: TaxonomyVersion;
+      readonly diagnosticEngines?: readonly string[] | undefined;
     },
   ): Promise<{
     leads: readonly SourcedLead[];
@@ -615,6 +697,9 @@ export class SearchPipeline {
             jurisdictions: input.jurisdictions,
             languages: input.languages,
             taxonomy: input.taxonomy,
+            ...(input.diagnosticEngines === undefined || input.diagnosticEngines.length === 0
+              ? {}
+              : { diagnosticEngines: input.diagnosticEngines }),
           },
           queryId: query.queryId,
           family: query.family,
@@ -851,6 +936,11 @@ export class SearchPipeline {
       // to be told.
       const gate = await this.fetchGate.authorise({
         sourceId: leadSourceId,
+        // The document is authorised against the publisher about to be contacted, not against
+        // the source that named it. For a source that publishes its own pages the two resolve
+        // to the same record; for a discovery service they are deliberately different, and that
+        // difference is what stops one approval on our SearXNG record authorising the open web.
+        publisherDomain: lead.publisherDomain,
         url: lead.url,
         jurisdiction: query.jurisdiction,
         language: lead.language,
@@ -919,6 +1009,7 @@ export class SearchPipeline {
       if (!hasData(fetched) || fetched.data.body === null) {
         rejected.push({
           ...this.leadRecord(lead, query, input),
+          fetchAttempted: true,
           stage: 'FETCH',
           reason:
             fetched.status === 'FAILED'
@@ -985,6 +1076,7 @@ export class SearchPipeline {
         // document that asserted nothing — the distinction is the whole of D-046 and D-048.
         rejected.push({
           ...this.leadRecord(lead, query, input),
+          fetchAttempted: true,
           stage: 'EXTRACTION',
           reason:
             normalised.warnings[0] ??
@@ -1007,6 +1099,7 @@ export class SearchPipeline {
       if (!hasData(extracted) || extracted.data.length === 0) {
         rejected.push({
           ...this.leadRecord(lead, query, input),
+          fetchAttempted: true,
           stage: 'EXTRACTION',
           reason:
             // "The extractor failed on this document" and "the extractor read it and it said
@@ -1041,6 +1134,7 @@ export class SearchPipeline {
         if (finding === null) {
           rejected.push({
             ...this.leadRecord(lead, query, input),
+            fetchAttempted: true,
             stage: 'CLASSIFICATION',
             reason:
               'The extracted assertion did not survive classification: the event could not ' +
@@ -1308,8 +1402,13 @@ export class SearchPipeline {
       url: lead.url,
       title: lead.title,
       publisher: lead.publisher,
+      publisherDomain: lead.publisherDomain,
       cascadeRung: lead.rung,
       queryId: query.queryId,
+      // The default is the honest one: nothing has been asked for yet. The four sites that
+      // reject a candidate *after* a request went out override it.
+      fetchAttempted: false,
+      discoveredByEngines: lead.discovery?.discoveryEngines ?? [],
     };
   }
 
@@ -1397,9 +1496,11 @@ export class SearchPipeline {
     const subjectEvidence: SubjectIdentityEvidence = {
       names: [
         { text: subject.fullName, role: 'PRIMARY' },
-        ...subject.aliases.map(
-          (alias): IdentityName => ({ text: alias.name, role: 'ALIAS', origin: alias.origin }),
-        ),
+        ...subject.aliases.map((alias): IdentityName => ({
+          text: alias.name,
+          role: 'ALIAS',
+          origin: alias.origin,
+        })),
       ],
       datesOfBirth: subject.dateOfBirth === null ? [] : [subject.dateOfBirth],
       countries: subject.countryContext,
@@ -1557,6 +1658,15 @@ export class SearchPipeline {
         retrievalDate: { value: input.now.toISOString().slice(0, 10), precision: 'DAY' },
         cascadeRung: lead.rung,
         mode: lead.provenance.mode,
+        // Present only for a lead a metasearch layer found. Absent, not null, for everything
+        // else: `exactOptionalPropertyTypes` keeps "this document has no discovery channel"
+        // distinguishable from "it has one and we lost it".
+        ...(lead.discovery === undefined
+          ? {}
+          : {
+              discoverySource: lead.discovery.discoverySource,
+              discoveryEngines: lead.discovery.discoveryEngines,
+            }),
       },
       subjectMentionSpans: assertion.subjectMentionSpans,
       conductSpan: assertion.conductSpan,
@@ -1700,9 +1810,6 @@ export class SearchPipeline {
  * `aggregate` passes: a finding that is returned and counted nowhere is a finding the summary
  * does not know about, which is the defect this whole path was rebuilt to remove.
  */
-function countBands(
-  findings: readonly FindingRecord[],
-  bands: readonly EvidenceBand[],
-): number {
+function countBands(findings: readonly FindingRecord[], bands: readonly EvidenceBand[]): number {
   return findings.filter((finding) => bands.includes(finding.band)).length;
 }

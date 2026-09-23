@@ -96,7 +96,20 @@ const TAXONOMY: TaxonomyVersion = {
 };
 
 function readerFor(version: ActiveSourceVersion | null): SourceVersionReader {
-  return { loadActive: () => Promise.resolve(version) };
+  return {
+    loadActive: () => Promise.resolve(version),
+    // The publisher lookup resolves to the same version when its canonical domains cover the
+    // host, which is what a registered publisher looks like to the gate.
+    loadActiveByDomain: (domain: string) =>
+      Promise.resolve(
+        version !== null &&
+          version.canonicalDomains.some(
+            (canonical) => domain === canonical || domain.endsWith(`.${canonical}`),
+          )
+          ? version
+          : null,
+      ),
+  };
 }
 
 function gateFor(
@@ -177,6 +190,9 @@ describe('every gate refuses on its own fact', () => {
     const gate = new FetchGateService(
       {
         loadActive: () => {
+          throw new Error('the registry must not be consulted for a refused URL');
+        },
+        loadActiveByDomain: () => {
           throw new Error('the registry must not be consulted for a refused URL');
         },
       },
@@ -558,6 +574,101 @@ describe('D-042 — no live request to a publisher nobody accepted contact with'
     const decision = await gateFor(fixture, { mode: 'MOCK' }).authorise(
       inputFor({ sourceId: fixture.sourceId }),
     );
+    expect(decision.authorised).toBe(true);
+  });
+});
+
+/**
+ * Discovery permission and publisher-fetch permission are separate decisions.
+ *
+ * The property: a discovery service's approval authorises **querying that service**, and never
+ * authorises fetching from whatever that service happens to name. Without this, one signature on
+ * our own `searxng-adverse-media` record would authorise contacting every publisher on the open
+ * web — which is the opposite of what D-042 exists for, and is what that record's own policy
+ * summary says must not happen.
+ */
+describe('a discovered document is authorised against its publisher, not its discoverer', () => {
+  it('refuses a publisher no registry record covers, naming the domain', async () => {
+    // The reader covers `news-example.cr` and nothing else. The lead was discovered by a
+    // metasearch service and points somewhere nobody has approved.
+    const decision = await gateFor(NEWS_SOURCE).authorise(
+      inputFor({
+        sourceId: 'searxng-adverse-media',
+        url: 'https://www.stabroeknews.com/2024/12/31/news/world/story/',
+        publisherDomain: 'www.stabroeknews.com',
+      }),
+    );
+
+    expect(decision.authorised).toBe(false);
+    if (decision.authorised) {
+      return;
+    }
+    expect(decision.refusal).toBe('PUBLISHER_NOT_APPROVED');
+    // The domain and the discoverer both appear, because a reviewer's next question is "which
+    // publisher, and who named it?".
+    expect(decision.detail).toContain('www.stabroeknews.com');
+    expect(decision.detail).toContain('searxng-adverse-media');
+  });
+
+  it('does not treat an unapproved publisher as a source-level coverage gap', () => {
+    // Per candidate, never per source. Otherwise the discovery service would be reported as an
+    // excluded source the first time it named an unknown publisher — which is every run — and
+    // the engines that worked would disappear behind that exclusion.
+    expect(isSourceLevelRefusal('PUBLISHER_NOT_APPROVED')).toBe(false);
+  });
+
+  it('authorises under the PUBLISHER version when a record covers the domain', async () => {
+    // Same discovery source as the refusal above; the only thing that changed is that the
+    // publisher is one the registry covers. The authorisation names the publisher's version.
+    const decision = await gateFor(NEWS_SOURCE).authorise(
+      inputFor({
+        sourceId: 'searxng-adverse-media',
+        url: 'https://news-example.cr/sucesos/uno',
+        publisherDomain: 'news-example.cr',
+      }),
+    );
+
+    expect(decision.authorised).toBe(true);
+    if (!decision.authorised) {
+      return;
+    }
+    // Not the discovery source's version — the publisher's.
+    expect(decision.authorisation.sourceVersionId).toBe('src-news-cr:v4');
+    expect(decision.sourceVersion.sourceId).toBe('src-news-cr');
+  });
+
+  it('covers a subdomain from a record written against the parent domain', async () => {
+    const decision = await gateFor(NEWS_SOURCE).authorise(
+      inputFor({
+        sourceId: 'searxng-adverse-media',
+        url: 'https://www.news-example.cr/sucesos/uno',
+        publisherDomain: 'www.news-example.cr',
+      }),
+    );
+    expect(decision.authorised).toBe(true);
+  });
+
+  it('does not let a lookalike domain match on a suffix', async () => {
+    // `notnews-example.cr` must not match a record for `news-example.cr`. Matching is on whole
+    // labels, so the one-character difference is a different publisher and is refused.
+    const decision = await gateFor(NEWS_SOURCE).authorise(
+      inputFor({
+        sourceId: 'searxng-adverse-media',
+        url: 'https://notnews-example.cr/sucesos/uno',
+        publisherDomain: 'notnews-example.cr',
+      }),
+    );
+    expect(decision.authorised).toBe(false);
+    if (decision.authorised) {
+      return;
+    }
+    expect(decision.refusal).toBe('PUBLISHER_NOT_APPROVED');
+  });
+
+  it('still authorises a source fetching its own pages, with no publisherDomain', async () => {
+    // The older path is unchanged: absent `publisherDomain` means the source named by sourceId
+    // is the one being fetched, which is correct for a publisher reading its own feed.
+    const decision = await gateFor(NEWS_SOURCE).authorise(inputFor());
     expect(decision.authorised).toBe(true);
   });
 });

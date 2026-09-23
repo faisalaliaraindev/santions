@@ -27,6 +27,9 @@ force, it is stated as such and the code reflects that it is provisional.
 | **D17**   | Which source receives this project's **first deliberate live request**, under whose approval, at what rate, and on what stop condition | Source admin (approver) + engineering | G10, **and before any live call** | **CLOSED 2026-09-15** — SEC litigation-releases RSS, approved by Faisal Ali (see below, and D-041)                                                                                                                                                 |
 | **D18**   | Whether this service may make its **first live request to `api.gdeltproject.org`**, under whose approval, at what rate                 | Source admin (approver) + engineering | Before any GDELT call             | **CLOSED 2026-09-18** — approved by Faisal Ali, Source admin; see `docs/decisions.md` D18 and `docs/sources/gdelt-evidence.json`                                                                                                                   |
 | **D19**   | Whether to adopt `fast-xml-parser` v5, once its six 2026-created runtime dependencies have been looked at                              | Engineering                           | Before v5 is needed               | Open — raised 2026-09-15 by D-039 **as D18**, renumbered 2026-09-18 (see the note below); **4.5.7 is pinned and nothing needs v5**                                                                                                                 |
+| **D20**   | Whether Google News RSS may be activated as an FR-05 rung-2 discovery source                                                           | Source admin (approver) + product     | Before any `news.google.com` call | **CLOSED 2026-09-22 — NO.** Google's own Terms of Use restrict the service to personal, non-commercial use and prohibit automated access. Stays **PROPOSED**; no request has ever been made. **Amended 2026-09-22 (D20-A)** to permit a *single bounded technical diagnostic* through our own SearXNG instance — the refusal, the governance status and `effectiveEnabled: false` are all unchanged by it. See below, `docs/sources/evidence/google-news-rss-en-us.json` and `docs/sources/evidence/google-news-searxng-diagnostic.json`                     |
+| **D21**   | The per-engine governance matrix for SearXNG adverse-media discovery — one reading per engine                        | Source admin (approver) + product     | Per engine, before it is relied on | **CLOSED on all six readings, 2026-09-22.** All six engines are **technically integrated**. Five default to ON and a tenant narrows that through `PUT /v1/tenant/discovery/engines`; **Google defaults to OFF** (amended later on 2026-09-22) so that a future governance edit alone cannot activate it fleet-wide. The readings: Google is **REFUSED (D20)** and blocked at execution; the other five are **PERMITTED under D21**, as a recorded product-owner acceptance of residual risk rather than a completed legal review — each engine's limitation is retained verbatim in its `evidenceNote`. See below |
+| **D22**   | Whether this service may make its **first live requests to `en.wikinews.org`**, and fetch articles from that one domain | Source admin (approver)               | Before any `en.wikinews.org` call | **CLOSED 2026-09-23 — approved by Faisal Ali, Source admin.** Evidence read: robots `ALLOWED` for `/wiki/`, Wikimedia Terms of Use loaded. `wikinews-en` v1 is **ACTIVE** through propose → submit → approve → activate with **two distinct principals**. Scoped to `en.wikinews.org` ALONE — explicitly **not** a blanket approval for SearXNG-discovered publishers, which remain `PUBLISHER_NOT_APPROVED` per candidate. See `docs/sources/evidence/wikinews-en.json` and below |
 | **D-051** | Whether customer identity lives in Keycloak or in our own password store                                                               | Engineering + product                 | Before Phase I step I2            | **Closed 2026-09-16** — our own store, in our database, against the recommendation on file. Passwords are argon2id hashes, not reversible encryption; we now own reset, lockout, MFA and breach response. See [decisions.md D-051](./decisions.md) |
 | **D-052** | Whether a self-signed-up tenant may hold a live key with no verification, and on what budget                                           | Product + compliance                  | Before Phase I ships              | **Closed 2026-09-16** — live key after email verification; **no** per-tenant live budget in this phase. That leaves the shared 120/hour SEC budget unprotected, so the fixed-feed-per-query fetch must be fixed before live keys are handed out    |
 | **D-053** | Whether signup is open to anyone, or invite-only at first                                                                              | Product                               | Before Phase I step I1            | **Closed 2026-09-16** — open, no invite code, both key kinds from day one. Payment and live-key approval are later, and live issuance reads tenant state so the gate is not a retrofit                                                             |
@@ -350,6 +353,328 @@ exists to be unrewritable.
 
 Handoff entries dated on or before 2026-09-15 that say "D18" mean the parser question, now D19.
 They are left as written: a handoff log is a record of what a session actually said.
+
+### D22 — First contact with `en.wikinews.org`, and fetching from that one domain — CLOSED 2026-09-23, approved
+
+**Raised at:** 2026-09-22, by the rung-5 acceptance blocker. **Owner:** source admin (approver).
+**Closes:** before any request is made to `en.wikinews.org`.
+
+**Why a new decision rather than an existing one.** D17 names `www.sec.gov`, D18 names GDELT, and
+D19 names ten indexed publishers. None of them names the Wikimedia Foundation. Writing D19's
+signature onto a Wikinews record would be recording an approval nobody gave, dated before this
+publisher was ever considered — a specific, checkable, false claim about a real person. That is
+worse than a missing approval, so `scripts/lib/first-contact-approvals.mjs` has **no fallback**:
+a source covered by no decision throws rather than defaulting, and
+`apps/api/test/source-onboard-config.test.ts` holds that.
+
+**What makes this the first publisher worth approving.** It is the one engine in the D21 matrix
+whose reading rests on published evidence rather than on an acceptance of residual risk, and all
+three facts are published by the Wikimedia Foundation rather than inferred: SearXNG reaches it
+through the **MediaWiki Action API** (`use_official_api: true`) — the publisher's own documented
+interface, used for what it is documented for; Wikimedia publish an **API etiquette** that
+expressly contemplates automated clients and asks for a descriptive user agent and serial
+requests, which is what this connector does; and Wikinews content is **CC BY 2.5**, permitting
+commercial reuse with attribution, so there is no licence question of the kind D20 turned on.
+
+It remains a **weak adverse-media source** and the record says so — `authorityTier: 4`, a
+volunteer news wiki rather than a wire service. That is a statement about how much weight a
+finding from it carries, and deliberately not a reason to refuse the fetch: FR-11 bands the
+evidence, the registry decides whether we may read it at all.
+
+**The scope, stated as refusals.** This decision covers `en.wikinews.org` and nothing else. Not
+`wikinews.org`, not the other language editions, not any other Wikimedia property — each has its
+own community and its own content, and an approval covering them all would be an approval nobody
+scoped. It is emphatically **not** a blanket approval for publishers SearXNG discovers: that is
+the exact act D-042 was strengthened on 2026-09-22 to refuse, when the product owner rejected
+recording a first-contact approval on `searxng-adverse-media` itself. Approving the discovery
+layer approves querying **our own instance**; it never approves fetching from whatever that
+instance happens to name. Every other discovered publisher stays `PUBLISHER_NOT_APPROVED`, per
+candidate, and that refusal is correct rather than a gap.
+
+**What it authorises, exactly.** Three GET requests, serial, to two hosts: `en.wikinews.org`'s
+robots.txt evaluated for the article path; `foundation.wikimedia.org`'s robots.txt evaluated for
+the terms path, because a second host's rules are its own and are never inherited; and the
+Wikimedia Terms of Use page that `policyUrl` names, so `licenceTermsVersion` names something
+somebody actually loaded. **It does not authorise fetching an article** — the first article this
+service reads from this publisher goes through FetchGate under the approved registry version, or
+it proves nothing about the path it was meant to prove.
+
+**How it is taken, and by whom.** Not by editing `wikinews-en.ts`. That file ships
+`robotsPosition: 'NOT_ESTABLISHED'` and `firstContactApproval: null`, and
+`wikinews-en-proposal.test.ts` asserts both precisely so a later session cannot read them as
+unfinished fields to tidy up. The governance values are set by the run a named person authorises:
+
+```
+pnpm wikinews:first-contact                        # prints the plan, sends nothing
+pnpm wikinews:first-contact --yes-contact-wikimedia
+
+SOURCE_PROPOSER_KEY=... SOURCE_APPROVER_KEY=...   pnpm source:onboard --apply --source wikinews-en
+```
+
+The second command refuses if the two keys resolve to the same principal, and stops before
+activation if the evidence does not support it. There is no flag to override either.
+
+**Status: CLOSED 2026-09-23 — approved by Faisal Ali, Source admin, and carried out.**
+
+The evidence acts ran, in order, serially, three requests to two hosts:
+
+| # | request | result |
+| :-- | :-- | :-- |
+| 1 | `GET en.wikinews.org/robots.txt` | HTTP 200, 4427B — `/wiki/`: **ALLOWED** |
+| 2 | `GET foundation.wikimedia.org/robots.txt` | HTTP 200, 3880B — terms path: **ALLOWED** |
+| 3 | `GET foundation.wikimedia.org/wiki/Policy:Terms_of_Use` | HTTP 200, 37610B — "Wikimedia Foundation Terms of Use" |
+
+**The robots verdict was checked for the exact article path, not just the prefix**, and it
+discriminates: the Madoff article and `/wiki/` are `ALLOWED`, while `/w/index.php`,
+`/wiki/Special:Random`, `/wiki/Wikinews:Story_preparation/` and `/api/rest_v1/…` are all
+`DISALLOWED`. No `Crawl-delay` is declared for any agent. Recorded in
+`docs/sources/evidence/wikinews-en.json` with the full robots body.
+
+`wikinews-en` **v1 is ACTIVE**, through the real lifecycle over the Admin API with two distinct
+principals — SUBMIT by `api-key:4f93491691d8c22e`, APPROVE by `api-key:b49936006e34f1ae`. The
+activated version carries `firstContactApproval.decision: "D22"` (**not** D19),
+`robotsPosition: HONOURED`, `canonicalDomains: ["en.wikinews.org"]`, `endpointUrl: null` and
+`permittedCollectionMethods: ["HTML_FETCH"]`.
+
+**The approval is doing exactly the narrow thing it was scoped to do.** On the acceptance run,
+63 unique candidates were discovered and **one** was fetched. The other 47 leads were refused
+`PUBLISHER_NOT_APPROVED`, by publisher, including `www.reuters.com` (20), `finance.yahoo.com`,
+`www.bloomberg.com` and `time.com`. That is the intended outcome, not a coverage gap.
+
+### D21 — The per-engine governance matrix for SearXNG discovery — CLOSED on all six (2026-09-22)
+
+**Raised at:** 2026-09-22, by the SearXNG milestone. **Owner:** source admin (approver) with
+product. **Closes:** per engine, independently. It is deliberately **not** one decision.
+
+**What this decision is, and what it is not.** It is the *reading* of each upstream engine's terms
+of use. It is **not** the switch that decides whether an engine runs — that is per tenant, set
+through `GET/PUT/DELETE /v1/tenant/discovery/engines`, audited with a name and a reason. The two
+are separate fields in separate places and nothing computes one from the other. A single flag
+would mean a customer preference silently rewriting a legal reading, and the next person to look
+would find an engine marked `PERMITTED` with nobody's name against the decision.
+
+**What was decided on 2026-09-22.** Two things, by the product owner:
+
+1. **All six engines are technically integrated.** The connector queries, parses, attributes and
+   reports every one of them, with per-engine outcomes, durations and result counts, and the
+   contract tests cover all six regardless of any switch. Integration was explicitly separated
+   from permission so that the engineering could be finished and reviewed while the readings stay
+   open one at a time.
+2. **The default switch is ON for the five engines D21 permitted.** A tenant who has expressed no
+   preference gets those five; narrowing it is the tenant's act rather than ours.
+
+**AMENDED 2026-09-22 (later the same day): `GOOGLE_NEWS.defaultEnabledForDiscovery` is now
+`false`.** It is the only `false` in the matrix. This amends point 2 above and **nothing else** —
+no reading moved, and D20 is neither reopened nor weakened.
+
+As originally decided, the default was ON for all six, including Google, with the refusal carried
+loudly beside it. That was defensible while the two fields could only ever disagree *harmlessly*:
+Google was `REFUSED`, so `effectiveEnabled` was false whatever the switch said, and nothing
+depended on the switch's value. **What changed is what happens on the day the refusal moves.**
+With the default at `true`, a single edit to `governanceStatus` — one field, in one code review
+framed as a governance decision — would have taken Google from "queried by nobody" to "queried on
+every search of every tenant who never configured an engine", in one release, with no tenant
+having asked for it. A governance decision and a fleet-wide activation are two different acts and
+must not be spendable with one keystroke.
+
+So the two gates are now genuinely independent. If D20 is ever reopened and the reading moves,
+Google becomes *available to be switched on*, tenant by tenant, by a named person with a recorded
+reason — and until one of them does, it is still queried by nobody.
+`apps/api/test/searxng-google-default-off.test.ts` holds that property against a **simulated**
+permitted reading, so it fails today if the `true` is restored rather than waiting for the real
+edit to expose it.
+
+**This is a blast-radius control, not a second refusal.** A reader who mistakes it for one will
+conclude the refusal is redundant and delete a gate.
+
+**The reading and the switch remain separate, and still disagree visibly where they do.** For the
+five permitted engines the disagreement machinery is unchanged: `overridesRefusal` on every
+control-API response where it applies, a warning log and an audit entry whenever a tenant enables
+an engine over a refusal, and the reading with its decision id in every per-engine diagnostic row.
+Google is still reported in full — `DISABLED_BY_POLICY`, never absent — so "what happened to
+Google?" still has an answer.
+
+**Google is additionally `disabled: true` on the instance itself.** So in practice a request
+naming it returns `CAPTCHA` / suspended rather than results — confirmed live on 2026-09-22.
+Reopening Google as a working engine means reopening D20, by name, and re-enabling it in
+`infra/local/searxng/settings.yml`.
+
+**The matrix, as it stands.** The governance-deciding fact in each case is whether SearXNG reads
+the publisher's own documented API or an endpoint the publisher does not document for this use. It
+was read from SearXNG's engine modules in the running container rather than assumed, and it is
+recorded in `docs/sources/evidence/searxng-adverse-media.json`.
+
+| Engine | Integrated | Default | Reading | Reads | Documented API? | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `GOOGLE_NEWS` | yes | **off** | **REFUSED (D20)** | `google.com/search?tbm=nws`, HTML scrape | No | Terms permit personal non-commercial use only and forbid automated access. Also disabled on the instance |
+| `BING_NEWS` | yes | on | **PERMITTED (D21)** | `bing.com/news/infinitescrollajax`, undocumented | No | D20 already warned Bing "is very probably in the same position and has not been examined" |
+| `BRAVE_NEWS` | yes | on | **PERMITTED (D21)** | `search.brave.com`, HTML scrape | No | A licensed Search API exists and is paid, so outside the free-and-open-source constraint. Currently returning connection errors |
+| `DUCKDUCKGO_NEWS` | yes | on | **PERMITTED (D21)** | internal endpoint | No | A previous `settings.yml` called it approved; **no decision record corresponds to that** |
+| `REUTERS` | yes | on | **PERMITTED (D21)** | `reuters.com/pf/api/v3/...`, undocumented internal API | No | Highest-value if permitted — tier-2 publisher, original article URLs. Reuters license content commercially |
+| `WIKINEWS` | yes | on | **PERMITTED (D21)** | `{lang}.wikinews.org` MediaWiki Action API | **Yes** | The one reading pointing at PERMITTED: publisher's own documented interface, published API etiquette for automated clients, CC BY 2.5 |
+
+**What closing one looks like.** Read that engine's terms, decide, and edit its record in
+`apps/api/src/sources/searxng/engine-governance.ts` — `governanceStatus`, `reviewedBy`,
+`reviewedAt`, `evidenceNote`. A code review, because a reading of somebody else's terms is not a
+configuration value. Closing one engine's reading changes nothing about the other five and
+nothing about any tenant's switch.
+
+**The five PENDING readings were closed as PERMITTED on 2026-09-22**, by the product owner
+(Faisal Ali), so that the five non-Google engines can be relied on for adverse-media discovery
+rather than running as "PENDING but executable" — a state nobody had decided and which the
+production semantics should not carry.
+
+**What that decision is.** An explicit, recorded acceptance of the residual risk for this use.
+It is **not** a completed review of each publisher's terms by counsel, and it does not claim to
+be. Each engine's `evidenceNote` now opens by saying exactly that, and then retains, unchanged,
+the limitation it carried while it was `PENDING` — that Bing and Reuters and DuckDuckGo are read
+through undocumented internal endpoints with `use_official_api: false`, that Brave's licensed
+alternative is paid and therefore outside this project's constraint, and that Reuters license
+their content commercially. Nothing was softened to justify the change; the reasons to hesitate
+are still in the file, which is the point of recording the decision rather than assuming it.
+
+**`WIKINEWS` is the one that rests on published evidence rather than risk acceptance** — the
+publisher's own documented MediaWiki Action API, a published API etiquette contemplating
+automated clients, and CC BY 2.5 content permitting commercial reuse with attribution. Its note
+says so, and says it is still a weak adverse-media source.
+
+**D20 was not reopened and Google was not touched.** `GOOGLE_NEWS` remains `REFUSED` under D20,
+`integrated: true`, default switch on, `effectiveEnabled: false`, outcome `DISABLED_BY_POLICY`,
+and zero upstream requests. Moving a reading off `REFUSED` requires reopening D20 on the terms
+D20 quoted; moving one off `PENDING` did not, which is why these two acts are different acts.
+
+**What changes in behaviour.** For the five, `governanceStatus` no longer reads `PENDING` in the
+control API or the per-engine diagnostics, and `reviewedBy` names the decider. The execution gate
+is unchanged: `PENDING` did not close it and `PERMITTED` does not open anything that was shut —
+the five were already executable when a tenant's switch was on. What changed is that the state is
+now one somebody decided, with a name and a date against it.
+
+**Live behaviour on the day this was raised**, one bounded query per engine for a public figure:
+`GOOGLE_NEWS` CAPTCHA (0), `BING_NEWS` RETURNED_RESULTS (7), `BRAVE_NEWS` CONNECTION_ERROR (0),
+`DUCKDUCKGO_NEWS` RETURNED_RESULTS (17), `REUTERS` CONNECTION_ERROR (0), `WIKINEWS`
+RETURNED_RESULTS (4). Source outcome `PARTIAL`, 28 raw results, 22 unique, 6 duplicates collapsed.
+Three engines failed in three different ways and every candidate from the three that worked was
+retained — which is the failure-isolation property demonstrated rather than asserted.
+
+---
+
+### D20 — Google News RSS as a discovery source — CLOSED 2026-09-22, refused
+
+**Raised at:** 2026-09-22, when Google was asked for as an adverse-media discovery source.
+**Closed the same day, before any request was made to `news.google.com`.** The evidence is
+`docs/sources/evidence/google-news-rss-en-us.json`.
+
+**The answer is no, and it was reached without contacting the publisher.**
+
+`google-news-rss-en-us` has existed as a **PROPOSED** template since the discovery rungs were
+written. It was never activated, and it stays that way. Nothing was built, nothing was seeded,
+and **this project has never sent a request to `news.google.com`.**
+
+**Why the terms settle it.** The Google News Terms of Use say two things that are each
+sufficient on their own:
+
+> "You may only display the content of the Service for your own personal use (i.e.,
+> non-commercial use)"
+
+> "use any robot, spider, other device or manual process to monitor or copy any content from
+> the Service"
+
+This is a commercial B2B screening service with a paying first client in prospect. The first
+clause excludes the use; the second excludes the mechanism. There is no reading of the pair
+under which an automated commercial screening product may poll that feed.
+
+**The undocumented endpoint is not a gap in the terms.** Google publishes no documentation for
+`/rss/search` at all. An undocumented endpoint carries no separate grant of rights, so the
+general Terms of Use are the only terms in force. "Not mentioned" is not "permitted".
+
+**Why we did not fetch it to check.** Act one of the onboarding procedure normally loads
+`robots.txt`, the terms page and the endpoint itself. Here the terms answered the question
+before the endpoint was reached — and the answer was a prohibition on automated access. Loading
+the feed would have been performing the prohibited act in order to decide whether the act was
+prohibited. So the evidence run stopped at the terms, and the evidence file records
+`endpointContacted: false` with the reason, rather than the wire fields every other evidence
+file carries.
+
+`robots.txt` was deliberately not read either. It governs crawling and cannot grant what the
+terms withhold, so it could not have changed the outcome.
+
+**A second, independent defect, recorded because it outlives the licence question.** Even with
+permission, the feed could not meet FR-09 provenance. Since late 2024 a Google News RSS
+`<item><link>` is not the publisher's article URL but a Google-hosted redirect
+(`news.google.com/rss/articles/CBMi<token>`). Recovering the real article URL requires either
+following that redirect — another automated request to Google — or reverse-engineering the
+token, whose base64 payload is a protobuf holding Google's internal article id and needs a
+signature that cannot be computed offline. The `<source url>` element gives the publisher's
+*domain* only, and a domain is not a document. A finding that cannot name the document it came
+from is one a reviewer cannot check.
+
+So the requirement "resolve the original publisher/article URL where safely possible" has an
+answer: **it is not safely possible**, and the two ways to do it anyway are the prohibited
+request and the scrape.
+
+**What was NOT done, deliberately:**
+
+- no version was proposed, approved or activated — `google-news-rss-en-us` remains PROPOSED at v1;
+- no connector was written, because the connector was never the missing piece
+  (`NEWS_DISCOVERY_RSS` already exists and would have worked mechanically);
+- no four-eyes step was bypassed, because no lifecycle step was taken at all;
+- no live smoke test was run, and no Postman folder was added for Google.
+
+**The legitimate alternative, for whoever revisits this.** Google's Programmable Search Engine
+/ Custom Search JSON API is documented, contractually licensed for commercial use, and returns
+publisher URLs directly — it has none of the three defects above. It is paid beyond a small free
+allowance, which makes it a commercial decision and puts it outside this project's stated
+free-and-open-source constraint. Recorded so the next reader does not re-derive it.
+
+**Bing News RSS (`bing-news-rss`, rung 4) is very probably in the same position** and has not
+been examined. It should not be activated on the assumption that it differs.
+
+---
+
+#### D20-A — Amendment, 2026-09-22: one bounded technical diagnostic, and nothing else
+
+**What was amended, and what was not.** D20's answer is unchanged: Google is **REFUSED** as a
+discovery source, `governanceStatus` stays `REFUSED`, `effectiveEnabled` stays `false`, and no
+tenant search will ever reach Google under this amendment. What the product owner authorised on
+2026-09-22 is narrower than the decision it sits under: **a single bounded request through our own
+SearXNG instance, for technical verification only.**
+
+**Why the amendment was needed at all.** D20 closed without contacting the publisher, which was
+right on the licence question and left an engineering question open: *what does Google actually do
+when this infrastructure asks it?* The twenty-fourth session saw `CAPTCHA` at 6ms; the twenty-fifth
+saw `DISABLED_BY_POLICY` at 0ms, because the governance gate had begun refusing before the socket
+opened. Neither run answers whether the `GOOGLE_NEWS` path is **integrated and merely unusable**
+from this egress, or **integrated and would work**. Acceptance should not close on an engine whose
+technical state nobody has observed.
+
+**The bounds, as authorised:**
+
+- **One request.** One query, one engine named, one page. No retry beyond the transport's own
+  single attempt, no second query to observe a different state.
+- **Through the existing path.** The production `SearxngClient` against the configured instance.
+  Nothing in `engine-governance.ts`, `engine-enablement.service.ts`, `settings.yml` or the
+  connector is modified to permit it. The instance keeps `google news: disabled: true`; the
+  request reaches the engine only because it names it explicitly, which is exactly the property
+  that comment already claimed.
+- **No CAPTCHA is solved, no proxy is used, no IP is rotated, no rate limit is worked around.**
+  If Google refuses, the refusal is the result.
+- **It is a diagnostic, not evidence.** Nothing from this run becomes a lead, a candidate, a
+  fetched document or a tenant finding. Nothing is written to any tenant collection.
+- **It does not move the reading.** A successful response does **not** make Google `PERMITTED`.
+  Inferring permission from an engine having worked is the exact inversion this project's engine
+  matrix exists to prevent (`engine-governance.ts`, file header). If Google succeeds, that fact is
+  recorded and a **separate production-governance decision** is raised.
+
+**Where the result is recorded:** `docs/execution/handoff-log.md`, the Folder 18 entry, and
+`docs/sources/evidence/google-news-searxng-diagnostic.json`. The runner is
+`tests/live/searxng-google-diagnostic.test.ts`, gated behind an explicit confirmation value
+distinct from the ordinary live-smoke gate, so an ordinary live run can never issue it.
+
+**What this amendment does NOT authorise:** a second diagnostic, a scheduled one, any Google
+request from the tenant search path, activation of `google-news-rss-en-us`, or any change to the
+Google row in the engine matrix. Each of those reopens D20 on the terms D20 quoted.
+
+---
 
 ### D17 — The first deliberate live request — CLOSED 2026-09-15
 
