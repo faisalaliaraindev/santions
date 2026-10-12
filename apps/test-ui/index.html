@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adverse Search — Test UI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --border: #e2e5e9;
+      --fg: #111827;
+      --fg-muted: #6b7280;
+      --accent: #1d4ed8;
+      --accent-hover: #1e40af;
+
+      --band-corroborated: #dc2626;
+      --band-corroborated-bg: #fef2f2;
+      --band-supported: #d97706;
+      --band-supported-bg: #fffbeb;
+      --band-ambiguous: #ca8a04;
+      --band-ambiguous-bg: #fefce8;
+      --band-company: #2563eb;
+      --band-company-bg: #eff6ff;
+      --band-contradicted: #6b7280;
+      --band-contradicted-bg: #f9fafb;
+      --band-lead: #9ca3af;
+      --band-lead-bg: #f9fafb;
+
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0f1117;
+        --surface: #1a1d27;
+        --border: #2d3144;
+        --fg: #f1f5f9;
+        --fg-muted: #94a3b8;
+        --accent: #3b82f6;
+        --accent-hover: #60a5fa;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2d3144;
+      --fg: #f1f5f9;
+      --fg-muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #60a5fa;
+      color-scheme: dark;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+      padding: 0 16px;
+    }
+
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding-block: 32px;
+    }
+
+    .header {
+      margin-bottom: 28px;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+    .header p {
+      color: var(--fg-muted);
+      margin-top: 4px;
+      font-size: 13px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .form-grid .full { grid-column: 1 / -1; }
+
+    @media (max-width: 560px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid .full { grid-column: 1; }
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--fg-muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 14px;
+      font-family: inherit;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--fg);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+    }
+    input::placeholder { color: var(--fg-muted); opacity: 0.7; }
+
+    .config-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+      align-items: flex-end;
+    }
+    .config-row > div { flex: 1; min-width: 0; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 18px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.secondary {
+      background: transparent;
+      color: var(--fg-muted);
+      border: 1px solid var(--border);
+    }
+    .btn.secondary:hover:not(:disabled) {
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--fg-muted);
+      margin-bottom: 12px;
+    }
+
+    /* Results */
+    .results-area { margin-top: 24px; display: flex; flex-direction: column; gap: 16px; }
+
+    .summary-bar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      flex: 1;
+      min-width: 120px;
+    }
+    .stat-label { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 22px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+    .coverage-banner {
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      border: 1px solid;
+    }
+    .coverage-banner.complete { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+    .coverage-banner.incomplete { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+    .coverage-banner.unknown { background: var(--surface); border-color: var(--border); color: var(--fg-muted); }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .coverage-banner.complete { background: #052e16; border-color: #166534; color: #4ade80; }
+      :root:not([data-theme="light"]) .coverage-banner.incomplete { background: #1c1400; border-color: #92400e; color: #fbbf24; }
+    }
+
+    .no-match {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .no-match h3 { font-size: 15px; margin-bottom: 8px; }
+    .no-match ul { padding-left: 18px; color: var(--fg-muted); font-size: 13px; }
+    .no-match ul li { margin-bottom: 3px; }
+    .no-match .disclaimer { font-size: 12px; color: var(--fg-muted); margin-top: 10px; font-style: italic; }
+
+    .finding-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .finding-card-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .finding-card-body {
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .band-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .band-CORROBORATED  { color: var(--band-corroborated);  background: var(--band-corroborated-bg); }
+    .band-SUPPORTED     { color: var(--band-supported);     background: var(--band-supported-bg); }
+    .band-AMBIGUOUS     { color: var(--band-ambiguous);     background: var(--band-ambiguous-bg); }
+    .band-COMPANY_CONTEXT { color: var(--band-company);    background: var(--band-company-bg); }
+    .band-CONTRADICTED  { color: var(--band-contradicted);  background: var(--band-contradicted-bg); }
+    .band-LEAD_ONLY     { color: var(--band-lead);          background: var(--band-lead-bg); }
+
+    .finding-title {
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.4;
+      flex: 1;
+      min-width: 0;
+    }
+    .finding-title a {
+      color: var(--fg);
+      text-decoration: none;
+    }
+    .finding-title a:hover { text-decoration: underline; color: var(--accent); }
+
+    .meta-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .meta-item-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--fg-muted); }
+    .meta-item-value { font-size: 12px; font-weight: 500; }
+
+    .stage-pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--fg);
+    }
+
+    .rationale {
+      font-size: 12px;
+      color: var(--fg-muted);
+      line-height: 1.5;
+      border-left: 2px solid var(--border);
+      padding-left: 10px;
+    }
+
+    .error-box {
+      padding: 14px 16px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: var(--radius);
+      color: #991b1b;
+      font-size: 13px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .error-box {
+        background: #1c0a0a;
+        border-color: #7f1d1d;
+        color: #fca5a5;
+      }
+    }
+
+    .elapsed {
+      font-size: 12px;
+      color: var(--fg-muted);
+      text-align: right;
+      margin-top: -8px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--fg-muted);
+    }
+    .empty-state svg { opacity: 0.3; margin-bottom: 12px; }
+
+    .leads-count {
+      font-size: 12px;
+      color: var(--fg-muted);
+      padding: 8px 0;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--fg-muted);
+    }
+
+    details > summary { cursor: pointer; list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary::before { content: '▶  '; font-size: 10px; color: var(--fg-muted); }
+    details[open] > summary::before { content: '▼  '; }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <div class="header">
+      <h1>Adverse Search — Test UI</h1>
+      <p>Test tool for the Zquence integration. Enter a name and search for adverse media.</p>
+    </div>
+
+    <!-- Config -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="section-title">Connection</div>
+      <div class="config-row">
+        <div>
+          <label for="serverUrl">Server URL</label>
+          <input id="serverUrl" type="text" value="http://localhost:3000" placeholder="http://localhost:3000" />
+        </div>
+        <div>
+          <label for="apiKey">API Key</label>
+          <input id="apiKey" type="password" placeholder="erly_live_..." />
+        </div>
+      </div>
+    </div>
+
+    <!-- Search form -->
+    <div class="card">
+      <div class="section-title">Search</div>
+      <div class="form-grid">
+        <div class="full">
+          <label for="fullName">Full Name <span style="color:var(--band-corroborated)">*</span></label>
+          <input id="fullName" type="text" placeholder="e.g. Roberto Castillo" autocomplete="off" />
+        </div>
+        <div>
+          <label for="purpose">Screening Purpose</label>
+          <select id="purpose">
+            <option value="CUSTOMER_ONBOARDING">Customer Onboarding</option>
+            <option value="ENHANCED_DUE_DILIGENCE">Enhanced Due Diligence</option>
+            <option value="PERIODIC_REVIEW">Periodic Review</option>
+            <option value="SUPPLIER_DUE_DILIGENCE">Supplier Due Diligence</option>
+            <option value="EMPLOYEE_SCREENING">Employee Screening</option>
+            <option value="TRANSACTION_MONITORING_ESCALATION">Transaction Monitoring</option>
+          </select>
+        </div>
+        <div>
+          <label for="environment">Environment</label>
+          <select id="environment">
+            <option value="sandbox">Sandbox (mock data)</option>
+            <option value="live">Live (real sources)</option>
+          </select>
+        </div>
+        <div>
+          <label for="dobYear">Year of Birth (optional)</label>
+          <input id="dobYear" type="text" placeholder="e.g. 1978" maxlength="4" />
+        </div>
+        <div>
+          <label for="country">Country Context (optional)</label>
+          <input id="country" type="text" placeholder="e.g. GT, MX, US" />
+        </div>
+      </div>
+
+      <div style="margin-top: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <button class="btn" id="searchBtn" onclick="runSearch()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          Search
+        </button>
+        <button class="btn secondary" onclick="clearResults()">Clear</button>
+        <span id="statusText" style="font-size:12px; color:var(--fg-muted);"></span>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsArea" class="results-area"></div>
+
+  </div>
+
+  <script>
+    let abortController = null;
+
+    function setStatus(msg) {
+      document.getElementById('statusText').textContent = msg;
+    }
+
+    function clearResults() {
+      document.getElementById('resultsArea').innerHTML = '';
+      setStatus('');
+    }
+
+    function bandLabel(band) {
+      const map = {
+        CORROBORATED: 'Corroborated',
+        SUPPORTED: 'Supported',
+        AMBIGUOUS: 'Ambiguous',
+        COMPANY_CONTEXT: 'Company Context',
+        CONTRADICTED: 'Contradicted',
+        LEAD_ONLY: 'Lead Only',
+      };
+      return map[band] || band;
+    }
+
+    function stageLabel(stage) {
+      const map = {
+        ALLEGATION: 'Allegation',
+        COMPLAINT_FILED: 'Complaint Filed',
+        INVESTIGATION_OPENED: 'Investigation',
+        RAID_ARREST_DETENTION: 'Arrest / Detention',
+        CHARGE_INDICTMENT: 'Charged',
+        CIVIL_CLAIM_FILED: 'Civil Claim',
+        REGULATORY_ACTION_FINE: 'Regulatory Action',
+        SETTLEMENT_CONSENT_ORDER: 'Settlement',
+        CONVICTION_FINAL_JUDGMENT: 'Conviction',
+        DEBARMENT_DISQUALIFICATION: 'Debarment',
+        DESIGNATION_SANCTION: 'Designation',
+        APPEAL_PENDING: 'Appeal Pending',
+        ACQUITTAL_DISMISSED_OVERTURNED: 'Acquitted / Dismissed',
+        CORRECTION_RETRACTION: 'Retraction',
+        SPENT_EXPUNGED: 'Spent / Expunged',
+        RUMOUR_UNATTRIBUTED: 'Rumour',
+        UNSPECIFIED: 'Unspecified',
+        SANCTIONS_DESIGNATION: 'Sanctions Designation',
+      };
+      return map[stage] || stage;
+    }
+
+    function tierLabel(tier) {
+      const map = { 1: 'Tier 1 — Authority', 2: 'Tier 2 — National Press', 3: 'Tier 3 — Trade Press', 4: 'Tier 4 — Aggregator', 5: 'Tier 5 — Lead Only' };
+      return map[tier] || `Tier ${tier}`;
+    }
+
+    function escHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function renderFinding(f) {
+      const doc = f.document || {};
+      const band = f.band || 'LEAD_ONLY';
+      const url = doc.url || '';
+      const title = doc.title || '(no title)';
+      const publisher = doc.publisher || doc.sourceId || '';
+      const stage = stageLabel(f.proceduralStage || 'UNSPECIFIED');
+      const role = (f.partyRole || 'UNSPECIFIED').replace(/_/g, ' ');
+      const tier = doc.authorityTier || 5;
+      const pubDate = (doc.publicationDate?.value) ? doc.publicationDate.value.slice(0,10) : null;
+      const mode = doc.mode === 'MOCK' ? ' <span class="tag">MOCK</span>' : '';
+      const engines = (doc.discoveryEngines || []).join(', ');
+      const rationale = (f.rationale || []).join(' · ');
+      const category = f.category ? f.category.replace(/_/g,' ') : null;
+
+      return `
+        <div class="finding-card">
+          <div class="finding-card-header">
+            <span class="band-pill band-${band}">${bandLabel(band)}</span>
+            <div class="finding-title">
+              ${url
+                ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(title)}</a>`
+                : escHtml(title)
+              }${mode}
+            </div>
+          </div>
+          <div class="finding-card-body">
+            <div class="meta-row">
+              <div class="meta-item">
+                <span class="meta-item-label">Source</span>
+                <span class="meta-item-value">${escHtml(publisher)}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-item-label">Stage</span>
+                <span class="meta-item-value"><span class="stage-pill">${escHtml(stage)}</span></span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-item-label">Role</span>
+                <span class="meta-item-value">${escHtml(role)}</span>
+              </div>
+              ${category ? `<div class="meta-item">
+                <span class="meta-item-label">Category</span>
+                <span class="meta-item-value">${escHtml(category)}</span>
+              </div>` : ''}
+              <div class="meta-item">
+                <span class="meta-item-label">Authority</span>
+                <span class="meta-item-value">${escHtml(tierLabel(tier))}</span>
+              </div>
+              ${pubDate ? `<div class="meta-item">
+                <span class="meta-item-label">Published</span>
+                <span class="meta-item-value">${escHtml(pubDate)}</span>
+              </div>` : ''}
+              ${engines ? `<div class="meta-item">
+                <span class="meta-item-label">Via</span>
+                <span class="meta-item-value">${escHtml(engines)}</span>
+              </div>` : ''}
+            </div>
+            ${rationale ? `<div class="rationale">${escHtml(rationale)}</div>` : ''}
+          </div>
+        </div>`;
+    }
+
+    function renderResults(data) {
+      const area = document.getElementById('resultsArea');
+      const result = data.result || {};
+      const findings = result.findings || [];
+      const rejected = result.rejectedLeads || [];
+      const counts = data.findingCounts || {};
+      const noMatch = result.noMatchStatement;
+      const coverageRaw = data.coverage || 'UNKNOWN';
+      const coverage = coverageRaw.replace(/_/g,' ');
+
+      const coverageClass = coverageRaw.includes('SCOPE') ? 'complete' : coverageRaw === 'INCOMPLETE' ? 'incomplete' : 'unknown';
+
+      const elapsed = data.elapsedMs != null ? `${(data.elapsedMs/1000).toFixed(1)}s` : null;
+
+      let html = '';
+
+      // Stats
+      html += `<div class="summary-bar">
+        <div class="stat">
+          <div class="stat-label">Findings</div>
+          <div class="stat-value">${counts.total ?? findings.length}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Corroborated</div>
+          <div class="stat-value" style="color:var(--band-corroborated)">${counts.corroborated ?? 0}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Supported</div>
+          <div class="stat-value" style="color:var(--band-supported)">${counts.supported ?? 0}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Ambiguous</div>
+          <div class="stat-value" style="color:var(--band-ambiguous)">${counts.ambiguous ?? 0}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Leads Found</div>
+          <div class="stat-value" style="color:var(--fg-muted)">${rejected.length}</div>
+        </div>
+      </div>`;
+
+      if (elapsed) {
+        html += `<div class="elapsed">Completed in ${elapsed}</div>`;
+      }
+
+      // Coverage
+      html += `<div class="coverage-banner ${coverageClass}">
+        <strong>Coverage:</strong> ${escHtml(coverage)}
+        ${result.unmeasuredLanguages?.length ? ' · No measured recall for: ' + result.unmeasuredLanguages.join(', ') : ''}
+      </div>`;
+
+      // No match
+      if (noMatch && findings.length === 0) {
+        html += `<div class="no-match">
+          <h3>${escHtml(noMatch.headline)}</h3>
+          <ul>${(noMatch.limitations || []).map(l => `<li>${escHtml(l)}</li>`).join('')}</ul>
+          <div class="disclaimer">${escHtml(noMatch.disclaimer)}</div>
+        </div>`;
+      }
+
+      // Findings
+      if (findings.length > 0) {
+        html += `<div class="section-title" style="padding-top:4px">${findings.length} Finding${findings.length !== 1 ? 's' : ''}</div>`;
+        findings.forEach(f => { html += renderFinding(f); });
+      }
+
+      // Leads (collapsed)
+      if (rejected.length > 0) {
+        html += `<details style="margin-top:4px">
+          <summary style="font-size:13px; color:var(--fg-muted); padding: 6px 0;">
+            ${rejected.length} lead${rejected.length !== 1 ? 's' : ''} found but not promoted to findings
+          </summary>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
+            ${rejected.map(l => `
+              <div style="display:flex; gap:10px; align-items:flex-start; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:6px; font-size:12px;">
+                <span class="tag">${escHtml(l.stage)}</span>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(l.title || l.url)}</div>
+                  <div style="color:var(--fg-muted); margin-top:2px;">${escHtml(l.publisher)} · ${escHtml(l.reason)}</div>
+                </div>
+              </div>`).join('')}
+          </div>
+        </details>`;
+      }
+
+      // Source outcomes (collapsed)
+      const sourceOutcomes = result.sourceOutcomes || [];
+      if (sourceOutcomes.length > 0) {
+        html += `<details style="margin-top:4px">
+          <summary style="font-size:13px; color:var(--fg-muted); padding: 6px 0;">Source outcomes (${sourceOutcomes.length})</summary>
+          <div style="display:flex; flex-direction:column; gap:4px; margin-top:10px;">
+            ${sourceOutcomes.map(s => `
+              <div style="display:flex; gap:10px; align-items:center; padding:8px 12px; background:var(--surface); border:1px solid var(--border); border-radius:6px; font-size:12px;">
+                <span class="tag" style="flex-shrink:0;">${escHtml(s.outcome)}</span>
+                <span style="flex:1; font-weight:500;">${escHtml(s.sourceName)}</span>
+                ${s.detail ? `<span style="color:var(--fg-muted); font-size:11px;">${escHtml(s.detail)}</span>` : ''}
+              </div>`).join('')}
+          </div>
+        </details>`;
+      }
+
+      area.innerHTML = html;
+    }
+
+    async function runSearch() {
+      const name = document.getElementById('fullName').value.trim();
+      if (!name) {
+        document.getElementById('fullName').focus();
+        setStatus('Name is required.');
+        return;
+      }
+
+      const serverUrl = (document.getElementById('serverUrl').value || 'http://localhost:3000').replace(/\/$/, '');
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const purpose = document.getElementById('purpose').value;
+      const environment = document.getElementById('environment').value;
+      const dobYearRaw = document.getElementById('dobYear').value.trim();
+      const countryRaw = document.getElementById('country').value.trim();
+
+      const body = {
+        fullName: name,
+        purpose,
+        environment,
+        jurisdictions: ['US'],
+        languages: ['en'],
+      };
+
+      if (dobYearRaw && /^\d{4}$/.test(dobYearRaw)) {
+        body.dateOfBirth = { value: `${dobYearRaw}-01-01`, precision: 'YEAR' };
+      }
+
+      if (countryRaw) {
+        const codes = countryRaw.split(/[\s,]+/).map(c => c.trim().toUpperCase()).filter(c => /^[A-Z]{2}$/.test(c));
+        if (codes.length) body.countryContext = codes;
+      }
+
+      if (abortController) abortController.abort();
+      abortController = new AbortController();
+
+      const btn = document.getElementById('searchBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> Searching…';
+      setStatus('');
+      document.getElementById('resultsArea').innerHTML = '';
+
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = `ApiKey ${apiKey}`;
+
+        const res = await fetch(`${serverUrl}/v1/screen`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: abortController.signal,
+        });
+
+        const json = await res.json();
+
+        if (!res.ok) {
+          const msg = json?.message || json?.error || `HTTP ${res.status}`;
+          document.getElementById('resultsArea').innerHTML =
+            `<div class="error-box"><strong>Error ${res.status}:</strong> ${escHtml(Array.isArray(msg) ? msg.join('; ') : msg)}</div>`;
+          return;
+        }
+
+        renderResults(json);
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        document.getElementById('resultsArea').innerHTML =
+          `<div class="error-box"><strong>Could not reach the server.</strong><br>Make sure the backend is running at <code>${escHtml(serverUrl)}</code> and CORS is enabled for this origin.</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search';
+      }
+    }
+
+    document.getElementById('fullName').addEventListener('keydown', e => {
+      if (e.key === 'Enter') runSearch();
+    });
+
+    // Persist config in localStorage
+    try {
+      const saved = JSON.parse(localStorage.getItem('adverse-test-config') || '{}');
+      if (saved.serverUrl) document.getElementById('serverUrl').value = saved.serverUrl;
+      if (saved.apiKey) document.getElementById('apiKey').value = saved.apiKey;
+      if (saved.environment) document.getElementById('environment').value = saved.environment;
+    } catch {}
+
+    ['serverUrl','apiKey','environment'].forEach(id => {
+      document.getElementById(id).addEventListener('change', () => {
+        try {
+          localStorage.setItem('adverse-test-config', JSON.stringify({
+            serverUrl: document.getElementById('serverUrl').value,
+            apiKey: document.getElementById('apiKey').value,
+            environment: document.getElementById('environment').value,
+          }));
+        } catch {}
+      });
+    });
+  </script>
+</body>
+</html>

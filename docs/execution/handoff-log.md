@@ -27,6 +27,59 @@ Say what you did about it.
 
 ---
 
+## 2026-10-12 — test UI built; adverse-search delivery plan for Zquence
+
+**Asked:** Build a simple standalone test UI so the Zquence test team can search any name
+independently before the full Zquence integration goes live. Deliver adverse-search (news
+sources only) today. Google News RSS to be activated. SearXNG (Bing, DuckDuckGo, Reuters,
+Brave, Wikinews) to be activated.
+
+**Did:**
+
+- Written `apps/test-ui/index.html` — a zero-dependency standalone HTML page. Opens in any
+  browser directly (no server needed). The test team enters the API server URL and API key,
+  types a name, picks purpose and environment, submits to `POST /v1/screen`. Results render
+  as band-colour-coded finding cards (title, source, stage, authority tier, rationale, link).
+  Coverage banner, counts bar, and collapsible lead/source-outcome sections included.
+  localStorage saves the last server URL, API key, and environment setting across reloads.
+
+**Left half-done / next steps (in order):**
+
+1. **Activate `searxng-adverse-media`** — the source is built (`apps/api/src/sources/registry/
+   searxng-adverse-media.ts`) but not active. All five SearXNG engines (Bing, DuckDuckGo,
+   Reuters, Brave, Wikinews) have `governanceStatus: 'PERMITTED'` and `defaultEnabledForDiscovery:
+   true` in `engine-governance.ts`. Activation needs the four-eyes lifecycle (propose → submit →
+   approve → activate). User runs it; session should not fire first contact.
+
+2. **Google News RSS** — `google-news-rss-en-us` template exists in `discovery-rungs.ts` but
+   `firstContactApproval: null` and `robotsPosition: 'NOT_ESTABLISHED'`. Activation requires:
+   (a) new decision record accepting ToS risk (commercial automated use), (b) fix redirect
+   resolution in the RSS connector so `/rss/articles/CBMi<token>` links are followed to the
+   real publisher URL, (c) four-eyes activation lifecycle. Do NOT edit `firstContactApproval`
+   or `robotsPosition` directly — that bypasses the lifecycle.
+
+3. **Expose service** — backend only runs locally. For today's delivery to Zquence test team,
+   use Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:3000`) or ngrok. Give the
+   resulting URL to the test team as their server URL in the test UI.
+
+4. **Provision Zquence tenant** — create a tenant + API key (sandbox for testing, then live).
+   Hand the key to the test team to paste into the test UI API Key field.
+
+5. **Zquence integration** — once test team validates, integrate `POST /v1/screen` into the
+   Zquence onboarding flow with `purpose: 'CUSTOMER_ONBOARDING'` and `environment: 'live'`.
+
+**Not run this session:** no live requests made. User triggers first contact per memory rule.
+
+**Found:** No new defects. The test UI is a file-protocol page; if the browser blocks `fetch`
+to `http://` from `file://` (common in Chrome for mixed-content), the test team should either
+open it via a local `http-server` or configure the CORS header on the API to allow `null`
+origin. Noted in the error message in the page itself.
+
+**Decisions touched:** none. D20 (Google REFUSED) unchanged. SearXNG activation pending (no
+decision record number assigned yet).
+
+---
+
 ## 2026-09-23 (thirtieth) — one endpoint for everything: `POST /v1/screen`, all sources or each source
 
 **Asked:** "everything running from one endpoint; stop everything; update the document with
