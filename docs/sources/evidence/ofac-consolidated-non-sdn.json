@@ -1,0 +1,81 @@
+{
+  "sourceId": "ofac-consolidated-non-sdn",
+  "sourceName": "OFAC Consolidated Non-SDN Sanctions List",
+  "publisher": "US Department of the Treasury, Office of Foreign Assets Control",
+  "userAgent": "AdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://sanctionslistservice.ofac.treas.gov/robots.txt",
+      "pathChecked": "/api/PublicationPreview/exports/CONSOLIDATED.XML",
+      "requestedAt": "2026-09-21T08:03:24.482Z",
+      "httpStatus": 404,
+      "wireBytes": 0,
+      "contentType": null,
+      "verdict": "ALLOWED",
+      "absent": true,
+      "body": ""
+    },
+    "policyRobots": {
+      "url": "https://ofac.treasury.gov/robots.txt",
+      "pathChecked": "/consolidated-sanctions-list-non-sdn-lists",
+      "requestedAt": "2026-09-21T08:03:25.699Z",
+      "httpStatus": 200,
+      "wireBytes": 688,
+      "contentType": "text/plain",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "#\n# robots.txt\n#\n# This file is to prevent the crawling and indexing of certain parts\n# of your site by web crawlers and spiders run by sites like Yahoo!\n# and Google. By telling these \"robots\" where not to go on your site,\n# you save bandwidth and server resources.\n#\n# This file will be ignored unless it is at the root of your host:\n# Used:    http://example.com/robots.txt\n# Ignored: http://example.com/site/robots.txt\n#\n# For more information about the robots.txt standard, see:\n# http://www.robotstxt.org/robotstxt.html\n\nUser-agent: *\n# CSS, JS, Images\nAllow: /core/*.css$\nAllow: /core/*.css?\nAllow: /core/*.js$\nAllow: /core/*.js?\nAllow: /core/*.gif\nAllow: /core/*.jpg\nAllow: /core/*.jpeg\nAllow: /core/*.png\nAllow: /core/*.svg\nAllow: /profiles/*.css$\nAllow: /profiles/*.css?\nAllow: /profiles/*.js$\nAllow: /profiles/*.js?\nAllow: /profiles/*.gif\nAllow: /profiles/*.jpg\nAllow: /profiles/*.jpeg\nAllow: /profiles/*.png\nAllow: /profiles/*.svg\n# Directories\nDisallow: /core/\nDisallow: /profiles/\n# Files\nDisallow: /README.md\nDisallow: /composer/Metapackage/README.txt\nDisallow: /composer/Plugin/ProjectMessage/README.md\nDisallow: /composer/Plugin/Scaffold/README.md\nDisallow: /composer/Plugin/VendorHardening/README.txt\nDisallow: /composer/Template/README.txt\nDisallow: /modules/README.txt\nDisallow: /sites/README.txt\nDisallow: /themes/README.txt\nDisallow: /web.config\n# Paths (clean URLs)\nDisallow: /admin/\nDisallow: /comment/reply/\nDisallow: /filter/tips\nDisallow: /node/add/\nDisallow: /search/\nDisallow: /user/register\nDisallow: /user/password\nDisallow: /user/login\nDisallow: /user/logout\nDisallow: /media/oembed\nDisallow: /*/media/oembed\n# Paths (no clean URLs)\nDisallow: /index.php/admin/\nDisallow: /index.php/comment/reply/\nDisallow: /index.php/filter/tips\nDisallow: /index.php/node/add/\nDisallow: /index.php/search/\nDisallow: /index.php/user/password\nDisallow: /index.php/user/register\nDisallow: /index.php/user/login\nDisallow: /index.php/user/logout\nDisallow: /index.php/media/oembed\nDisallow: /index.php/*/media/oembed\n"
+    },
+    "terms": {
+      "url": "https://ofac.treasury.gov/consolidated-sanctions-list-non-sdn-lists",
+      "requestedAt": "2026-09-21T08:03:36.063Z",
+      "httpStatus": 302,
+      "wireBytes": 0,
+      "contentType": null,
+      "lastModified": null,
+      "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "extractedTermsSentences": [],
+      "textLength": 0
+    },
+    "redirectRobots:wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com": {
+      "url": "https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/robots.txt",
+      "pathChecked": "/Published/6f141e88-8b06-41e6-89e7-d4017d73a738/2026-09-17/ac391fbd-8ac6-4dce-b73b-115435194157/CONSOLIDATED.XML?X-Amz-Expires=3600&X-Amz-Security-Token=FwoDYXdzEMb%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDBenkWlzQ0vxeNEYwSLtBCDGYoRhO9sK%2Fzqwb3CzyVi3im%2FG4NlXJ0P9KsVpLCP2ERqG9tBZicyRNo2gXn45Jf7BhHhgMaoO8PZBtabRmmg5xfLLLlNy7g0NNEIWXd15TLNjNqV5j9wnneT5F277j30R0JJyokictI4gj8t3nll0%2B7j2Or%2Bc1cVQohPi%2BDluyzltlXF2WnY9aGdvick0WKbb6x%2BQL4905IprQ0EBEqZZg6ApnbC1TlVY6Xk4Y1qQ4jkwUjleIueNZeLaie4LxbRopwCG3hfEijzKywAQboF0%2FCQyWR1wxoAH6NMjYJchPMGBGMb%2F7ai7qllG8Hi%2BX7%2B7GhJ%2BmVWwWzuOWDnolgD2b%2BCukRy9mrHzwREbvnYB18IDBYlQjOUbj0aVB19BtvCBzANBf4oVbgIN%2FmW7C18qzJiU4CusEqPKiwhJscMSMRQo%2B5RwKH8nafm8HP45mtzTmg25oAprnUIWboIdOWfAviE5SWkgj73b7mFSzlbO1ckxB4ZR6cBcYGgimm11q3KEtFfkp4Atpo%2FjNH7ETbDBPnN0dlkQDFweIn96V7xIX37q%2FPIM3VWCyInswPh%2BuNIPufzC546ZlXMl3h0AJJ5B3bYrXd5LNO5kwiMTQq969kIEIEn%2BpnSQND5RhJ%2BxaARRJEMxGbnszP7pllBNcrdkwU%2Bx3SeO8%2BgpjYc3dqcRNIS1fc4kFpZKJbpT%2ByQujeXQjBqg2E5PmOXzjfpR8VTdihC9sYB%2Bi4Bl7lLAcYC2jAha0XObb4DcncvhhPVgil3ZvqumgffeCO3SNZYfJoBM6%2BegT%2FSekJmiYxk1NFU9hNJHVpUEnOBUHUbfAyjauMPVBjJBThMYkBmI9Om2AUo6m1la2Ek9DaJKl%2ByEpSNGo5mBPn9ji0c7NHZtAiR%2F1iYHmrvYkT4AD9GVuQvTYQpJDXske9A%3D&response-content-disposition=attachment%3B%20filename%3D%22consolidated.xml%22&response-content-type=text%2Fxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIASARBLFPLIHOOHGGU%2F20260921%2Fus-gov-west-1%2Fs3%2Faws4_request&X-Amz-Date=20260921T080343Z&X-Amz-SignedHeaders=host&X-Amz-Signature=309b0aad274167082368c40be264e860bbaa805487e0f722650c4cb5d1d95aca",
+      "requestedAt": "2026-09-21T08:03:45.171Z",
+      "httpStatus": 403,
+      "wireBytes": 275,
+      "contentType": "application/xml",
+      "verdict": "UNKNOWN",
+      "absent": false,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>CVT5N92PA3FP83XC</RequestId><HostId>kyzz/GR7MFse+kqRfJA+Odz4Cyp2HsoyKc+4dXKde51A+cvKgqTW7/nUHSIiGck0FMg0HCJMUJ9eSNoPFUrgmw0ddcM/14R4J/NpmQxhYBY=</HostId></Error>"
+    },
+    "redirects": [
+      {
+        "from": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.XML",
+        "status": 302,
+        "to": "https://wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com/Published/6f141e88-8b06-41e6-89e7-d4017d73a738/2026-09-17/ac391fbd-8ac6-4dce-b73b-115435194157/CONSOLIDATED.XML?X-Amz-Expires=3600&X-Amz-Security-Token=FwoDYXdzEMb%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDBenkWlzQ0vxeNEYwSLtBCDGYoRhO9sK%2Fzqwb3CzyVi3im%2FG4NlXJ0P9KsVpLCP2ERqG9tBZicyRNo2gXn45Jf7BhHhgMaoO8PZBtabRmmg5xfLLLlNy7g0NNEIWXd15TLNjNqV5j9wnneT5F277j30R0JJyokictI4gj8t3nll0%2B7j2Or%2Bc1cVQohPi%2BDluyzltlXF2WnY9aGdvick0WKbb6x%2BQL4905IprQ0EBEqZZg6ApnbC1TlVY6Xk4Y1qQ4jkwUjleIueNZeLaie4LxbRopwCG3hfEijzKywAQboF0%2FCQyWR1wxoAH6NMjYJchPMGBGMb%2F7ai7qllG8Hi%2BX7%2B7GhJ%2BmVWwWzuOWDnolgD2b%2BCukRy9mrHzwREbvnYB18IDBYlQjOUbj0aVB19BtvCBzANBf4oVbgIN%2FmW7C18qzJiU4CusEqPKiwhJscMSMRQo%2B5RwKH8nafm8HP45mtzTmg25oAprnUIWboIdOWfAviE5SWkgj73b7mFSzlbO1ckxB4ZR6cBcYGgimm11q3KEtFfkp4Atpo%2FjNH7ETbDBPnN0dlkQDFweIn96V7xIX37q%2FPIM3VWCyInswPh%2BuNIPufzC546ZlXMl3h0AJJ5B3bYrXd5LNO5kwiMTQq969kIEIEn%2BpnSQND5RhJ%2BxaARRJEMxGbnszP7pllBNcrdkwU%2Bx3SeO8%2BgpjYc3dqcRNIS1fc4kFpZKJbpT%2ByQujeXQjBqg2E5PmOXzjfpR8VTdihC9sYB%2Bi4Bl7lLAcYC2jAha0XObb4DcncvhhPVgil3ZvqumgffeCO3SNZYfJoBM6%2BegT%2FSekJmiYxk1NFU9hNJHVpUEnOBUHUbfAyjauMPVBjJBThMYkBmI9Om2AUo6m1la2Ek9DaJKl%2ByEpSNGo5mBPn9ji0c7NHZtAiR%2F1iYHmrvYkT4AD9GVuQvTYQpJDXske9A%3D&response-content-disposition=attachment%3B%20filename%3D%22consolidated.xml%22&response-content-type=text%2Fxml&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIASARBLFPLIHOOHGGU%2F20260921%2Fus-gov-west-1%2Fs3%2Faws4_request&X-Amz-Date=20260921T080343Z&X-Amz-SignedHeaders=host&X-Amz-Signature=309b0aad274167082368c40be264e860bbaa805487e0f722650c4cb5d1d95aca",
+        "at": "2026-09-21T08:03:44.159Z"
+      }
+    ],
+    "resolvedEndpointUrl": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.XML",
+    "endpoint": {
+      "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.XML",
+      "resolvedUrl": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.XML",
+      "requestedAt": "2026-09-21T08:03:44.159Z",
+      "failure": "The redirect target host wc2h-sls-prod-public-published.s3.us-gov-west-1.amazonaws.com has robots verdict UNKNOWN; it was not followed.",
+      "verified": false
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": false,
+    "activationSupported": false,
+    "blocker": "The configured endpoint did not return a usable XML document. See steps.endpoint for what it did return."
+  }
+}

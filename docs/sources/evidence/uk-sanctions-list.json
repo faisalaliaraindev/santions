@@ -1,0 +1,61 @@
+{
+  "sourceId": "uk-sanctions-list",
+  "sourceName": "UK Sanctions List",
+  "publisher": "UK Foreign, Commonwealth & Development Office",
+  "userAgent": "AdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://sanctionslist.fcdo.gov.uk/robots.txt",
+      "pathChecked": "/docs/UK-Sanctions-List.xml",
+      "requestedAt": "2026-09-21T08:01:15.264Z",
+      "httpStatus": 403,
+      "wireBytes": 111,
+      "contentType": "application/xml",
+      "verdict": "UNKNOWN",
+      "absent": false,
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+    },
+    "policyRobots": {
+      "url": "https://www.gov.uk/robots.txt",
+      "pathChecked": "/government/publications/the-uk-sanctions-list",
+      "requestedAt": "2026-09-21T08:01:15.933Z",
+      "httpStatus": 200,
+      "wireBytes": 617,
+      "contentType": "text/plain; charset=utf-8",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "User-agent: *\nDisallow: /*/print$\n# Don't allow indexing of site search\nDisallow: /search/all*\nSitemap: https://www.gov.uk/sitemap.xml\n\n# The Meta-ExternalAgent crawler crawls the web for use cases such as training foundation AI models.\n# It results in timeouts from Vertex that back up requests from users making genuine searches\nUser-agent: meta-externalagent\nDisallow: /search/all*\n\n# https://ahrefs.com/robot/ crawls the site frequently\nUser-agent: AhrefsBot\nCrawl-delay: 10\n\n# https://www.deepcrawl.com/bot/ makes lots of requests. Ideally we'd slow it\n# down rather than blocking it but it doesn't mention whether or not it\n# supports crawl-delay.\nUser-agent: deepcrawl\nDisallow: /\n\n# Complaints of 429 'Too many requests' seem to be coming from SharePoint servers\n# (https://social.msdn.microsoft.com/Forums/en-US/3ea268ed-58a6-4166-ab40-d3f4fc55fef4)\n# The robot doesn't recognise its User-Agent string, see the MS support article:\n# https://support.microsoft.com/en-us/help/3019711/the-sharepoint-server-crawler-ignores-directives-in-robots-txt\nUser-agent: MS Search 6.0 Robot\nDisallow: /"
+    },
+    "terms": {
+      "url": "https://www.gov.uk/government/publications/the-uk-sanctions-list",
+      "requestedAt": "2026-09-21T08:01:19.944Z",
+      "httpStatus": 200,
+      "wireBytes": 30167,
+      "contentType": "text/html; charset=utf-8",
+      "lastModified": null,
+      "bodySha256": "dea5228d5da007d57e661ed6fb788b9dd243cd8e80de9ece843746c153de71ac",
+      "extractedTermsSentences": [
+        "tax Passports, travel and living abroad Visas and immigration Working, jobs and pensions Government activity Departments News Guidance and regulation Research and statistics Policy papers and consultations Transparency How government works Get involved Support links Help Privacy Cookies Accessibility statement Contact Terms and conditions Rhestr o Wasanaethau Cymraeg Government Digital Service All content is available under the Open Government Licence v3."
+      ],
+      "textLength": 57370
+    },
+    "endpoint": {
+      "skipped": true,
+      "reason": "artifact-host robots verdict UNKNOWN",
+      "verified": false
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "NOT_ESTABLISHED",
+    "endpointVerified": false,
+    "activationSupported": false,
+    "blocker": "robots.txt for sanctionslist.fcdo.gov.uk did not permit /docs/UK-Sanctions-List.xml (verdict UNKNOWN)."
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "types": ["node"],
+    // Tests and scripts are transformed by vitest/node, not tsc. Bundler resolution avoids
+    // NodeNext's CJS/ESM inference, which would treat these .ts files as CommonJS because the
+    // root package.json declares no "type".
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    // Tests import the decorated NestJS sources, so the root project needs decorator support.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["*.ts", "*.mts", "scripts/**/*", "tests/**/*", "apps/api/src/types/express.d.ts"]
+}

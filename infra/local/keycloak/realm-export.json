@@ -1,0 +1,336 @@
+{
+  "realm": "adverse-search-local",
+  "enabled": true,
+  "displayName": "Adverse Search (local development)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "failureFactor": 10,
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+
+  "roles": {
+    "realm": [
+      {
+        "name": "viewer",
+        "description": "Read search results and findings. No review, no administration."
+      },
+      {
+        "name": "analyst",
+        "description": "Create and run searches. Cannot review, cannot activate sources."
+      },
+      {
+        "name": "reviewer",
+        "description": "Record reasoned review actions on findings, split and merge events."
+      },
+      {
+        "name": "tenant_admin",
+        "description": "Administer users, clients and settings within one tenant."
+      },
+      {
+        "name": "source_admin",
+        "description": "Propose and approve source registry versions. Four-eyes enforced."
+      },
+      {
+        "name": "taxonomy_admin",
+        "description": "Propose and approve taxonomy and policy versions. Four-eyes enforced."
+      },
+      {
+        "name": "auditor",
+        "description": "Read audit records. Separately controlled from audit write."
+      },
+      {
+        "name": "platform_operator",
+        "description": "Operate infrastructure. MUST NOT be able to read customer evidence (test T06). Operating the platform does not imply permission to read what it holds."
+      },
+      {
+        "name": "platform_admin",
+        "description": "Provider-side administration. No implicit cross-tenant evidence access; break-glass is an explicit audited workflow."
+      }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "adverse-search-panel",
+      "name": "Control panel (backend-for-frontend)",
+      "description": "Authorisation-code with PKCE, exchanged server-side by the API's BFF. The browser never receives a provider token.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-development-only",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://127.0.0.1:3000/auth/callback",
+        "http://localhost:3000/auth/callback"
+      ],
+      "webOrigins": ["http://127.0.0.1:3000", "http://localhost:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:3000/##http://localhost:3000/"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "adverse-search-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "adverse-search-machine",
+      "name": "Machine client (integrators such as Target Platform)",
+      "description": "Client credentials with an audience-bound short-lived token. Browser bundles never contain this secret.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-development-only-machine",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "300"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "tenant_id",
+            "claim.value": "tenant-alpha",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "adverse-search-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "adverse-search-machine-beta",
+      "name": "Machine client for the second tenant",
+      "description": "Exists so cross-tenant denial (T04) can be tested with two genuinely distinct authenticated machine identities.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-development-only-machine-beta",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "tenant_id",
+            "claim.value": "tenant-beta",
+            "jsonType.label": "String",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "adverse-search-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "alpha.analyst",
+      "email": "alpha.analyst@example.test",
+      "firstName": "Alpha",
+      "lastName": "Analyst",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["analyst"]
+    },
+    {
+      "username": "alpha.reviewer",
+      "email": "alpha.reviewer@example.test",
+      "firstName": "Alpha",
+      "lastName": "Reviewer",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["reviewer", "viewer"]
+    },
+    {
+      "username": "alpha.viewer",
+      "email": "alpha.viewer@example.test",
+      "firstName": "Alpha",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["viewer"]
+    },
+    {
+      "username": "alpha.tenant.admin",
+      "email": "alpha.tenant.admin@example.test",
+      "firstName": "Alpha",
+      "lastName": "TenantAdmin",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["tenant_admin", "viewer"]
+    },
+    {
+      "username": "beta.analyst",
+      "email": "beta.analyst@example.test",
+      "firstName": "Beta",
+      "lastName": "Analyst",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-beta"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["analyst"]
+    },
+    {
+      "username": "beta.reviewer",
+      "email": "beta.reviewer@example.test",
+      "firstName": "Beta",
+      "lastName": "Reviewer",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-beta"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["reviewer", "viewer"]
+    },
+    {
+      "username": "source.admin",
+      "email": "source.admin@example.test",
+      "firstName": "Source",
+      "lastName": "Proposer",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["source_admin"]
+    },
+    {
+      "username": "source.approver",
+      "email": "source.approver@example.test",
+      "firstName": "Source",
+      "lastName": "Approver",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["source_admin", "taxonomy_admin"]
+    },
+    {
+      "username": "platform.operator",
+      "email": "platform.operator@example.test",
+      "firstName": "Platform",
+      "lastName": "Operator",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": [] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["platform_operator"]
+    },
+    {
+      "username": "auditor",
+      "email": "auditor@example.test",
+      "firstName": "Audit",
+      "lastName": "Reader",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": { "tenant_id": ["tenant-alpha"] },
+      "credentials": [
+        { "type": "password", "value": "local-development-only", "temporary": false }
+      ],
+      "realmRoles": ["auditor"]
+    }
+  ],
+
+  "clientScopeMappings": {},
+  "defaultDefaultClientScopes": ["profile", "email", "roles", "web-origins"],
+  "defaultOptionalClientScopes": ["offline_access"]
+}

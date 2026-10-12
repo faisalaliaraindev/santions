@@ -1,0 +1,74 @@
+{
+  "sourceId": "unsc-consolidated",
+  "sourceName": "UN Security Council Consolidated List",
+  "publisher": "United Nations Security Council",
+  "userAgent": "AdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://scsanctions.un.org/robots.txt",
+      "pathChecked": "/resources/xml/en/name/consolidated.xml",
+      "requestedAt": "2026-09-21T08:03:05.082Z",
+      "httpStatus": 404,
+      "wireBytes": 39,
+      "contentType": "text/html",
+      "verdict": "ALLOWED",
+      "absent": true,
+      "body": "Unsupported regime, language, or route."
+    },
+    "policyRobots": {
+      "url": "https://main.un.org/robots.txt",
+      "pathChecked": "/securitycouncil/en/content/un-sc-consolidated-list",
+      "requestedAt": "2026-09-21T08:03:06.047Z",
+      "httpStatus": 202,
+      "wireBytes": 0,
+      "contentType": "text/html; charset=UTF-8",
+      "verdict": "UNKNOWN",
+      "absent": false,
+      "body": ""
+    },
+    "terms": {
+      "skipped": true,
+      "reason": "policy-host robots verdict UNKNOWN"
+    },
+    "redirectRobots:unsolprodfiles.blob.core.windows.net": {
+      "url": "https://unsolprodfiles.blob.core.windows.net/robots.txt",
+      "pathChecked": "/publiclegacyxmlfiles/EN/consolidatedLegacyByNAME.xml?sv=2024-05-04&st=2026-09-21T08%3A03%3A07Z&se=2026-09-21T09%3A03%3A07Z&sr=b&sp=r&sig=TaQsdaLtV2lsuauSapIpytgeWJ91a69l6bCofQ%2BCd1Q%3D&rscd=attachment%3B%20filename%3D%22consolidatedLegacyByNAME.xml%22",
+      "requestedAt": "2026-09-21T08:03:09.321Z",
+      "httpStatus": 400,
+      "wireBytes": 226,
+      "contentType": "application/xml",
+      "verdict": "UNKNOWN",
+      "absent": false,
+      "body": "﻿<?xml version=\"1.0\" encoding=\"utf-8\"?><Error><Code>OutOfRangeInput</Code><Message>One of the request inputs is out of range.\nRequestId:0a39f48c-501e-001d-2e9f-49682c000000\nTime:2026-09-21T08:03:08.8502511Z</Message></Error>"
+    },
+    "redirects": [
+      {
+        "from": "https://scsanctions.un.org/resources/xml/en/name/consolidated.xml",
+        "status": 302,
+        "to": "https://unsolprodfiles.blob.core.windows.net/publiclegacyxmlfiles/EN/consolidatedLegacyByNAME.xml?sv=2024-05-04&st=2026-09-21T08%3A03%3A07Z&se=2026-09-21T09%3A03%3A07Z&sr=b&sp=r&sig=TaQsdaLtV2lsuauSapIpytgeWJ91a69l6bCofQ%2BCd1Q%3D&rscd=attachment%3B%20filename%3D%22consolidatedLegacyByNAME.xml%22",
+        "at": "2026-09-21T08:03:09.087Z"
+      }
+    ],
+    "resolvedEndpointUrl": "https://scsanctions.un.org/resources/xml/en/name/consolidated.xml",
+    "endpoint": {
+      "url": "https://scsanctions.un.org/resources/xml/en/name/consolidated.xml",
+      "resolvedUrl": "https://scsanctions.un.org/resources/xml/en/name/consolidated.xml",
+      "requestedAt": "2026-09-21T08:03:09.087Z",
+      "failure": "The redirect target host unsolprodfiles.blob.core.windows.net has robots verdict UNKNOWN; it was not followed.",
+      "verified": false
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": false,
+    "activationSupported": false,
+    "blocker": "The configured endpoint did not return a usable XML document. See steps.endpoint for what it did return."
+  }
+}

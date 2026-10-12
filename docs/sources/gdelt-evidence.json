@@ -1,0 +1,58 @@
+{
+  "sourceId": "gdelt-doc-v2",
+  "userAgent": "AdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
+  "steps": {
+    "apiRobots": {
+      "url": "https://api.gdeltproject.org/robots.txt",
+      "requestedAt": "2026-09-18T14:39:23.121Z",
+      "httpStatus": 404,
+      "wireBytes": 236,
+      "contentType": "text/html; charset=iso-8859-1",
+      "pathChecked": "/api/v2/doc/doc",
+      "verdict": "ALLOWED",
+      "absent": true,
+      "body": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">\n<html><head>\n<title>404 Not Found</title>\n</head><body>\n<h1>Not Found</h1>\n<p>The requested URL was not found on this server.</p>\n</body></html>\n"
+    },
+    "siteRobots": {
+      "url": "https://gdeltproject.org/robots.txt",
+      "requestedAt": "2026-09-18T14:39:33.622Z",
+      "httpStatus": 200,
+      "wireBytes": 33,
+      "pathChecked": "/about.html",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "User-agent: *\r\nDisallow: /data/\r\n"
+    },
+    "terms": {
+      "url": "https://gdeltproject.org/about.html",
+      "requestedAt": "2026-09-18T14:39:34.520Z",
+      "httpStatus": 200,
+      "wireBytes": 6140,
+      "contentType": "text/html",
+      "lastModified": "Sat, 03 Sep 2022 00:54:31 GMT",
+      "bodySha256": "384754b514042255c4542d51dc1e631da55c83c67d46a92b53b48a812d94be6b",
+      "extractedTermsSentences": [
+        "The GDELT Story: About the GDELT Project The GDELT Project About Blog Data Solutions Intro Creation Contact Us Terms of Use Visualization credit GDELT Project.",
+        "The Creation of GDELT How did GDELT come to be, what is its backstory, and who is its creator? Contact Us We'd love to hear from you - what's the best way to get in touch with us? Terms of Use What can I do with GDELT and how can I use it in my projects? Image credit Georgetown University.",
+        "Redistributing GDELT You may redistribute, rehost, republish, and mirror any of the GDELT datasets in any form.",
+        "However, any use or redistribution of the data must include a citation to the GDELT Project and a link to this website (https://www."
+      ],
+      "textLength": 7371
+    },
+    "endpoint": {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=climate&mode=artlist&maxrecords=1&format=json&timespan=1d",
+      "queryParam": "query",
+      "endpointKind": "QUERY_FEED",
+      "requestedAt": "2026-09-18T14:39:34.905Z",
+      "httpStatus": 429,
+      "wireBytes": 444,
+      "contentType": null,
+      "parsedAsJson": false,
+      "articleCount": null,
+      "responseKeys": null,
+      "sampleFields": null,
+      "bodyPreview": "Please limit requests to one every 5 seconds or contact kalev.leetaru5@gmail.com for larger queries. All high-traffic users should switch to our ngrams dataset: https://blog.gdeltproject.org/using-the-new-web-ngrams-dataset-to-find-relevant-coverage/. For trend analysis, please see our daily newsletter briefings: https://blog.gdeltproject.org/announcing-our-new-daily-todays-trends-on-capitol-hill-",
+      "verified": false
+    }
+  }
+}

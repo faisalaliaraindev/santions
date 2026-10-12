@@ -1,0 +1,138 @@
+{
+  "sourceId": "searxng-adverse-media",
+  "engine": "GOOGLE_NEWS",
+  "gatheredAt": "2026-09-22",
+  "method": "SINGLE_BOUNDED_TECHNICAL_DIAGNOSTIC",
+  "authorisedBy": "D20-A (docs/open-decisions.md), product owner, 2026-09-22",
+  "runner": "tests/live/searxng-google-diagnostic.test.ts",
+  "armedBy": "SEARXNG_GOOGLE_DIAGNOSTIC=yes-one-google-request-under-d20a",
+  "methodNote": [
+    "This is NOT a first-contact evidence run and it is NOT a governance record. It is one request,",
+    "authorised by D20-A, to answer an engineering question D20 deliberately left open: what does Google",
+    "actually do when asked from this infrastructure?",
+    "",
+    "D20 refused Google on the publisher's own terms without contacting them, and that refusal is",
+    "UNCHANGED by this file. `governanceStatus` was REFUSED before the request and is REFUSED after it;",
+    "`effectiveEnabled` was false before and is false after; both are asserted inside the runner so that",
+    "the run cannot silently coincide with somebody flipping them.",
+    "",
+    "THE ENGINE SUCCEEDED. That is recorded here as a technical fact and it is NOT a reason to enable",
+    "Google. Inferring permission from an engine having worked is the precise inversion that",
+    "`engine-governance.ts` exists to prevent. Whether a working engine may be used is a separate",
+    "production-governance decision, and it has not been taken.",
+    "",
+    "A future reader must not read this file as evidence supporting activation. It is evidence about",
+    "the transport, and nothing else."
+  ],
+  "request": {
+    "attempted": true,
+    "count": 1,
+    "retries": 0,
+    "via": "our own SearXNG instance, http://127.0.0.1:28888, production SearxngClient",
+    "url": "http://127.0.0.1:28888/search?q=%22Bernard+Madoff%22+fraud&format=json&engines=google+news&pageno=1&language=en",
+    "query": "\"Bernard Madoff\" fraud",
+    "subject": "Bernard Madoff",
+    "subjectNote": "A public figure chosen for the live-smoke file, deliberately reused so this result is comparable with the same day's five-engine table. Not a customer and not a screening subject.",
+    "engineNamed": "google news",
+    "categoriesSent": null,
+    "categoriesNote": "Never sent. SearXNG treats `engines` and `categories` as a union, so a category would have pulled in engines this run was not authorised to touch.",
+    "page": 1,
+    "language": "en",
+    "timeoutMs": 20000,
+    "proxyUsed": false,
+    "captchaSolved": false,
+    "headersForged": false,
+    "instanceReconfigured": false,
+    "instanceReconfiguredNote": "`infra/local/searxng/settings.yml` still carries `google news: disabled: true`. The request reached the engine only because it named the engine explicitly, which is the property that file's own comment already documented. Nothing was edited to permit this."
+  },
+  "outcome": {
+    "result": "RETURNED_RESULTS",
+    "httpStatus": 200,
+    "upstreamOutcome": "SUCCESS",
+    "captcha": false,
+    "rateLimited429": false,
+    "accessDenied403": false,
+    "timeout": false,
+    "connectionError": false,
+    "durationMs": 1107,
+    "rawResultCount": 10,
+    "uniqueResultCount": 10,
+    "duplicatesCollapsed": 0,
+    "unresponsiveEngines": [],
+    "enginesCredited": ["google news"],
+    "enginesCreditedNote": "Asserted in the runner: the instance must not have run an engine the request did not name. It did not."
+  },
+  "publisherUrls": {
+    "usable": true,
+    "usableCount": 10,
+    "totalCount": 10,
+    "googleHostedRedirects": 0,
+    "finding": [
+      "This is the notable part, and it is the one that contradicts a D20 assumption rather than the",
+      "licence finding. D20 recorded a second, independent defect: a Google News RSS <item><link> is a",
+      "news.google.com/rss/articles/CBMi<token> redirect rather than the publisher's article URL, so the",
+      "feed cannot meet FR-09 provenance even with permission.",
+      "",
+      "That defect is specific to the RSS feed. The SearXNG `google news` engine scrapes",
+      "google.com/search?tbm=nws instead, and every one of the ten URLs it returned was an ORIGINAL",
+      "PUBLISHER URL with no Google-hosted redirect at all. So D20's provenance objection does NOT carry",
+      "over to this route, and anyone reopening the question should not cite it as though it did.",
+      "",
+      "The licence objection is untouched and remains the whole of the refusal: Google's Terms of Use",
+      "permit personal non-commercial use and forbid automated access, and scraping the news results page",
+      "is if anything further from permitted than reading the RSS feed D20 examined."
+    ],
+    "sample": [
+      "https://thedigitalbanker.com/how-is-hsbc-weathering-the-madoff-fraud-scandal/",
+      "https://www.bloomberg.com/news/articles/2025-10-26/hsbc-sees-1-1-billion-provision-on-madoff-case-litigation",
+      "https://www.theguardian.com/business/2025/oct/28/hsbc-bernie-madoff-case-bank-lawsuit-profits",
+      "https://www.reuters.com/business/finance/hsbc-book-11-billion-provision-after-luxembourg-court-ruling-madoff-case-2025-10-26/",
+      "https://www.cnbc.com/2025/10/27/hsbc-1point1-billion-in-provision-third-quarter-madoff-case.html",
+      "https://www.scmp.com/business/banking-finance/article/3330422/hsbc-set-aside-us11-billion-potential-payouts-madoff-fraud-lawsuits",
+      "https://time.com/5788411/bernie-madoff-dies/",
+      "https://www.independent.co.uk/news/business/hsbc-bernard-madoff-shares-london-ponzi-scheme-b2852733.html",
+      "https://abcnews.com/Business/story?id=6445567&page=1",
+      "https://www.dawn.com/news/1618215"
+    ]
+  },
+  "suspensionState": {
+    "beforeRequest": {
+      "recordedErrorsForEngine": "100% SearxEngineCaptchaException, CAPTCHA (suspended_time=3600)",
+      "lastCaptchaInContainerLog": "2026-09-22 10:51:32 (container clock)",
+      "suspendedAtRequestTime": false,
+      "reasoning": "The 3600s suspension from the 10:51 CAPTCHA had expired roughly two hours before this run. Had it still been in force the instance would have short-circuited and the run would have observed its own breaker rather than Google, which is exactly the trap the twenty-fifth session's 0ms DISABLED_BY_POLICY reading fell into from the other direction."
+    },
+    "afterRequest": {
+      "suspended": false,
+      "cooldownSeconds": 0,
+      "newCaptchaLogEntries": 0,
+      "recordedErrorsForEngine": "50% SearxEngineCaptchaException — unchanged absolute count, halved because this successful request is now the second sample",
+      "evidence": [
+        "`docker logs adverse-search-service-searxng-1 | grep -i google` shows exactly two entries, at",
+        "09:30:52 and 10:51:32, both predating this run. No entry was written by it.",
+        "",
+        "`GET /stats/errors` moved `google news` from 100% to 50% on the same single ErrorContext, which",
+        "is what one success recorded against one historical error looks like. A new CAPTCHA would have",
+        "added a log line and held the percentage at 100."
+      ]
+    }
+  },
+  "governance": {
+    "before": { "integrated": true, "governanceStatus": "REFUSED", "effectiveEnabled": false },
+    "after": { "integrated": true, "governanceStatus": "REFUSED", "effectiveEnabled": false },
+    "changed": false,
+    "tenantImpact": "None. No tenant search can reach Google: `effectiveEnabled` is computed as `integrated && tenantEnabled && governanceStatus !== 'REFUSED'`, so the REFUSED reading blocks execution whatever any tenant switch says. This diagnostic bypassed that gate deliberately and only inside its own file, which is not reachable from the request path.",
+    "dataImpact": "None. No lead, candidate, document, finding or database row was produced. The ten URLs above exist only in this file and in the run's console output."
+  },
+  "openQuestionRaised": [
+    "Google works from this egress and returns original publisher URLs. The refusal therefore now rests",
+    "on the licence alone, with no technical defect left standing behind it.",
+    "",
+    "That makes the production-governance question a live one rather than academic, and it is NOT",
+    "answered here. D20-A explicitly does not authorise enabling Google, and this run did not. Raising",
+    "it means reopening D20 on the terms D20 quoted — the personal-non-commercial clause and the",
+    "automated-access clause — or taking the documented alternative D20 already recorded: Google's",
+    "Programmable Search Engine / Custom Search JSON API, which is contractually licensed for commercial",
+    "use and paid beyond a free allowance."
+  ]
+}

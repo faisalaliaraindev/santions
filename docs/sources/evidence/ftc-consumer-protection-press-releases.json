@@ -1,0 +1,65 @@
+{
+  "sourceId": "ftc-consumer-protection-press-releases",
+  "sourceName": "FTC Consumer Protection Press Releases",
+  "publisher": "US Federal Trade Commission",
+  "userAgent": "AdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
+  "authorisingDecision": {
+    "decision": "D19",
+    "approvedBy": "Faisal Ali",
+    "role": "Source admin",
+    "approvedOn": "2026-09-21",
+    "scope": "Read robots.txt, read applicable terms/access-policy pages, verify the configured official endpoint, perform one controlled initial refresh, and record response metadata and applicable rate/access restrictions. Not blanket permission for unrestricted crawling."
+  },
+  "steps": {
+    "artifactRobots": {
+      "url": "https://www.ftc.gov/robots.txt",
+      "pathChecked": "/feeds/press-release-consumer-protection.xml",
+      "requestedAt": "2026-09-21T08:01:48.898Z",
+      "httpStatus": 200,
+      "wireBytes": 3056,
+      "contentType": "text/plain",
+      "verdict": "ALLOWED",
+      "absent": false,
+      "body": "#\r\n# robots.txt\r\n#\r\n# This file is to prevent the crawling and indexing of certain parts\r\n# of your site by web crawlers and spiders run by sites like Yahoo!\r\n# and Google. By telling these \"robots\" where not to go on your site,\r\n# you save bandwidth and server resources.\r\n#\r\n# This file will be ignored unless it is at the root of your host:\r\n# Used:    http://example.com/robots.txt\r\n# Ignored: http://example.com/site/robots.txt\r\n#\r\n# For more information about the robots.txt standard, see:\r\n# http://www.robotstxt.org/robotstxt.html\r\n\r\nUser-agent: *\r\nCrawl-delay: 5\r\n# CSS, JS, Images\r\nAllow: /core/*.css$\r\nAllow: /core/*.css?\r\nAllow: /core/*.js$\r\nAllow: /core/*.js?\r\nAllow: /core/*.gif\r\nAllow: /core/*.jpg\r\nAllow: /core/*.jpeg\r\nAllow: /core/*.png\r\nAllow: /core/*.svg\r\nAllow: /profiles/*.css$\r\nAllow: /profiles/*.css?\r\nAllow: /profiles/*.js$\r\nAllow: /profiles/*.js?\r\nAllow: /profiles/*.gif\r\nAllow: /profiles/*.jpg\r\nAllow: /profiles/*.jpeg\r\nAllow: /profiles/*.png\r\nAllow: /profiles/*.svg\r\n# Directories\r\nDisallow: /core/\r\nDisallow: /profiles/\r\n# Files\r\nDisallow: /README.txt\r\nDisallow: /web.config\r\n# Paths (clean URLs)\r\nDisallow: /admin/\r\nDisallow: /comment/reply/\r\nDisallow: /filter/tips\r\nDisallow: /node/add/\r\nDisallow: /search/\r\nDisallow: /user/register\r\nDisallow: /user/password\r\nDisallow: /user/login\r\nDisallow: /user/logout\r\n# Paths (no clean URLs)\r\nDisallow: /index.php/admin/\r\nDisallow: /index.php/comment/reply/\r\nDisallow: /index.php/filter/tips\r\nDisallow: /index.php/node/add/\r\nDisallow: /index.php/search/\r\nDisallow: /index.php/user/password\r\nDisallow: /index.php/user/register\r\nDisallow: /index.php/user/login\r\nDisallow: /index.php/user/logout\r\n\r\n# For link-checking site crawlers.\r\nDisallow: /es/node/*\r\nDisallow: /*?combine=\r\nDisallow: /*?*combine=*\r\nDisallow: /*?items_per_page=\r\nDisallow: /*?*items_per_page=*\r\nDisallow: /*/comment/*\r\nDisallow: /*/comment/reply/*\r\nDisallow: /news-events/events-calendar/2018/03/ninth-annual-african-consumer-protection-dialogue-conference\r\nDisallow: /news-events/events-calendar/2018/03/ninth-annual-african-consumer-protection-dialogue-conference/RSVP\r\nDisallow: /news-events/events-calendar/2019/05/tenth-annual-african-consumer-protection-dialogue-conference\r\nDisallow: /sites/default/files/documents/public_statements/joint-fda/ftc-warning-letter-concerning-product-labeling-human-chrorionic-gonadotropin-hcg-drugs/ucm282052.htm\r\nDisallow: /sites/default/files/documents/videos/final-ftc-privacy-report-press-conference/privacyframework.shtm\r\nDisallow: /sites/default/files/documents/public_statements/statement-ftc-chairman-jon-leibowitz-senate-judiciary-committees-passage-preserve-access-affordable.369/pfdvote.shtm\r\nDisallow: /sites/default/files/documents/public_statements/statement-ftc-chairman-jon-leibowitz-regarding-announcement-arthur-d.levinson-has-resigned-googles-board/google.shtm\r\nDisallow: /sites/default/files/documents/public_statements/statement-ftc-chairman-jon-leibowitz-passage-h.r.3126-consumer-financial-protection-act-2009-house-energy-and-commerce-committee/cfpa.shtm\r\n"
+    },
+    "policyRobots": {
+      "url": "https://www.ftc.gov/robots.txt",
+      "pathChecked": "/stay-connected/rss",
+      "sameHostAsArtifact": true,
+      "verdict": "ALLOWED"
+    },
+    "terms": {
+      "url": "https://www.ftc.gov/stay-connected/rss",
+      "requestedAt": "2026-09-21T08:01:52.907Z",
+      "httpStatus": 200,
+      "wireBytes": 384460,
+      "contentType": "text/html; charset=UTF-8",
+      "lastModified": "Mon, 21 Sep 2026 08:01:51 GMT",
+      "bodySha256": "38ce30ba92a02454a80483cf7f75b7e7361f3555539bb3638811209c5197a94a",
+      "extractedTermsSentences": [
+        "s Get Business Blog updates Get your free credit report Find refund cases Order bulk publications Consumer Advice Shopping and Donating Credit, Loans, and Debt Jobs and Making Money Unwanted Calls, Emails, and Texts Identity Theft and Online Security Scams Business Guidance Advertising and Marketing Credit and Finance Privacy and Security By Industry Search the RN database For Small Businesses Browse Business Guidance Resources Business Blog Servicemembers: Your tool for financial readiness Visit militaryconsumer."
+      ],
+      "textLength": 8123
+    },
+    "endpoint": {
+      "url": "https://www.ftc.gov/feeds/press-release-consumer-protection.xml",
+      "requestedAt": "2026-09-21T08:01:56.917Z",
+      "httpStatus": 200,
+      "wireBytes": 143720,
+      "decompressedBytes": 143720,
+      "contentType": "application/rss+xml; charset=utf-8",
+      "mediaType": "application/rss+xml",
+      "bodySha256": "395421083c72732a54b9cbb0db357f80c89bc63ef825de8bdf2e5bef2853588c",
+      "bodyPreview": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<rss xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:atom=\"http://www.w3.org/2005/Atom\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\" xmlns:foaf=\"http://xmlns.com/foaf/0.1/\" xmlns:og=\"http://ogp.me/ns#\" xmlns:rdfs=\"http://www.w3.org/2000/01/rdf-schema#\" xmlns:schema=\"http://schema.org/\" xmlns:sioc=\"http://rdfs.org/sioc/ns#\" xmlns:sioct=\"http://rd",
+      "looksLikeHtmlErrorPage": false,
+      "credentialRequired": null,
+      "verified": true
+    }
+  },
+  "conclusion": {
+    "robotsPosition": "HONOURED",
+    "endpointVerified": true,
+    "activationSupported": true,
+    "blocker": null
+  }
+}

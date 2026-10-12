@@ -1,0 +1,171 @@
+# Local development stack.
+#
+# Everything here is free and self-hostable, per the non-negotiable boundary in the plan:
+# zero paid data subscriptions, zero commercial data licences, and a self-hosted extraction
+# model rather than a hosted third-party endpoint.
+#
+# Host ports live in the 280xx range, not the services' defaults. This machine runs other
+# stacks (another MongoDB already holds 27017), and a screening service fighting an unrelated
+# project for a port is a confusing failure to debug. Container-internal ports are unchanged.
+#
+# Named project-local volumes only. `pnpm local:down` stops without deleting them;
+# `pnpm local:reset` deletes them behind an explicit confirmation.
+
+name: adverse-search-service
+
+services:
+  # MongoDB as a single-node replica set. A standalone mongod cannot do transactions, and
+  # transactions are required for the state/outbox/audit commit.
+  mongo:
+    image: mongo:8.0
+    command: ['--replSet', 'rs0', '--bind_ip_all', '--port', '27017']
+    ports:
+      - '127.0.0.1:28017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Reports healthy only once the replica set has actually elected a primary.
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  mongo-init:
+    image: mongo:8.0
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: 'no'
+    entrypoint:
+      - bash
+      - -c
+      - |
+        mongosh --host mongo:27017 --quiet --eval '
+          try {
+            rs.status();
+            print("replica set already initiated");
+          } catch (e) {
+            rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongo:27017"}]});
+            print("replica set initiated");
+          }
+        '
+
+  # Search index. Working assumption only — open decision D12 is settled by the G4
+  # matcher-latency workload test, which may replace this with OpenSearch.
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-local-development-master-key-change-me}
+      MEILI_ENV: development
+      MEILI_NO_ANALYTICS: 'true'
+    ports:
+      - '127.0.0.1:28700:7700'
+    volumes:
+      - meili-data:/meili_data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:7700/health']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # S3 and SQS emulation. Not evidence that real AWS IAM/KMS policies work — that is a
+  # separate gate (G11, SEC-03).
+  localstack:
+    image: localstack/localstack:4.0
+    environment:
+      SERVICES: s3,sqs
+      DEBUG: '0'
+      AWS_DEFAULT_REGION: eu-west-2
+    ports:
+      - '127.0.0.1:28566:4566'
+    volumes:
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:4566/_localstack/health']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Local OIDC provider with synthetic accounts. Production federation is configurable;
+  # production startup rejects this issuer (T09).
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ['start-dev', '--import-realm', '--http-port=8080']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-local-development-only}
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:28080:8080'
+    volumes:
+      # The realm is imported from realm-export.json on every start, and Keycloak's own H2
+      # database is deliberately NOT persisted. Two reasons: the named volume is root-owned
+      # while Keycloak runs as uid 1000, so it cannot write there; and more importantly, a
+      # persisted dev realm silently diverges from the committed realm-export.json the moment
+      # somebody edits it in the admin UI. Declarative import is the source of truth.
+      - ./keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: [
+          'CMD-SHELL',
+          # The image ships neither curl nor wget, so this uses bash's /dev/tcp. The
+          # 'Connection: close' header and the timeout both matter: without them the read
+          # blocks and the healthcheck fails even though Keycloak is serving correctly.
+          'exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e "GET /health/ready HTTP/1.1\nhost: localhost\nConnection: close\n" >&3 && timeout 3 cat <&3 | grep -q "200 OK"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # Self-hosted metasearch — cascade rung 5. Subject to the same SSRF and egress controls as
+  # any other outbound path (SEC-02).
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+    ports:
+      - '127.0.0.1:28888:8080'
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/healthz']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # Self-hosted open-weight extraction model. A hosted third-party endpoint is not permitted
+  # (plan section 1.1): it is both a cost and a cross-border processing question.
+  # Which model is open decision D7 — no model is pulled automatically.
+  model-runtime:
+    image: ollama/ollama:latest
+    ports:
+      - '127.0.0.1:28434:11434'
+    volumes:
+      - model-data:/root/.ollama
+    healthcheck:
+      test: ['CMD-SHELL', 'ollama list >/dev/null 2>&1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # Serves the synthetic source fixtures. Never reachable from a live-mode run: mock and
+  # live modes are separate profiles and a fixture must never appear as a live result (T55).
+  fixture-server:
+    image: nginx:1.27-alpine
+    ports:
+      - '127.0.0.1:28090:80'
+    volumes:
+      - ./fixtures:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:80/health.json']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mongo-data:
+  meili-data:
+  localstack-data:
+  model-data:

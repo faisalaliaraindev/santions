@@ -1,0 +1,785 @@
+/**
+ * The real `EvidenceFetchPort` — Phase E step 1.
+ *
+ * # What this file is
+ *
+ * The first component in this service that can put a request on the wire to a publisher who did
+ * not ask to hear from us. Everything Phase D built — the registry, the four-eyes approval, the
+ * rights gate, the breaker, the budgets, the kill switch — exists so that this can be written
+ * without it being reckless. This is where all of it either runs or does not.
+ *
+ * **No live source has been contacted by this project.** Nothing in this file changes that on its
+ * own: the real transport is constructed only by the live composition root, and every test runs
+ * against an injected one.
+ *
+ * # The order of operations is the specification
+ *
+ * 1. Refuse an unauthorised or unattributable request (`fetch-authorisation.ts`, shared with the
+ *    mock so the two cannot drift).
+ * 2. `screenUrl` — the SEC-02 gate on what the string alone can show.
+ * 3. `checkAccess` **immediately before the socket opens**, and again before every redirect hop
+ *    and before fetching robots.txt.
+ * 4. robots.txt, fetched and cached per host. `DISALLOWED` refuses, and **`UNKNOWN` refuses**.
+ * 5. The request: honest user agent, conditional GET, redirects followed one screened hop at a
+ *    time.
+ * 6. The budgets: wire bytes, decompressed bytes, redirect count, total elapsed time.
+ * 7. Health fed back — `recordSuccess`, or `recordFailure` with the observed `FailureSignal`.
+ *
+ * # The two judgements worth arguing with
+ *
+ * **A gate refusal is never recorded as the source's failure.** A robots disallow and a refused
+ * address are facts about one path and one address. Both classify as `HARD_BLOCK`, whose
+ * `domainAction` is `SUSPEND`, and D5's breaker opens immediately on that — so handing either to
+ * `recordFailure` would suspend an entire working news feed because one of the articles it listed
+ * was unreachable. Health records only what **the server did**: a status code, a reset connection,
+ * a timeout, an oversize body.
+ *
+ * **Who spends the budget.** The publisher counts requests, so the component that opens the
+ * socket spends. The pipeline's pre-fetch check is a non-spending rights-and-breaker question;
+ * this adapter spends once per request it actually issues — the robots.txt fetch included, which
+ * is a real request to the publisher and was counted nowhere before.
+ *
+ * # What is deliberately absent
+ *
+ * No Playwright, no rendering, no escalation. FR-06 permits a rendered fetch only on a
+ * deterministic logged trigger, and three of the four triggers are judgements about extracted
+ * text — which is still a keyword placeholder. Inventing a trigger to justify rendering would put
+ * a fabricated reason into a record that exists to be audited. `allowRender` is accepted and
+ * ignored, and `renderTrigger` is always null, which is the truth.
+ *
+ * No CAPTCHA, challenge, paywall or login wall is ever solved, worked around or retried from a
+ * different identity. A recognised challenge is abandoned and reported (T87).
+ */
+
+import { Logger } from '@nestjs/common';
+
+import {
+  classifyFailure,
+  parseRobots,
+  robotsAbsent,
+  robotsUnavailable,
+  robotsVerdict,
+  screenUrl,
+  type FailureSignal,
+  type RobotsFile,
+  type SourceCoverageOutcome,
+} from '@adverse-search/domain';
+
+import { minIntervalMsFor, requestPacer, type RequestPacer } from './request-pacer.js';
+import {
+  assertAttributable,
+  assertAuthorised,
+  assertNotFixtureAuthorisation,
+} from './fetch-authorisation.js';
+import type { EvidenceFetchPort, FetchRequest, FetchResult } from './evidence-fetch.port.js';
+import { NodeHttpsTransport, type HttpTransport, type TransportResult } from './http-transport.js';
+import {
+  failed,
+  ok,
+  type AdapterDescriptor,
+  type Clock,
+  type SourceOutcome,
+} from './source-adapter.js';
+
+export const HTTP_EVIDENCE_FETCH_DESCRIPTOR: AdapterDescriptor = {
+  adapterId: 'http-evidence-fetch',
+  portKind: 'EVIDENCE_FETCH',
+  // A placeholder, and it is replaced per request. See `provenanceFor` below: the source a
+  // document came from is the source whose approval permitted the fetch, and that is known only
+  // once the request names it. A record stamped with a transport's own id could not be traced
+  // back to an approval, which is what `AdapterDescriptor.sourceId` is for.
+  sourceId: 'src-http-fetch',
+  parserVersion: 'http-1',
+  // HTTP itself is documented and versioned. The volatility FR-05 worries about belongs to the
+  // *parsers* of undocumented feeds, not to the transport underneath them.
+  stabilityClass: 'DOCUMENTED_STABLE',
+  mode: 'LIVE',
+  // Empty, and that is the correct value rather than a missing one. A transport is **not**
+  // jurisdiction-bound: it fetches whatever an approved source version permitted, and the
+  // jurisdiction gate is `authorisation.jurisdictionEnabled`, decided upstream by
+  // `FetchGateService` from the run's scope, the source's approved countries and the pinned
+  // taxonomy. This used to declare `['CR']` so that a coverage view grouping adapters by country
+  // would not show a transport claiming worldwide coverage — which was the wrong fix for a real
+  // worry: it made the transport look like Costa Rican coverage, which is a stronger and falser
+  // claim than no claim at all. Under **D-044** the product is worldwide and the pretence is
+  // actively misleading. A coverage view must group by the **source's** countries, which every
+  // record carries, not by the transport's.
+  jurisdictions: [],
+};
+
+/**
+ * The slice of `SourceHealthService` this adapter uses.
+ *
+ * Narrow on purpose: the adapter may ask whether it is allowed to make a call and report what
+ * happened, and it may not engage a kill switch, release one, or read the operator view.
+ */
+export interface SourceAccessPort {
+  checkAccess(input: {
+    readonly sourceId: string;
+    readonly now: Date;
+    readonly queriesAffected?: number | undefined;
+    readonly spend?: boolean | undefined;
+  }): Promise<{
+    readonly decision: { readonly allowed: boolean; readonly detail: string };
+    readonly coverageOutcome: SourceCoverageOutcome | null;
+  }>;
+  recordFailure(input: {
+    readonly sourceId: string;
+    readonly signal: FailureSignal;
+    readonly now: Date;
+  }): Promise<unknown>;
+  recordSuccess(input: { readonly sourceId: string; readonly now: Date }): Promise<unknown>;
+}
+
+/**
+ * The slice of `DomainHealthService` this adapter uses — the **per-domain** breaker (D-040).
+ *
+ * Separate from `SourceAccessPort` because the two answer different questions and must both
+ * answer yes. The source port guards the agreement an approver signed; this one guards the
+ * publisher the URL actually points at, which for a discovery source is a different party
+ * entirely — a news feed is one source and a hundred publishers.
+ *
+ * Declared here rather than in the service, following `SourceAccessPort`: the adapter states the
+ * narrowest thing it needs, and the service satisfies it.
+ */
+export interface DomainAccessPort {
+  checkDomain(input: { readonly url: string; readonly now: Date }): Promise<{
+    readonly domain: string | null;
+    readonly decision: { readonly allowed: boolean; readonly detail: string } | null;
+  }>;
+  recordDomainFailure(input: {
+    readonly url: string;
+    readonly signal: FailureSignal;
+    readonly detail: string;
+    readonly now: Date;
+  }): Promise<void>;
+  recordDomainSuccess(input: { readonly url: string; readonly now: Date }): Promise<void>;
+}
+
+export interface HttpEvidenceFetchOptions {
+  readonly access: SourceAccessPort;
+  /**
+   * The per-domain breaker. Optional in the type, **required in the live composition root**.
+   *
+   * Optional here so that a unit test asserting one narrow thing about the source breaker does
+   * not have to stand up a second one; required in `buildSourceAdapters`, which refuses to
+   * construct a live adapter without it for the same reason it refuses one without a contact
+   * URL. An absent domain breaker is not a degraded one — it is a fetcher that cannot notice a
+   * publisher refusing it.
+   */
+  readonly domains?: DomainAccessPort;
+  /**
+   * The contact URL the user agent carries. **Required, with no default.**
+   *
+   * FR-06: "The user agent identifies the service honestly with a contact URL." A default would
+   * be a URL nobody reads, on a host nobody owns, and a publisher who wanted us to stop would
+   * have nowhere to write. Missing configuration must stop the process, not produce a polite
+   * lie — so `buildSourceAdapters` refuses to construct this adapter without one.
+   */
+  readonly contactUrl: string;
+  readonly serviceName?: string;
+  readonly transport?: HttpTransport;
+  readonly clock?: Clock;
+  /** How long a parsed robots.txt is trusted. Publishers change them; a day is the convention. */
+  readonly robotsTtlMs?: number;
+  /** Enforces the approved `requestCeilingPerSecond`, including on the robots.txt read. */
+  readonly pacer?: RequestPacer;
+  /** A robots.txt larger than this is treated as unavailable rather than parsed. */
+  readonly maxRobotsBytes?: number;
+}
+
+interface CachedRobots {
+  readonly robots: RobotsFile;
+  readonly expiresAt: number;
+}
+
+/** Recognised in a body that came back 200. Never solved, worked around, or retried elsewhere. */
+const CHALLENGE_MARKERS: readonly string[] = [
+  'captcha',
+  'cf-challenge',
+  'are you a robot',
+  'enable javascript and cookies to continue',
+  'verifying you are human',
+  'ddos protection by',
+];
+
+export class HttpEvidenceFetchAdapter implements EvidenceFetchPort {
+  readonly descriptor = HTTP_EVIDENCE_FETCH_DESCRIPTOR;
+
+  private readonly logger = new Logger('HttpEvidenceFetch');
+  private readonly access: SourceAccessPort;
+  private readonly domains: DomainAccessPort | null;
+  private readonly transport: HttpTransport;
+  private readonly clock: Clock;
+  private readonly userAgent: string;
+  private readonly robotsTtlMs: number;
+  private readonly pacer: RequestPacer;
+  private readonly maxRobotsBytes: number;
+  /** Per host, not per URL: robots.txt is a property of the host and is fetched once for it. */
+  private readonly robotsCache = new Map<string, CachedRobots>();
+
+  constructor(options: HttpEvidenceFetchOptions) {
+    if (options.contactUrl.trim() === '') {
+      throw new Error(
+        'HttpEvidenceFetchAdapter requires a contact URL. FR-06 requires the user agent to ' +
+          'identify the service honestly with a contact URL, and a publisher who wants us to ' +
+          'stop must have somewhere to write.',
+      );
+    }
+    this.access = options.access;
+    this.domains = options.domains ?? null;
+    this.transport = options.transport ?? new NodeHttpsTransport();
+    this.clock = options.clock ?? ((): Date => new Date());
+    this.userAgent = `${options.serviceName ?? 'ErlyAdverseSearch'}/1.0 (+${options.contactUrl})`;
+    this.robotsTtlMs = options.robotsTtlMs ?? 24 * 60 * 60 * 1000;
+    this.pacer = options.pacer ?? requestPacer;
+    this.maxRobotsBytes = options.maxRobotsBytes ?? 512 * 1024;
+  }
+
+  /**
+   * The robots.txt position for a URL, as currently understood.
+   *
+   * Fetches and caches on first sight of a host. Answers `UNKNOWN` when robots.txt could not be
+   * read — never `ALLOWED`, because an outage at the publisher is not consent.
+   */
+  async robotsPositionFor(url: string): Promise<'ALLOWED' | 'DISALLOWED' | 'UNKNOWN'> {
+    const screening = screenUrl(url);
+    if (!screening.allowed) {
+      // A URL we may not fetch has no robots position worth reporting, and reporting `ALLOWED`
+      // for one would be the more dangerous of the two wrong answers.
+      return 'UNKNOWN';
+    }
+    const parsed = new URL(url);
+    // No source is named here, so this probe is not charged to a budget. It is cached per host
+    // and, on the fetch path, the charged call happens first — so in practice this reads the
+    // cache. A caller that asks about a host the service has never fetched issues one uncharged
+    // request; step 2's gate service is where that call site gets a source to charge.
+    const robots = await this.robotsFor(parsed, null);
+    return robotsVerdict(robots, this.userAgent, `${parsed.pathname}${parsed.search}`);
+  }
+
+  async fetch(request: FetchRequest): Promise<SourceOutcome<FetchResult>> {
+    // Programming errors first, and they throw: a caller that cannot name its authorisation or
+    // its attribution has a bug, and turning that into a coverage gap would report a source as
+    // unreachable when it was never reached for.
+    assertAuthorised(request);
+    assertAttributable(request);
+    // A fixture authorisation says there is no publisher behind this source. Honouring one here
+    // would open a socket to a real host under a record saying no real host was involved (T55).
+    assertNotFixtureAuthorisation(request);
+
+    const sourceId = request.attribution.sourceId;
+    const startedAt = this.clock().getTime();
+    const deadline = startedAt + request.budget.timeoutMs;
+
+    let currentUrl = request.url;
+    let hops = 0;
+
+    // Redirects are followed here, one screened hop at a time, rather than by the transport. A
+    // transport that followed them would carry the request past the gate without the gate being
+    // consulted — and a 302 to `http://169.254.169.254/` is the obvious way to try it.
+    for (;;) {
+      const screening = screenUrl(currentUrl);
+      if (!screening.allowed) {
+        return this.refuse(
+          request,
+          { policyRefusal: true },
+          `${screening.rejection ?? 'REJECTED'}: ${screening.detail ?? currentUrl}`,
+        );
+      }
+      const parsed = new URL(currentUrl);
+
+      // Rights first, and **without spending**, because of what a refusal has to say. D5's
+      // ordering principle is rights, then health, then economics — a source an operator
+      // suspended one second ago must report *that*, not "the publisher is in a cooldown".
+      // Found by the trip-wire harness: with the domain gate first, a 403 halted the source and
+      // the next request then reported a domain cooldown, hiding the halt an operator would be
+      // asked about. Non-spending, so asking the question costs the publisher nothing.
+      const rights = await this.access.checkAccess({ sourceId, now: this.clock(), spend: false });
+      if (!rights.decision.allowed) {
+        return this.refuse(request, { policyRefusal: true }, rights.decision.detail);
+      }
+
+      // Then the publisher. Before robots, because fetching robots.txt is itself a request to
+      // this publisher: a domain that has refused us must not be asked for its robots.txt.
+      const domain = await this.domainDecision(request, currentUrl);
+      if (domain !== null) {
+        return domain;
+      }
+
+      const robots = await this.robotsDecision(request, parsed, deadline);
+      if (robots !== null) {
+        return robots;
+      }
+
+      const access = await this.access.checkAccess({ sourceId, now: this.clock(), spend: true });
+      if (!access.decision.allowed) {
+        // Not a failure of the source — our own decision not to ask it, one instant before the
+        // socket would have opened. This is what makes the D5 kill switch effective mid-run.
+        return this.refuse(request, { policyRefusal: true }, access.decision.detail);
+      }
+
+      const remainingMs = deadline - this.clock().getTime();
+      if (remainingMs <= 0) {
+        return await this.observed(
+          request,
+          { syscallCode: 'ETIMEDOUT' },
+          'Budget elapsed before the request was issued.',
+        );
+      }
+
+      // The choke point. Every outbound request this service makes to a publisher passes through
+      // here — first hop and every redirect — so this is where a recorded ceiling has to be
+      // honoured for it to mean anything. Keyed on the host of the URL actually being requested,
+      // so a redirect onto another host is paced against that host rather than the original.
+      await this.pacer.pace(
+        new URL(currentUrl).host,
+        minIntervalMsFor(request.authorisation.requestCeilingPerSecond),
+      );
+
+      const result = await this.transport.send({
+        url: currentUrl,
+        headers: this.headersFor(request, hops === 0),
+        timeoutMs: remainingMs,
+        maxWireBytes: request.budget.maxBytes,
+        maxDecompressedBytes: request.budget.maxDecompressedBytes,
+      });
+
+      if (result.kind === 'FAILURE') {
+        // A refused address is our policy and never the source's fault; everything else is
+        // something the server or the network did, and health hears about it.
+        return result.signal.policyRefusal === true
+          ? this.refuse(request, result.signal, result.detail)
+          : await this.observed(request, result.signal, result.detail);
+      }
+
+      const location = result.headers['location'];
+      if (isRedirect(result.status) && location !== undefined) {
+        hops += 1;
+        if (hops > request.budget.maxRedirects) {
+          return await this.observed(
+            request,
+            { limitExceeded: true },
+            `More than ${String(request.budget.maxRedirects)} redirects.`,
+          );
+        }
+        currentUrl = new URL(location, currentUrl).toString();
+        // Round the loop: screened again, robots checked again for the new host, access checked
+        // again. A redirect is a new request to a possibly different publisher.
+        continue;
+      }
+
+      return await this.complete(request, currentUrl, result);
+    }
+  }
+
+  /**
+   * The robots gate for one hop. Returns an outcome when the fetch must not proceed, else null.
+   *
+   * An approved exception skips the check **for the hosts it names, and only those** — FR-06
+   * requires the exception to be per source and per jurisdiction with a named approver, and
+   * `assertAuthorised` has already refused one that is unnamed or names no host.
+   *
+   * **Decision D6 closed on 2026-09-21** and decided the shape: the exception is a list of the
+   * publisher's own delivery hosts, recorded on the approved version. A publisher that serves its
+   * bulk file by redirecting its documented address to a signed, one-hour object-store URL — OFAC
+   * to AWS GovCloud S3, the UN to Azure Blob — has a delivery host that answers `robots.txt` with
+   * a 403, which reads as `UNKNOWN` and is refused below. That refusal is right in general and
+   * wrong for that one shape.
+   *
+   * What keeps this narrow is that the host is matched, not the source. A hop onto any other host
+   * takes the strict path and is refused even though the source carries an exception, so a
+   * publisher who repoints their redirect needs a newly approved version rather than merely a new
+   * `Location` header. That is the "fail closed if the redirect leaves the expected delivery
+   * infrastructure" half of the decision, and it is enforced here rather than promised in a doc.
+   */
+  private async robotsDecision(
+    request: FetchRequest,
+    url: URL,
+    deadline: number,
+  ): Promise<SourceOutcome<FetchResult> | null> {
+    if (
+      request.authorisation.robotsPosition === 'EXCEPTION_APPROVED' &&
+      request.authorisation.robotsExceptionDeliveryHosts.includes(url.host.toLowerCase())
+    ) {
+      this.logger.log(
+        `${url.host}: robots exception applied, approved by ` +
+          `${request.authorisation.robotsExceptionApprovedBy ?? 'nobody'} under source version ` +
+          `${request.authorisation.sourceVersionId}. The host is named in the exception's own ` +
+          `delivery-host list (D6); every other host on this fetch still takes the strict path.`,
+      );
+      return null;
+    }
+
+    const robots = await this.robotsFor(
+      url,
+      { sourceId: request.attribution.sourceId, deadline },
+      request.authorisation.requestCeilingPerSecond,
+    );
+    const verdict = robotsVerdict(robots, this.userAgent, `${url.pathname}${url.search}`);
+    if (verdict === 'ALLOWED') {
+      return null;
+    }
+    if (verdict === 'DISALLOWED') {
+      return this.refuse(
+        request,
+        { robotsDisallow: true },
+        `robots.txt at ${url.host} disallows ${url.pathname}.`,
+      );
+    }
+    // UNKNOWN. Reading "we could not tell" as permission makes an outage at the publisher into
+    // consent, which is the one reading `robots.ts` was written to refuse.
+    return this.refuse(
+      request,
+      { policyRefusal: true },
+      `robots.txt at ${url.host} could not be read, so permission is not established. ` +
+        `Refusing rather than assuming: an outage at the publisher is not consent. A source ` +
+        `that needs an exception needs one approved and recorded (open decision D6).`,
+    );
+  }
+
+  /**
+   * The per-domain gate for one hop. Returns an outcome when the fetch must not proceed.
+   *
+   * A refusal here is **our** decision not to ask, exactly like a robots refusal, so it goes
+   * through `refuse` and never touches source health. What it records is that a publisher who
+   * has already refused us is not asked again — which is the fact the per-domain breaker exists
+   * to hold, and which the per-source breaker structurally cannot (D-040).
+   */
+  private async domainDecision(
+    request: FetchRequest,
+    url: string,
+  ): Promise<SourceOutcome<FetchResult> | null> {
+    if (this.domains === null) {
+      return null;
+    }
+    const { decision } = await this.domains.checkDomain({ url, now: this.clock() });
+    if (decision === null || decision.allowed) {
+      return null;
+    }
+    return this.refuse(request, { policyRefusal: true }, decision.detail);
+  }
+
+  /** Fetch and cache robots.txt for a host. `spend` counts it — it is a real request. */
+  private async robotsFor(
+    url: URL,
+    charge: { readonly sourceId: string; readonly deadline: number } | null,
+    /**
+     * The approved ceiling for the source this read is on behalf of, in requests per second.
+     *
+     * robots.txt is a request to the publisher like any other. GDELT's rate limiter refuses it
+     * exactly as it refuses a query, and a refused robots.txt reads as "permission could not be
+     * established" — so an unpaced robots read turns a working, permitting publisher into one
+     * this service believes has not answered.
+     */
+    ceilingPerSecond: number | null = null,
+  ): Promise<RobotsFile> {
+    const cached = this.robotsCache.get(url.host);
+    const now = this.clock().getTime();
+    if (cached !== undefined && cached.expiresAt > now) {
+      return cached.robots;
+    }
+
+    if (charge !== null) {
+      const access = await this.access.checkAccess({
+        sourceId: charge.sourceId,
+        now: this.clock(),
+        spend: true,
+      });
+      if (!access.decision.allowed) {
+        // Not cached: a refusal is a fact about this instant, and caching it as "unavailable"
+        // would keep refusing a host for a day after the source was released.
+        return robotsUnavailable();
+      }
+    }
+
+    const remainingMs = charge === null ? 10_000 : charge.deadline - now;
+    if (remainingMs <= 0) {
+      return robotsUnavailable();
+    }
+
+    // Honour the publisher's ceiling for this request too, on the **same key** the document
+    // fetch uses. Keyed on the host, never on the source id: the thing being rate-limited is the
+    // publisher's view of us, and a robots read on one key followed immediately by a document
+    // fetch on another is two requests with no gap between them — which is precisely how the
+    // 2026-09-18 live run was rate-limited by GDELT despite "being paced".
+    await this.pacer.pace(url.host, minIntervalMsFor(ceilingPerSecond));
+
+    const result = await this.transport.send({
+      url: `${url.origin}/robots.txt`,
+      headers: { 'user-agent': this.userAgent, accept: 'text/plain', 'accept-encoding': 'gzip' },
+      timeoutMs: Math.min(remainingMs, 10_000),
+      maxWireBytes: this.maxRobotsBytes,
+      maxDecompressedBytes: this.maxRobotsBytes,
+    });
+
+    const robots = interpretRobotsResponse(result);
+    // Only a **known** answer is cached. `robotsUnavailable()` means "we could not establish a
+    // position just now" — a 429, a timeout, an HTML error page — and caching that for the full
+    // TTL turns one transient refusal into a day of refusing a publisher who never said no. The
+    // branch fifteen lines up already declines to cache a refusal for exactly this reason; this
+    // is the same fact arriving over the wire instead of from the budget.
+    //
+    // An absent robots.txt (404/410) *is* a known answer — the site has restricted nothing — and
+    // is cached like any other.
+    if (robots.known) {
+      this.robotsCache.set(url.host, { robots, expiresAt: now + this.robotsTtlMs });
+    }
+    return robots;
+  }
+
+  /** Turn a successful response into a `FetchResult`, or into the failure it really was. */
+  private async complete(
+    request: FetchRequest,
+    finalUrl: string,
+    result: Extract<TransportResult, { kind: 'RESPONSE' }>,
+  ): Promise<SourceOutcome<FetchResult>> {
+    const now = this.clock();
+
+    if (result.status === 304) {
+      // A conditional hit is a successful fetch with no body, not an empty document. Conflating
+      // them would let a caller store an empty version over a good one.
+      await this.access.recordSuccess({ sourceId: request.attribution.sourceId, now });
+      await this.domains?.recordDomainSuccess({ url: finalUrl, now });
+      return ok(this.provenanceFor(request), now, {
+        url: request.url,
+        finalUrl,
+        httpStatus: 304,
+        headers: result.headers,
+        body: null,
+        notModified: true,
+        contentType: null,
+        bytes: 0,
+        renderTrigger: null,
+        egressIdentityId: request.attribution.egressIdentityId,
+        fetchedAt: now.toISOString(),
+      });
+    }
+
+    if (result.status >= 400) {
+      const retryAfter = Number(result.headers['retry-after']);
+      return await this.observed(
+        request,
+        {
+          httpStatus: result.status,
+          ...(Number.isFinite(retryAfter) ? { retryAfterSeconds: retryAfter } : {}),
+        },
+        `${String(result.status)} from ${finalUrl}.`,
+      );
+    }
+
+    if (result.status !== 200) {
+      // A 2xx or 3xx that is neither 200 nor a followed redirect — a 204, or a 3xx with no
+      // Location. There is no document here, and treating one as an empty document is how an
+      // empty finding gets written.
+      return await this.observed(
+        request,
+        { httpStatus: result.status, emptyBody: true },
+        `${String(result.status)} carried no document.`,
+      );
+    }
+
+    const contentType = result.headers['content-type'] ?? null;
+    const challenge = detectChallenge(result.body, contentType);
+    if (challenge !== null) {
+      // FR-06 and T87: abandoned, recorded, never solved by any path. The classifier reads
+      // `challengeDetected` as a soft block, which cools the identity and degrades the domain.
+      return await this.observed(request, { challengeDetected: true, httpStatus: 200 }, challenge);
+    }
+
+    if (result.body.byteLength === 0) {
+      return await this.observed(request, { emptyBody: true, httpStatus: 200 }, 'Empty 200 body.');
+    }
+
+    await this.access.recordSuccess({ sourceId: request.attribution.sourceId, now });
+    await this.domains?.recordDomainSuccess({ url: finalUrl, now });
+    return ok(this.provenanceFor(request), now, {
+      url: request.url,
+      finalUrl,
+      httpStatus: 200,
+      headers: result.headers,
+      body: result.body,
+      notModified: false,
+      contentType,
+      bytes: result.body.byteLength,
+      // Always null. See the file header: a rendered fetch must name a real trigger, and there
+      // is no rendering in this step.
+      renderTrigger: null,
+      egressIdentityId: request.attribution.egressIdentityId,
+      fetchedAt: now.toISOString(),
+    });
+  }
+
+  private headersFor(request: FetchRequest, first: boolean): Record<string, string> {
+    const headers: Record<string, string> = {
+      'user-agent': this.userAgent,
+      accept: 'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8',
+      'accept-encoding': 'gzip, deflate, br',
+    };
+    if (first) {
+      for (const [name, value] of Object.entries(request.requestHeaders ?? {})) {
+        const normalized = name.toLowerCase();
+        if (
+          normalized === 'host' ||
+          normalized === 'user-agent' ||
+          normalized === 'if-none-match' ||
+          normalized === 'if-modified-since'
+        ) {
+          throw new Error(`Custom fetch header ${name} is managed by the evidence fetcher.`);
+        }
+        headers[normalized] = value;
+      }
+    }
+    // Conditional headers go on the first hop only. Replaying an `If-None-Match` to whatever a
+    // redirect points at asks a different document about a different document's ETag, and a
+    // server that answered 304 to it would be answering about nothing we hold.
+    if (first && request.conditional.etag !== null) {
+      headers['if-none-match'] = request.conditional.etag;
+    }
+    if (first && request.conditional.lastModified !== null) {
+      headers['if-modified-since'] = request.conditional.lastModified;
+    }
+    return headers;
+  }
+
+  /**
+   * A refusal: **our** decision not to ask, so health never hears about it.
+   *
+   * Returned as `FAILED` rather than thrown because it is a fact about the world discovered while
+   * fetching — a publisher's robots.txt, a third party's redirect — and not a bug at the call
+   * site. The lead survives with its reason attached.
+   */
+  private refuse(
+    request: FetchRequest,
+    signal: FailureSignal,
+    detail: string,
+  ): SourceOutcome<FetchResult> {
+    this.logger.warn(`Refusing ${request.url}: ${detail}`);
+    return failed(this.provenanceFor(request), this.clock(), signal, detail);
+  }
+
+  /**
+   * A failure **the server produced**. Recorded against the source's health, deliberately.
+   *
+   * Awaited rather than fired and forgotten: the breaker exists to stop the *next* request, and a
+   * write still in flight when the next request is decided is a breaker that opens one request
+   * too late. That is the request the breaker was there to prevent.
+   */
+  private async observed(
+    request: FetchRequest,
+    signal: FailureSignal,
+    detail: string,
+  ): Promise<SourceOutcome<FetchResult>> {
+    const policy = classifyFailure(signal);
+    this.logger.warn(`${request.url} failed as ${policy.failureClass}: ${detail}`);
+    await this.access.recordFailure({
+      sourceId: request.attribution.sourceId,
+      signal,
+      now: this.clock(),
+    });
+    // The same fact, recorded against the publisher as well as against the agreement. A 429
+    // from one host is a fact about that host; a feed that linked to it is not at fault, and
+    // the source breaker alone would either blame the feed or lose the observation entirely.
+    await this.domains?.recordDomainFailure({
+      url: request.url,
+      signal,
+      detail,
+      now: this.clock(),
+    });
+    return failed(this.provenanceFor(request), this.clock(), signal, detail);
+  }
+
+  /**
+   * The descriptor stamped onto this request's provenance.
+   *
+   * `sourceId` is the one the request names, not the transport's own: `AdapterDescriptor.sourceId`
+   * exists "so a record can be traced to its approval", and a document stamped `src-http-fetch`
+   * traces to a transport rather than to the source version that permitted it.
+   */
+  private provenanceFor(request: FetchRequest): AdapterDescriptor {
+    return { ...this.descriptor, sourceId: request.attribution.sourceId };
+  }
+}
+
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+/**
+ * What a robots.txt response means.
+ *
+ * A 404 is permission — the publisher chose not to write one, which is the settled convention.
+ * A 5xx, a timeout, a redirect or an HTML error page is `UNKNOWN`, which the caller refuses on.
+ * The difference is the whole point of `robots.ts`: "no rule found" and "we could not tell" are
+ * not the same fact, and only one of them is consent.
+ */
+export function interpretRobotsResponse(result: TransportResult): RobotsFile {
+  if (result.kind === 'FAILURE') {
+    return robotsUnavailable();
+  }
+  if (result.status === 404 || result.status === 410) {
+    return robotsAbsent();
+  }
+  if (result.status !== 200) {
+    return robotsUnavailable();
+  }
+  const contentType = result.headers['content-type'] ?? '';
+  if (contentType !== '' && !contentType.toLowerCase().includes('text/plain')) {
+    // An HTML error page served as 200 is the commonest way a robots.txt "succeeds" while telling
+    // us nothing. Parsing it would find no rules and read as permission.
+    return robotsUnavailable();
+  }
+  return parseRobots(new TextDecoder().decode(result.body));
+}
+
+/**
+ * Script blocks, removed before the markers are looked for.
+ *
+ * A page's inline JavaScript is configuration, not something the publisher served *to us as a
+ * challenge*, and scanning it produced a false positive that blocked a whole publisher. Every
+ * MediaWiki page embeds a config blob in `<head>` naming its edit-captcha extension
+ * (`wgConfirmEditCaptchaNeededForGenericEdit`, `wgConfirmEditHCaptchaSiteKey`) — a statement
+ * about what *editing* would require, on a page that was served to us in full, 200, 85KB of
+ * article. Matching the bare substring there meant `en.wikinews.org` was reported as serving a
+ * bot challenge while it was serving the article, and the same would happen on every other wiki.
+ *
+ * An unterminated `<script` at the end of the window is dropped too, so a marker cannot hide in
+ * the tail of a script the window happened to cut in half.
+ */
+function withoutScripts(html: string): string {
+  return html
+    .replace(/<script\b[\s\S]*?<\/script\s*>/giu, ' ')
+    .replace(/<script\b[\s\S]*$/iu, ' ');
+}
+
+/**
+ * Recognise a challenge or interstitial in a body that came back 200.
+ *
+ * Deliberately conservative and deliberately dumb: it looks at the first few kilobytes of an HTML
+ * body for well-known markers. A false positive costs one lead and is reported honestly; a false
+ * negative stores a CAPTCHA page as evidence about a person, which is much worse. That asymmetry
+ * is unchanged — what changed is *where* it looks.
+ *
+ * **Inline scripts are excluded** (see `withoutScripts`). That is not a loosening of the check: a
+ * real interstitial puts its text in the title and the visible body, because its whole purpose is
+ * to be read by a person, and all of that survives script-stripping. What does not survive is a
+ * publisher's JavaScript configuration mentioning a captcha it would use somewhere else.
+ *
+ * The window is read larger than it is scanned so that removing a script cannot pull unscanned
+ * markup into view and change the answer depending on how long the page's scripts happen to be.
+ */
+export function detectChallenge(body: Uint8Array, contentType: string | null): string | null {
+  if (contentType !== null && !contentType.toLowerCase().includes('html')) {
+    return null;
+  }
+  const head = withoutScripts(
+    new TextDecoder('utf-8', { fatal: false }).decode(body.subarray(0, 16384)),
+  )
+    .slice(0, 4096)
+    .toLowerCase();
+  const marker = CHALLENGE_MARKERS.find((candidate) => head.includes(candidate));
+  return marker === undefined
+    ? null
+    : `A bot challenge or interstitial was served (matched "${marker}"). Abandoned without any ` +
+        `attempt to solve, work around or retry it from elsewhere (FR-06, T87).`;
+}

@@ -1,0 +1,88 @@
+name: CI
+
+# Offline CI only. Live source suites (`test:contract:live`, `measure:coverage`,
+# `verify:aws`) run separately with approved credentials and are never exposed to an
+# untrusted pull request (section 10.4).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      # The release gate. Runs with no I/O dependency, so it gates every pull request.
+      # A failure here means the system can state something it has no basis to state.
+      - name: Invariants I1-I10 (release gate)
+        run: pnpm test:invariants
+
+      - name: Evaluation metrics
+        run: pnpm test:evaluation
+
+      - name: Coverage thresholds
+        run: pnpm exec vitest run --project unit --project invariants --project evaluation --coverage
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # SEC-04: licences of every open-source component are inspected, including — once a
+      # model is chosen (open decision D7) — the model weights.
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+
+      - name: Licence inventory
+        run: pnpm licenses list --json > licences.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: licence-inventory
+          path: licences.json
+          if-no-files-found: warn

@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*", "src/types/express.d.ts"],
+  "references": [
+    {
+      "path": "../../packages/domain/tsconfig.build.json"
+    },
+    {
+      "path": "../../packages/contracts/tsconfig.build.json"
+    }
+  ]
+}

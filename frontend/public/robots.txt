@@ -1,0 +1,3 @@
+# The control panel serves screening results about identifiable people.
+User-agent: *
+Disallow: /
