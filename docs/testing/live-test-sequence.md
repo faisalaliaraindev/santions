@@ -30,7 +30,7 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
 ### 2. Start the infrastructure
 
 ```powershell
-cd D:\Erly\Projects\sanctions\erly-sanction-service-backend
+cd D:\Adverse Search\Projects\sanctions\adverse-search-service
 pnpm local:up
 pnpm local:bootstrap
 ```
@@ -45,7 +45,7 @@ One terminal, kept open:
 ```powershell
 # Only needed for the Google step (20.4). Harmless otherwise.
 $env:ALLOW_LOCAL_GOOGLE_DIAGNOSTIC = 'true'
-$env:GOOGLE_DIAGNOSTIC_TENANT_ID   = '<your Zquence tenant id>'
+$env:GOOGLE_DIAGNOSTIC_TENANT_ID   = '<your Target Platform tenant id>'
 pnpm dev:live
 ```
 
@@ -64,7 +64,7 @@ $env:ADVERSE_SEARCH_MODE = 'mock'; pnpm dev:api
 
 ### 4. Postman
 
-Import `postman/erly-adverse-search-full.postman_collection.json` and
+Import `postman/adverse-search-service-full.postman_collection.json` and
 `postman/local.ready.postman_environment.json`, then select that environment.
 
 | Variable            | Value                                                               |
@@ -174,7 +174,7 @@ properties over the asynchronous API, and still work:
 | 15     | SEC vs GDELT request shapes (GDELT is suspended)        | `mixedLiveConfirm = yes-contact-sec-and-gdelt`        |
 | 17     | All lists + both SEC feeds, combined acceptance         | `caConfirm = yes-contact-sec-and-indexed`             |
 | 18     | News engines, Wikinews article → finding                | `sxConfirm = yes-query-searxng-and-sec`               |
-| 19     | Google via the Zquence tenant, over `/v1/searches`      | `googleDiagnosticConfirm = yes-run-google-live-local` |
+| 19     | Google via the Target Platform tenant, over `/v1/searches`      | `googleDiagnosticConfirm = yes-run-google-live-local` |
 
 Folders 14–18 each sign up a fresh tenant, and **signup allows 5 per hour.** Folder 20 signs
 nobody up.
@@ -194,6 +194,6 @@ pnpm local:down
 ```
 
 **Check:** the first command above finds nothing more to stop, and `docker ps` lists no
-`erly-adverse-search-*` container. `local:down` keeps the data volumes, so the indexed snapshots
+`adverse-search-service-*` container. `local:down` keeps the data volumes, so the indexed snapshots
 and tenants are still there next time. `pnpm local:reset` is the one that wipes them. Don't run it
 unless you mean to.

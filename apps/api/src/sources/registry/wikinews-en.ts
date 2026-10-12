@@ -52,7 +52,7 @@
  * honest state, not a gap to be closed by whoever reads this next.
  */
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
+import { sourceContentSchema } from '@adverse-search/contracts';
 
 export const WIKINEWS_EN_SOURCE_ID = 'wikinews-en';
 

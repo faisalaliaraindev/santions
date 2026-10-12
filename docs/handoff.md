@@ -1,4 +1,4 @@
-# Handoff — Erly adverse-search service
+# Handoff — Adverse Search Service service
 
 **Date:** 2026-09-10 · **Status:** gates G0, G1, G2 complete; G3 partial · **Audience:** whoever picks this up next
 
@@ -16,7 +16,7 @@ evidence supports the connection.
 
 It is **not** a criminal record check, **not** a proof of identity, **not** a determination of
 guilt, and **not** a sanctions-list engine. A designation found in reporting is a lead to
-verify against the primary list — never a finding. Zquence keeps its sanctions.io integration
+verify against the primary list — never a finding. Target Platform keeps its sanctions.io integration
 and makes the final compliance decision.
 
 Every source, library and model is free to use, open-source, or public data published by the
@@ -74,8 +74,8 @@ Two, not the single monorepo the implementation plan assumes. See decision **D-0
 
 | Repository                       | Contents                                        | Commits |
 | :------------------------------- | :---------------------------------------------- | :------ |
-| `erly-sanction-service-backend`  | API, domain, evaluation, contracts, infra, docs | 5       |
-| `erly-sanction-service-frontend` | React control panel                             | 2       |
+| `adverse-search-service`  | API, domain, evaluation, contracts, infra, docs | 5       |
+| `adverse-search-frontend` | React control panel                             | 2       |
 
 **The cost of the split, and how it is paid.** The plan requires the panel and external
 integrators to invoke the same application services, and forbids a second matching engine in
@@ -314,7 +314,7 @@ From [`open-decisions.md`](./open-decisions.md). **A decision blocks its gate's 
 
 | ID      | Decision                                               | Owner                        | Closes at    |
 | :------ | :----------------------------------------------------- | :--------------------------- | :----------- |
-| **D10** | Minimum identity data an integrator must supply        | Product + Zquence            | G3 — **now** |
+| **D10** | Minimum identity data an integrator must supply        | Product + Target Platform            | G3 — **now** |
 | D12     | Search index: OpenSearch or Meilisearch                | Engineering (by measurement) | G4           |
 | D1      | Which jurisdictions and languages are enabled first    | Source/policy admin          | G5           |
 | D3      | Which categories are on by default                     | Taxonomy admin               | G5           |
@@ -389,7 +389,7 @@ All twelve FR-14 pages against the real API. Closes D11.
 
 ### Phase H — integration, live sources, hardening (G9–G11)
 
-G9 the Zquence contract; **G10 the first live calls this project has ever made** — measuring
+G9 the Target Platform contract; **G10 the first live calls this project has ever made** — measuring
 archive horizons, per-language recall, and populating the coverage matrix; G11 hardening and
 the readiness report.
 

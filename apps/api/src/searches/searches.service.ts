@@ -19,7 +19,7 @@ import type {
   LiveDiscoverySummary,
   SearxngDiscoverySummaryDto,
   SearchSummary,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 import {
   aggregateRun,
   enabledCategories,
@@ -34,7 +34,7 @@ import {
   type EvidenceBand,
   type FindingCounts,
   type SourceCoverageOutcome,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
 import { SourceHealthService } from '../sources/source-health.service.js';

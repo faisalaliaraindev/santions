@@ -1,5 +1,5 @@
 /**
- * `@erly/adverse-contracts` — the public API contract.
+ * `@adverse-search/contracts` — the public API contract.
  *
  * One source of truth for request and response shapes, shared by the API, the generated
  * client and the OpenAPI document. Schemas are strict: unknown fields are rejected rather

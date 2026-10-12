@@ -801,7 +801,7 @@ const DEV_ONLY_CONTROLLERS = process.env['NODE_ENV'] === 'production' ? [] : [De
     },
     {
       // The FR-04 → FR-11 pipeline (Phase E). Every judgement it makes is a pure function from
-      // `@erly/adverse-domain`; this provider only supplies it the I/O it sequences.
+      // `@adverse-search/domain`; this provider only supplies it the I/O it sequences.
       provide: SearchPipeline,
       useFactory: (
         subjects: SubjectsService,

@@ -27,8 +27,8 @@ Two repositories, side by side in the same parent folder:
 
 ```
 sanctions/
-  erly-sanction-service-backend/     <- the API and worker
-  erly-sanction-service-frontend/    <- the control panel
+  adverse-search-service/     <- the API and worker
+  adverse-search-frontend/    <- the control panel
 ```
 
 ---
@@ -38,7 +38,7 @@ sanctions/
 ## Step 1 — Install
 
 ```bash
-cd erly-sanction-service-backend
+cd adverse-search-service
 pnpm install
 ```
 
@@ -157,11 +157,11 @@ unimplemented suite is reported as unverified rather than quietly passing.
 
 ## Step 8 — Import
 
-Import **two** files from `erly-sanction-service-backend/postman/`:
+Import **two** files from `adverse-search-service/postman/`:
 
 | File                                               | What                                            |
 | :------------------------------------------------- | :---------------------------------------------- |
-| `erly-adverse-search-full.postman_collection.json` | The requests                                    |
+| `adverse-search-service-full.postman_collection.json` | The requests                                    |
 | `local.postman_environment.json`                   | The environment template — **no secrets in it** |
 
 Select the environment in the top-right dropdown, then paste your key from step 6 into `apiKey`
@@ -276,7 +276,7 @@ Signup sends a confirmation link. **No mail server runs on this stack**, so the 
 the `outboundEmails` collection — that collection is the inbox (D-058):
 
 ```bash
-docker exec erly-adverse-search-mongo-1 mongosh adverse_search --quiet --eval   'db.outboundEmails.find({kind:"EMAIL_VERIFICATION"}).sort({sentAt:-1}).limit(1).toArray()[0].body'
+docker exec adverse-search-service-mongo-1 mongosh adverse_search --quiet --eval   'db.outboundEmails.find({kind:"EMAIL_VERIFICATION"}).sort({sentAt:-1}).limit(1).toArray()[0].body'
 ```
 
 Take the token out of the body and confirm it:
@@ -324,7 +324,7 @@ curl -X POST http://127.0.0.1:3000/v1/tenant/api-keys \
 ```
 
 **That is the whole phase**: sign up, confirm the address, sign in, issue your own key — with
-nobody at Erly involved at any point. `POST /v1/auth/logout` ends the session, immediately and
+nobody at Adverse Search involved at any point. `POST /v1/auth/logout` ends the session, immediately and
 cluster-wide.
 
 Four things about it are deliberate (D-059):
@@ -352,7 +352,7 @@ customer shares one bucket of five signups an hour — see D-056.
 # Part 4 — The frontend (control panel)
 
 ```bash
-cd ../erly-sanction-service-frontend
+cd ../adverse-search-frontend
 pnpm install
 cp .env.example .env.local
 pnpm dev
@@ -494,7 +494,7 @@ below), or set `environment` to `live` and `subjectJurisdiction` to `US`.
 
 ## The `.env` keys, and what each is for
 
-All live in `erly-sanction-service-backend/.env`. **Blank means the capability is unavailable and
+All live in `adverse-search-service/.env`. **Blank means the capability is unavailable and
 reports as a coverage gap — never as a zero result.** That distinction is deliberate: "we could not
 look" must never render as "there is nothing there".
 

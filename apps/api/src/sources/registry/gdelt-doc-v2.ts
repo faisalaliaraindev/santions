@@ -60,7 +60,7 @@
  * change.
  */
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
+import { sourceContentSchema } from '@adverse-search/contracts';
 
 import { GDELT_TEMPLATE } from './discovery-rungs.js';
 

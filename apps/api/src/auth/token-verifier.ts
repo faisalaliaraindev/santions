@@ -14,7 +14,7 @@
 
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 
-import { isRole, type Principal, type Role } from '@erly/adverse-domain';
+import { isRole, type Principal, type Role } from '@adverse-search/domain';
 
 /**
  * Asymmetric algorithms only. HMAC is excluded on purpose: with a symmetric algorithm the

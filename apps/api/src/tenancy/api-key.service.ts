@@ -31,7 +31,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import { isRole, type Principal, type Role } from '@erly/adverse-domain';
+import { isRole, type Principal, type Role } from '@adverse-search/domain';
 
 export type KeyEnvironment = 'sandbox' | 'live';
 

@@ -178,7 +178,7 @@ export class AccountService {
           to: user.email,
           kind: 'PASSWORD_RESET',
           tenantId: user.tenantId,
-          subject: 'Reset your Erly adverse-search password',
+          subject: 'Reset your Adverse Search Service password',
           body: this.resetBody(token, expiresAt),
         },
         now,
@@ -193,7 +193,7 @@ export class AccountService {
 
   private verificationBody(organisationName: string, token: string, expiresAt: Date): string {
     return [
-      `A tenant was created for ${organisationName} on the Erly adverse-search service.`,
+      `A tenant was created for ${organisationName} on the Adverse Search Service service.`,
       '',
       'Confirm this address to finish setting it up:',
       '',

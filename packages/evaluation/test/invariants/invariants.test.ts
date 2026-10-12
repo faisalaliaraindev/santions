@@ -25,7 +25,7 @@ import {
   type InvariantResult,
   type NoMatchRunSample,
 } from '../../src/index.js';
-import { aggregateRun, renderNoMatchStatement } from '@erly/adverse-domain';
+import { aggregateRun, renderNoMatchStatement } from '@adverse-search/domain';
 
 /** Build the run-level samples I10 is checked against. */
 function noMatchSamples(): readonly NoMatchRunSample[] {

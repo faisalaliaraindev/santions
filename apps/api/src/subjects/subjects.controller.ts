@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common';
 
-import { createSubjectSchema, type SubjectVersion } from '@erly/adverse-contracts';
-import type { Principal } from '@erly/adverse-domain';
+import { createSubjectSchema, type SubjectVersion } from '@adverse-search/contracts';
+import type { Principal } from '@adverse-search/domain';
 
 import { RequirePermission } from '../auth/auth.guard.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';

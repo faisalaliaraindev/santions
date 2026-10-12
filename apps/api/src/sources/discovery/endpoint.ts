@@ -26,7 +26,7 @@
  * in the system assembled from two sources rather than taken whole.
  */
 
-import { screenUrl } from '@erly/adverse-domain';
+import { screenUrl } from '@adverse-search/domain';
 
 import type { ActiveSourceVersion } from '../source-version.service.js';
 

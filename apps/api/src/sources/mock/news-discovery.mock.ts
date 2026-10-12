@@ -29,7 +29,7 @@ import {
 } from '../source-adapter.js';
 import type { DiscoveryQuery, Lead } from '../lead.js';
 import type { ContractProbeResult, NewsDiscoveryPort } from '../news-discovery.port.js';
-import type { FailureSignal } from '@erly/adverse-domain';
+import type { FailureSignal } from '@adverse-search/domain';
 
 import { FIXTURE_LEADS, queryMatchesFixture } from './discovery-fixtures.js';
 

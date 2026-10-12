@@ -8,7 +8,7 @@ make sense in terms of the one before.
 
 | File                                               | What it is                                                      |
 | :------------------------------------------------- | :-------------------------------------------------------------- |
-| `erly-adverse-search-full.postman_collection.json` | All 38 requests, 12 folders                                     |
+| `adverse-search-service-full.postman_collection.json` | All 38 requests, 12 folders                                     |
 | `local.ready.postman_environment.json`             | Every key and name already filled in. **Contains real secrets** |
 
 > `local.ready.postman_environment.json` is git-ignored on purpose. It holds working credentials.

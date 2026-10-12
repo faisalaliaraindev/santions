@@ -39,7 +39,7 @@ import {
   shouldRetry,
   type FailureClass,
   type FailurePolicy,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import {
   InboxReceiptService,

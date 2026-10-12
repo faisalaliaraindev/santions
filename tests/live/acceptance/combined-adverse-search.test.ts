@@ -151,7 +151,7 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   // The honest user agent. Live mode refuses to start without one, which is correct and is why
   // there is no plausible-looking default here.
   FETCH_CONTACT_URL:
-    process.env['FETCH_CONTACT_URL'] ?? 'https://erlystage.com/bots/adverse-search',
+    process.env['FETCH_CONTACT_URL'] ?? 'https://example.com/bots/adverse-search',
 
   AWS_REGION: SQS.region,
   AWS_ENDPOINT_URL: SQS.endpointUrl,

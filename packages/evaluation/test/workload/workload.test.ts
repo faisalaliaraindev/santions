@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { normaliseName } from '@erly/adverse-domain';
+import { normaliseName } from '@adverse-search/domain';
 
 import { SEED_DATASET } from '../../src/dataset/seed.js';
 import {

@@ -20,7 +20,7 @@
  * The gate therefore applies to tenants that **signed themselves up**, which is precisely the
  * population D-052 was reasoning about: a self-signed-up tenant drives traffic to real
  * publishers under our identity, against a rate budget shared by the whole service, and nobody
- * at Erly has spoken to them. A tenant a person onboarded is a tenant a person vouched for.
+ * at Adverse Search has spoken to them. A tenant a person onboarded is a tenant a person vouched for.
  *
  * This is the same shape as `disabledAtOf` in `api-key.service.ts`, and for the same reason: a
  * field added today must not change the meaning of records written before it existed.

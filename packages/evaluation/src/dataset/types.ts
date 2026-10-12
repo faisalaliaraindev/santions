@@ -18,7 +18,7 @@ import type {
   PartyRole,
   StageValue,
   TenureLabel,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 export type DatasetSplit = 'TUNING' | 'HELD_OUT';
 

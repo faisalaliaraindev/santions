@@ -35,7 +35,7 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   type PasswordRejection,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 
 /**
  * `Algorithm.Argon2id`, by value.

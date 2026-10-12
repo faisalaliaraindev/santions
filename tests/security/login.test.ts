@@ -222,7 +222,7 @@ describe('I3 — a password buys a session that works like any other', () => {
 
   it('issues the tenant its first API key from a session, with no operator involved', async () => {
     // The whole point of the phase, reachable for the first time here: signup, confirm, sign in,
-    // issue a key — nobody at Erly touched it.
+    // issue a key — nobody at Adverse Search touched it.
     const account = await signUp();
     await confirm(account);
     const { body } = await logIn(account.email, account.password);

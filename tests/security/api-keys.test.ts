@@ -78,7 +78,7 @@ async function issue(
     label: 'integration test key',
     roles: ['analyst'],
     scopes: overrides.scopes ?? ['search:read', 'search:write'],
-    createdBy: 'operator@erly.test',
+    createdBy: 'operator@example.com',
     expiresAt: overrides.expiresAt ?? null,
   });
   return { ...issued, tenantId };
@@ -187,7 +187,7 @@ describe('T68 — the secret is shown once and stored hashed', () => {
     const live = await issue({ environment: 'live' });
 
     expect(sandbox.secret.startsWith('erly_sandbox_')).toBe(true);
-    expect(live.secret.startsWith('erly_live_')).toBe(true);
+    expect(live.secret.startsWith('asvc_live_')).toBe(true);
   });
 });
 
@@ -238,7 +238,7 @@ describe('T68 — a key authenticates, and a broken one does not', () => {
     // The most plausible tampering: a sandbox key rewritten to claim live. It must fail even
     // though the key ID and secret are genuine.
     const key = await issue({ environment: 'sandbox' });
-    const escalated = key.secret.replace('erly_sandbox_', 'erly_live_');
+    const escalated = key.secret.replace('erly_sandbox_', 'asvc_live_');
 
     const response = await request(app.getHttpServer())
       .get('/v1/searches')
@@ -281,7 +281,7 @@ describe('T68 — rotation and revocation are audited', () => {
 
     const rotated = await apiKeys.rotate({
       keyId: key.keyId,
-      actor: 'operator@erly.test',
+      actor: 'operator@example.com',
       reason: 'suspected exposure in a build log',
     });
 
@@ -306,7 +306,7 @@ describe('T68 — rotation and revocation are audited', () => {
     const key = await issue();
     await apiKeys.revoke({
       keyId: key.keyId,
-      actor: 'operator@erly.test',
+      actor: 'operator@example.com',
       reason: 'tenant offboarded',
     });
 
@@ -319,10 +319,10 @@ describe('T68 — rotation and revocation are audited', () => {
 
   it('will not rotate a revoked key back into service', async () => {
     const key = await issue();
-    await apiKeys.revoke({ keyId: key.keyId, actor: 'operator@erly.test', reason: 'offboarded' });
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'operator@example.com', reason: 'offboarded' });
 
     await expect(
-      apiKeys.rotate({ keyId: key.keyId, actor: 'operator@erly.test', reason: 'oops' }),
+      apiKeys.rotate({ keyId: key.keyId, actor: 'operator@example.com', reason: 'oops' }),
     ).rejects.toBeInstanceOf(ApiKeyError);
   });
 
@@ -331,12 +331,12 @@ describe('T68 — rotation and revocation are audited', () => {
       const key = await issue();
       await apiKeys.rotate({
         keyId: key.keyId,
-        actor: 'alice@erly.test',
+        actor: 'alice@example.com',
         reason: 'quarterly rotation',
       });
       await apiKeys.revoke({
         keyId: key.keyId,
-        actor: 'bob@erly.test',
+        actor: 'bob@example.com',
         reason: 'contract ended',
       });
 
@@ -348,17 +348,17 @@ describe('T68 — rotation and revocation are audited', () => {
 
       // An unexplained revocation is indistinguishable from an outage when somebody
       // investigates it three months later.
-      expect(revoked?.actor).toBe('bob@erly.test');
+      expect(revoked?.actor).toBe('bob@example.com');
       expect(revoked?.reason).toBe('contract ended');
-      expect(rotated?.actor).toBe('alice@erly.test');
+      expect(rotated?.actor).toBe('alice@example.com');
       expect(rotated?.reason).toBe('quarterly rotation');
     })();
   });
 
   it('is idempotent on a second revocation, and does not double-audit it', async () => {
     const key = await issue();
-    await apiKeys.revoke({ keyId: key.keyId, actor: 'operator@erly.test', reason: 'first' });
-    await apiKeys.revoke({ keyId: key.keyId, actor: 'operator@erly.test', reason: 'second' });
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'operator@example.com', reason: 'first' });
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'operator@example.com', reason: 'second' });
 
     const audit = await apiKeys.auditFor(key.keyId);
     expect(audit.filter((entry) => entry.event === 'REVOKED')).toHaveLength(1);
@@ -455,7 +455,7 @@ describe('self-service key issuance (D-050) cannot become a way to get more', ()
       label: 'tenant admin, self-service tests',
       roles: ['tenant_admin'],
       scopes: ['search:read', 'admin:read', 'admin:write'],
-      createdBy: 'operator@erly.test',
+      createdBy: 'operator@example.com',
       expiresAt: null,
     });
     return { ...issued, tenantId };
@@ -628,7 +628,7 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
       label: 'tenant admin, disable/enable tests',
       roles: ['tenant_admin'],
       scopes: ['search:read', 'admin:read', 'admin:write'],
-      createdBy: 'operator@erly.test',
+      createdBy: 'operator@example.com',
       expiresAt: null,
     });
     return { ...issued, tenantId };
@@ -649,7 +649,7 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
 
   it('refuses a disabled key, and says DISABLED rather than REVOKED', async () => {
     const key = await issue();
-    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'paused' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'paused' });
 
     expect(await rejectionFor(key.secret)).toBe('DISABLED');
 
@@ -663,8 +663,8 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
 
   it('brings the same secret back on enable, with no re-issue', async () => {
     const key = await issue();
-    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'paused' });
-    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'resumed' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'paused' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'resumed' });
 
     // Same secret, same key id: a tenant configuration holding it needs no edit. This is the
     // whole difference from revocation, which would force a new credential.
@@ -675,7 +675,7 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
 
   it('leaves revokedAt untouched when disabling, and keeps the two fields apart', async () => {
     const key = await issue();
-    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'paused' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'paused' });
 
     const keys = mongo.db().collection('apiKeyCredentials');
     const disabled = await keys.findOne({ keyId: key.keyId });
@@ -684,7 +684,7 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
     // If this is ever not null, disable has become revoke and the reversible half is a lie.
     expect(disabled?.['revokedAt']).toBeNull();
 
-    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'leaked after all' });
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@example.com', reason: 'leaked after all' });
     const revoked = await keys.findOne({ keyId: key.keyId });
     // Revoking a paused key is a real sequence — "paused" turning out to be "compromised" — and
     // it does not un-happen the pause.
@@ -694,10 +694,10 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
 
   it('will not enable a revoked key back into service', async () => {
     const key = await issue();
-    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'leaked' });
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@example.com', reason: 'leaked' });
 
     await expect(
-      apiKeys.enable({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'we changed our minds' }),
+      apiKeys.enable({ keyId: key.keyId, actor: 'bob@example.com', reason: 'we changed our minds' }),
     ).rejects.toBeInstanceOf(ApiKeyError);
 
     // And it is still refused, for the reason it was refused before.
@@ -706,10 +706,10 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
 
   it('will not disable a revoked key, because that would imply enable could undo it', async () => {
     const key = await issue();
-    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'leaked' });
+    await apiKeys.revoke({ keyId: key.keyId, actor: 'bob@example.com', reason: 'leaked' });
 
     await expect(
-      apiKeys.disable({ keyId: key.keyId, actor: 'bob@erly.test', reason: 'pause it' }),
+      apiKeys.disable({ keyId: key.keyId, actor: 'bob@example.com', reason: 'pause it' }),
     ).rejects.toBeInstanceOf(ApiKeyError);
   });
 
@@ -717,17 +717,17 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
     // Disable, replace the secret, enable is the ordinary rotation sequence. Rotation replaces
     // a secret; it is neither an off switch nor an on switch.
     const key = await issue();
-    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'rotating' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'rotating' });
 
     const rotated = await apiKeys.rotate({
       keyId: key.keyId,
-      actor: 'alice@erly.test',
+      actor: 'alice@example.com',
       reason: 'rotating',
     });
     expect(rotated.secret).not.toBe(key.secret);
     expect(await rejectionFor(rotated.secret)).toBe('DISABLED');
 
-    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'rotation done' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'rotation done' });
     await expect(apiKeys.verify(rotated.secret)).resolves.toBeDefined();
     // The pre-rotation secret is gone for good, enabled or not.
     expect(await rejectionFor(key.secret)).toBe('BAD_SECRET');
@@ -735,10 +735,10 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
 
   it('is idempotent both ways, and does not audit a change that did not happen', async () => {
     const key = await issue();
-    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'first' });
-    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'second' });
-    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'back on' });
-    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@erly.test', reason: 'back on again' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'first' });
+    await apiKeys.disable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'second' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'back on' });
+    await apiKeys.enable({ keyId: key.keyId, actor: 'alice@example.com', reason: 'back on again' });
 
     const audit = await apiKeys.auditFor(key.keyId);
     expect(audit.filter((entry) => entry.event === 'DISABLED')).toHaveLength(1);
@@ -751,19 +751,19 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
     const key = await issue();
     await apiKeys.disable({
       keyId: key.keyId,
-      actor: 'alice@erly.test',
+      actor: 'alice@example.com',
       reason: 'integration paused',
     });
     await apiKeys.enable({
       keyId: key.keyId,
-      actor: 'bob@erly.test',
+      actor: 'bob@example.com',
       reason: 'integration resumed',
     });
 
     const audit = await apiKeys.auditFor(key.keyId);
     expect(audit.map((entry) => entry.event)).toEqual(['ENABLED', 'DISABLED', 'CREATED']);
-    expect(audit.find((entry) => entry.event === 'DISABLED')?.actor).toBe('alice@erly.test');
-    expect(audit.find((entry) => entry.event === 'ENABLED')?.actor).toBe('bob@erly.test');
+    expect(audit.find((entry) => entry.event === 'DISABLED')?.actor).toBe('alice@example.com');
+    expect(audit.find((entry) => entry.event === 'ENABLED')?.actor).toBe('bob@example.com');
     expect(audit.find((entry) => entry.event === 'ENABLED')?.reason).toBe('integration resumed');
   });
 
@@ -837,7 +837,7 @@ describe('I4 — disable is reversible, revoke is not, and they are different fi
       tenantId: admin.tenantId,
       expiresAt: new Date(Date.now() - 60_000),
     });
-    await apiKeys.disable({ keyId: expired.keyId, actor: 'alice@erly.test', reason: 'paused' });
+    await apiKeys.disable({ keyId: expired.keyId, actor: 'alice@example.com', reason: 'paused' });
 
     const listed = await request(app.getHttpServer())
       .get('/v1/tenant/api-keys')

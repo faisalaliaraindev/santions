@@ -55,7 +55,7 @@ import {
   type SourceCoverageOutcome,
   type SourceHealth,
   type StopConditionPolicy,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { ApiException } from '../common/api-exception.js';
 import { AuditService } from '../persistence/audit.service.js';

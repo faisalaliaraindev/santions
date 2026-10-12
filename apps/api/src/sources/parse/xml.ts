@@ -37,7 +37,7 @@
 
 import { XMLParser } from 'fast-xml-parser';
 
-import type { FailureSignal } from '@erly/adverse-domain';
+import type { FailureSignal } from '@adverse-search/domain';
 
 /**
  * Bumped whenever the parse changes (FR-05 volatility control), and carried on every adapter

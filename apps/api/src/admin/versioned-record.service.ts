@@ -16,7 +16,7 @@
  *
  * **Where the decisions actually live.** This service performs no policy reasoning of its own:
  *
- * - which transitions are legal → `canTransition` (`@erly/adverse-domain`)
+ * - which transitions are legal → `canTransition` (`@adverse-search/domain`)
  * - whether the approver may approve → `canApprove`, enforced on identity, not on role
  * - whether the data may be touched at all → `decideRights` / `clearForActivation` (SEC-05)
  *
@@ -57,7 +57,7 @@ import {
   type RightsRequest,
   type TaxonomyRefusal,
   type TaxonomyVersion,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { ApiException } from '../common/api-exception.js';
 import { assertContentConforms } from './source-content.js';

@@ -135,7 +135,7 @@ async function tenantAdminKey(
     label: 'tenant admin, signup tests',
     roles: ['tenant_admin'],
     scopes: ['search:read', 'admin:read', 'admin:write'],
-    createdBy: 'operator@erly.test',
+    createdBy: 'operator@example.com',
     expiresAt: null,
   });
 }
@@ -148,7 +148,7 @@ async function analystKey(tenantId: string): Promise<IssuedApiKey> {
     label: 'analyst, signup tests',
     roles: ['analyst'],
     scopes: ['search:read', 'search:write'],
-    createdBy: 'operator@erly.test',
+    createdBy: 'operator@example.com',
     expiresAt: null,
   });
 }

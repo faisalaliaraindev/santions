@@ -108,7 +108,7 @@
       "newCaptchaLogEntries": 0,
       "recordedErrorsForEngine": "50% SearxEngineCaptchaException — unchanged absolute count, halved because this successful request is now the second sample",
       "evidence": [
-        "`docker logs erly-adverse-search-searxng-1 | grep -i google` shows exactly two entries, at",
+        "`docker logs adverse-search-service-searxng-1 | grep -i google` shows exactly two entries, at",
         "09:30:52 and 10:51:32, both predating this run. No entry was written by it.",
         "",
         "`GET /stats/errors` moved `google news` from 100% to 50% on the same single ErrorContext, which",

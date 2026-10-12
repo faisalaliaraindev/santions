@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Db } from 'mongodb';
 
-import type { TaxonomyVersion } from '@erly/adverse-domain';
+import type { TaxonomyVersion } from '@adverse-search/domain';
 
 import { loadConfig } from '../src/config/config.js';
 import { FetchGateService } from '../src/sources/fetch-gate.service.js';
@@ -52,7 +52,7 @@ import type {
 } from '../src/sources/source-version.service.js';
 
 const NOW = new Date('2026-09-23T12:00:00.000Z');
-const TENANT = 'tenant-zquence';
+const TENANT = 'tenant-target-platform';
 const OTHER_TENANT = 'tenant-other';
 
 const POLICY: LocalDiagnosticPolicy = {
@@ -94,7 +94,7 @@ describe('every condition is required', () => {
       NODE_ENV: 'production',
       ADVERSE_SEARCH_MODE: 'live',
       MONGODB_URI: 'mongodb://db.internal:27017/x',
-      OIDC_ISSUER: 'https://id.erlystage.com/realms/x',
+      OIDC_ISSUER: 'https://id.example.com/realms/x',
       OIDC_CLIENT_ID: 'panel',
       OIDC_CLIENT_SECRET: 'a-real-looking-secret-value',
       SESSION_SECRET: 'a-real-looking-session-secret',
@@ -105,7 +105,7 @@ describe('every condition is required', () => {
   });
 
   it('refuses a request that was not made to and from loopback', () => {
-    expect(decideLocalDiagnostic(POLICY, { ...REQUEST, hostname: 'api.erlystage.com' }).kind).toBe(
+    expect(decideLocalDiagnostic(POLICY, { ...REQUEST, hostname: 'api.example.com' }).kind).toBe(
       'REFUSED',
     );
     expect(decideLocalDiagnostic(POLICY, { ...REQUEST, remoteAddress: '10.0.0.4' }).kind).toBe(
@@ -315,7 +315,7 @@ function harness(policy: LocalDiagnosticPolicy | undefined) {
     versions,
     gate: new FetchGateService(versions, 'LIVE', {
       mode: 'LIVE',
-      contactUrl: 'https://erlystage.com/bots/adverse-search',
+      contactUrl: 'https://example.com/bots/adverse-search',
       region: 'eu-west-2',
     }),
     client: new SearxngClient(base.base, transport),

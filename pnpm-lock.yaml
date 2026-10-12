@@ -93,10 +93,10 @@ importers:
       '@aws-sdk/client-sqs':
         specifier: ^3.1130.0
         version: 3.1130.0
-      '@erly/adverse-contracts':
+      '@adverse-search/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@erly/adverse-domain':
+      '@adverse-search/domain':
         specifier: workspace:*
         version: link:../../packages/domain
       '@nestjs/common':
@@ -151,13 +151,13 @@ importers:
 
   packages/client:
     dependencies:
-      '@erly/adverse-contracts':
+      '@adverse-search/contracts':
         specifier: workspace:*
         version: link:../contracts
 
   packages/contracts:
     dependencies:
-      '@erly/adverse-domain':
+      '@adverse-search/domain':
         specifier: workspace:*
         version: link:../domain
       zod:
@@ -171,7 +171,7 @@ importers:
 
   packages/evaluation:
     dependencies:
-      '@erly/adverse-domain':
+      '@adverse-search/domain':
         specifier: workspace:*
         version: link:../domain
 

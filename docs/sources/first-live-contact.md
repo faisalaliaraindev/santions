@@ -38,7 +38,7 @@ No other publisher has ever received a request from this service.
 
 - **HTTP 200**, 916 bytes, `text/plain`
 - Verdict for `/enforcement-litigation/litigation-releases/rss`: **ALLOWED**
-- User agent: `ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)`
+- User agent: `ErlyAdverseSearch/1.0 (+https://example.com/bots/adverse-search)`
 
 **Evidence:** [`sec-robots-evidence.json`](./sec-robots-evidence.json), written by the script at
 the time of the request. This is the moment the sentence stopped being true.

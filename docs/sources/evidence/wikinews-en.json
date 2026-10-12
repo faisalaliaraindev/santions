@@ -3,7 +3,7 @@
   "sourceName": "English Wikinews",
   "publisher": "Wikimedia Foundation",
   "canonicalDomain": "en.wikinews.org",
-  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
   "authorisingDecision": {
     "decision": "D22",
     "approvedBy": "Faisal Ali",

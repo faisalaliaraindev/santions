@@ -1,5 +1,5 @@
 /**
- * `@erly/adverse-domain` — pure domain core.
+ * `@adverse-search/domain` — pure domain core.
  *
  * Everything exported here is a pure function or a type. No I/O, no database, no network,
  * no clock reads. That is a hard constraint, not a preference: `pnpm test:invariants` runs

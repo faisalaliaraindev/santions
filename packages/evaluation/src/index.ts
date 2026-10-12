@@ -1,7 +1,7 @@
 /**
- * `@erly/adverse-evaluation` — labelled dataset, FR-16 metrics and the I1-I10 harness.
+ * `@adverse-search/evaluation` — labelled dataset, FR-16 metrics and the I1-I10 harness.
  *
- * Like `@erly/adverse-domain`, this package performs no I/O. The invariant harness is a
+ * Like `@adverse-search/domain`, this package performs no I/O. The invariant harness is a
  * release gate that must run on every pull request without infrastructure.
  */
 

@@ -7,21 +7,21 @@
 
 ---
 
-## G9 — Zquence contract and external-client proof
+## G9 — Target Platform contract and external-client proof
 
 Typed Node client and runnable machine-client examples. A callback fixture that verifies
 signatures and handles replay, duplicates and out-of-order delivery. Tests for external subject
 references, tenant grants, token revocation, sandbox and live keys, and entitlement denials.
 
-Document how Zquence displays sanctions.io results and adverse-search results as **separate,
+Document how Target Platform displays sanctions.io results and adverse-search results as **separate,
 clearly labelled sections**. A designation reported in media is a lead to verify against the
 primary list — never rendered as a sanctions hit.
 
-Zquence-side work needs separate workspace access. Until it is granted, the client, receiver
+Target Platform-side work needs separate workspace access. Until it is granted, the client, receiver
 fixture and contract tests live in this repository.
 
 **Exit:** a local client submits, polls or receives notification, retrieves scoped evidence and
-handles failure. A disabled capability is rejected as an entitlement issue. No Zquence database
+handles failure. A disabled capability is rejected as an entitlement issue. No Target Platform database
 dependency exists.
 
 ---

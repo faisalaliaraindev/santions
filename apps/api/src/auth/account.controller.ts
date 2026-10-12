@@ -29,7 +29,7 @@ import {
   type EmailRequestInput,
   type ResetPasswordInput,
   type ResetPasswordResult,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 
 import { ApiException } from '../common/api-exception.js';
 import { validate } from '../common/zod-validation.pipe.js';

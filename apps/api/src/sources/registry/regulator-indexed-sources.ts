@@ -1,4 +1,4 @@
-import { sourceContentSchema, type SourceAccessPolicy } from '@erly/adverse-contracts';
+import { sourceContentSchema, type SourceAccessPolicy } from '@adverse-search/contracts';
 
 export const DOJ_FRAUD_SOURCE_ID = 'doj-fraud-enforcement';
 export const CFTC_ENFORCEMENT_SOURCE_ID = 'cftc-enforcement-press-releases';

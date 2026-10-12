@@ -26,7 +26,7 @@
  * # What this suite is NOT
  *
  * **It is not the browser end-to-end suite.** That one belongs to gate **G8** and mostly lives in
- * `erly-sanction-service-frontend`; `pnpm test:e2e` stays unimplemented until then and
+ * `adverse-search-frontend`; `pnpm test:e2e` stays unimplemented until then and
  * `verify:local` keeps reporting it as unverified. Letting an API-level suite satisfy that entry
  * would be a gate going green without being met, which is the exact failure `verify-local.mjs`
  * says it exists to prevent.

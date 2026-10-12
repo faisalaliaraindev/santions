@@ -65,7 +65,7 @@ import {
   type ResolutionStatus,
   type SourceCoverageOutcome,
   type Tenure,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { CapabilityCoverageService } from '../admin/capability-coverage.service.js';
 import { ApiException } from '../common/api-exception.js';

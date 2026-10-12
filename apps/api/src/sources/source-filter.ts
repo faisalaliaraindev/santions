@@ -1,4 +1,4 @@
-import type { SourceCoverageOutcome } from '@erly/adverse-domain';
+import type { SourceCoverageOutcome } from '@adverse-search/domain';
 
 /**
  * A source the request's `sources` filter left out.

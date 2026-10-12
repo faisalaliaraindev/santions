@@ -59,7 +59,7 @@
 
 import { Logger } from '@nestjs/common';
 
-import type { CountryCode } from '@erly/adverse-domain';
+import type { CountryCode } from '@adverse-search/domain';
 
 import { buildEndpoint } from './discovery/endpoint.js';
 import { endpointDigest, hostOf, type DiscoveryRequestLog } from './discovery-request-log.js';

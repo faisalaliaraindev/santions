@@ -1,13 +1,13 @@
 # Integrating adverse search into your platform — testing the flow in Postman first
 
-Written for a **tenant integrating this service into their own product** (Zquence or anyone else).
+Written for a **tenant integrating this service into their own product** (Target Platform or anyone else).
 It walks the exact calls your platform will make, in Postman, before you write a line of code.
 
 By the end you will know: which endpoints you need, what to store on your side, what to show your
 users, and what this service deliberately will not tell you.
 
-- Conceptual background: [`../docs/integration/zquence.md`](../docs/integration/zquence.md)
-- The same walkthrough in code: [`../examples/zquence-integration.mjs`](../examples/zquence-integration.mjs)
+- Conceptual background: [`../docs/integration/target-platform.md`](../docs/integration/target-platform.md)
+- The same walkthrough in code: [`../examples/target-platform-integration.mjs`](../examples/target-platform-integration.mjs)
 - What each endpoint is for: [`TESTING-GUIDE.md`](./TESTING-GUIDE.md)
 
 ---
@@ -28,7 +28,7 @@ another tenant, and you cannot read another tenant's searches — there is a req
 ### Getting a tenant
 
 **You create your own tenant** (decision **D-053**, phase I step I1). No invite code, no
-credential, nobody at Erly involved:
+credential, nobody at Adverse Search involved:
 
 ```http
 POST /v1/signup     { "organisationName": "...", "contactEmail": "...", "password": "..." }
@@ -54,7 +54,7 @@ Signups are bounded per client address; the sixth in an hour answers `429`, whic
 one, so the provider issues it:
 
 ```bash
-pnpm key:issue --role tenant_admin --label "Zquence production"
+pnpm key:issue --role tenant_admin --label "Target Platform production"
 ```
 
 The password creates your tenant's **administrator** in the same transaction. It is stored as an
@@ -92,7 +92,7 @@ every route works as it does with an API key, including issuing your first one:
 POST /v1/tenant/api-keys   Authorization: Session <token>
 ```
 
-So the whole path is yours: sign up, confirm, sign in, issue a key. Nobody at Erly is involved.
+So the whole path is yours: sign up, confirm, sign in, issue a key. Nobody at Adverse Search is involved.
 
 Four things to build around:
 
@@ -147,7 +147,7 @@ refused with `SANDBOX_CANNOT_ACCESS_LIVE`. That is a guard rail, not a bug.
 
 Import from this folder:
 
-- `erly-adverse-search-full.postman_collection.json`
+- `adverse-search-service-full.postman_collection.json`
 - `local.ready.postman_environment.json` — then select it in the top-right dropdown
 
 Paste your key into the `apiKey` environment variable and save (Ctrl+S).
@@ -372,10 +372,10 @@ Once the flow works in Postman, the mapping is direct:
 | `Findings and coverage`       | Your review screen — **render both** |
 | `10 — Refusals worth seeing`  | Your error-handling test suite       |
 
-`examples/zquence-integration.mjs` is the same walkthrough in code:
+`examples/target-platform-integration.mjs` is the same walkthrough in code:
 
 ```bash
-node examples/zquence-integration.mjs --api-key <key> --name "María Fernanda Solís Rojas"
+node examples/target-platform-integration.mjs --api-key <key> --name "María Fernanda Solís Rojas"
 ```
 
 Generate a typed client from `openapi/openapi.json` rather than hand-writing one. The document is

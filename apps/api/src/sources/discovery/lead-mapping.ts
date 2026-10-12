@@ -16,7 +16,7 @@
  * counting one story as two independent sources (FR-10).
  */
 
-import { canonicalise, screenUrl, type PreciseDate } from '@erly/adverse-domain';
+import { canonicalise, screenUrl, type PreciseDate } from '@adverse-search/domain';
 
 import type { CascadeRung, DiscoveryAttribution, Lead } from '../lead.js';
 import type { AdapterProvenance } from '../source-adapter.js';

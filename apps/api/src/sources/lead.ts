@@ -17,7 +17,7 @@
  * ports differ in how they are *asked*, not in what they return.
  */
 
-import type { CascadeRung, PreciseDate, QueryFamily, TaxonomyVersion } from '@erly/adverse-domain';
+import type { CascadeRung, PreciseDate, QueryFamily, TaxonomyVersion } from '@adverse-search/domain';
 
 import type { AdapterProvenance } from './source-adapter.js';
 

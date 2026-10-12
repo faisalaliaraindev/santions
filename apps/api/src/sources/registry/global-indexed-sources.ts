@@ -1,4 +1,4 @@
-import { sourceContentSchema, type SourceAccessPolicy } from '@erly/adverse-contracts';
+import { sourceContentSchema, type SourceAccessPolicy } from '@adverse-search/contracts';
 
 export const OFAC_SDN_SOURCE_ID = 'ofac-sdn';
 export const OFAC_NON_SDN_SOURCE_ID = 'ofac-consolidated-non-sdn';

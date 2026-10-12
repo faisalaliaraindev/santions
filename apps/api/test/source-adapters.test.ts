@@ -40,7 +40,7 @@ import {
   type SourceOutcome,
 } from '../src/sources/source-adapter.js';
 import { buildSourceAdapters } from '../src/sources/sources.registry.js';
-import { labelTenure } from '@erly/adverse-domain';
+import { labelTenure } from '@adverse-search/domain';
 
 const witness = MockModeWitness.require('MOCK');
 

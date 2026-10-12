@@ -121,7 +121,7 @@
     },
     {
       "clientId": "adverse-search-machine",
-      "name": "Machine client (integrators such as Zquence)",
+      "name": "Machine client (integrators such as Target Platform)",
       "description": "Client credentials with an audience-bound short-lived token. Browser bundles never contain this secret.",
       "enabled": true,
       "protocol": "openid-connect",

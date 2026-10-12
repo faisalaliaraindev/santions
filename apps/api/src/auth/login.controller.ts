@@ -33,7 +33,7 @@ import {
   type LoginInput,
   type LoginResult,
   type LogoutResult,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 
 import { AttemptLimitExceeded, AttemptLimiter, LOGIN_POLICY } from '../common/attempt-limiter.js';
 import { ApiException } from '../common/api-exception.js';

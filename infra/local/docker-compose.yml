@@ -11,7 +11,7 @@
 # Named project-local volumes only. `pnpm local:down` stops without deleting them;
 # `pnpm local:reset` deletes them behind an explicit confirmation.
 
-name: erly-adverse-search
+name: adverse-search-service
 
 services:
   # MongoDB as a single-node replica set. A standalone mongod cannot do transactions, and

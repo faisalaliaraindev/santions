@@ -54,7 +54,7 @@
  * fetch time rather than trusting this record.
  */
 
-import { sourceContentSchema, type SourceAccessPolicy } from '@erly/adverse-contracts';
+import { sourceContentSchema, type SourceAccessPolicy } from '@adverse-search/contracts';
 
 import {
   SEC_POLL_FLOOR_MS,

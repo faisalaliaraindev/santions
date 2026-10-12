@@ -116,10 +116,10 @@ const TEST_ENV: NodeJS.ProcessEnv = {
   // FR-06 refuses to build a live fetch adapter without an honest contact URL. Nothing in this
   // suite should reach it, and that is precisely what the suite asserts.
   FETCH_CONTACT_URL:
-    process.env['FETCH_CONTACT_URL'] ?? 'https://erlystage.com/bots/adverse-search',
+    process.env['FETCH_CONTACT_URL'] ?? 'https://example.com/bots/adverse-search',
   OUTBOUND_USER_AGENT:
     process.env['OUTBOUND_USER_AGENT'] ??
-    'ErlyAdverseSearch/0.1 (+https://erlystage.com/bots/adverse-search)',
+    'ErlyAdverseSearch/0.1 (+https://example.com/bots/adverse-search)',
 
   AWS_REGION: SQS.region,
   AWS_ENDPOINT_URL: SQS.endpointUrl,

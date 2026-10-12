@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { ADVERSE_CATEGORIES } from '@erly/adverse-domain';
+import { ADVERSE_CATEGORIES } from '@adverse-search/domain';
 
 import {
   CREATED_VIA_SIGNUP,

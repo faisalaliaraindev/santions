@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
+import { sourceContentSchema } from '@adverse-search/contracts';
 
 import {
   SEC_LITIGATION_RELEASES_CONTENT,

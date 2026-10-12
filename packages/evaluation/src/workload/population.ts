@@ -26,7 +26,7 @@
  * person or company.
  */
 
-import { normaliseName, phoneticKeys } from '@erly/adverse-domain';
+import { normaliseName, phoneticKeys } from '@adverse-search/domain';
 
 import { SEED_DATASET } from '../dataset/seed.js';
 

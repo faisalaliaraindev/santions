@@ -40,13 +40,13 @@ import {
   type ProposeVersionInput,
   type UpdateDraftInput,
   type VersionSummary,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 import {
   CAPABILITIES,
   permissionsForRoles,
   type Principal,
   type RightsClearance,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { ApiException } from '../common/api-exception.js';

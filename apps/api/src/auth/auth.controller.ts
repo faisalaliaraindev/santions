@@ -15,8 +15,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Controller, Get, Inject, Post, Query, Req, Res, VERSION_NEUTRAL } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
-import { isRole, type Role } from '@erly/adverse-domain';
-import type { SessionInfo } from '@erly/adverse-contracts';
+import { isRole, type Role } from '@adverse-search/domain';
+import type { SessionInfo } from '@adverse-search/contracts';
 
 import { ApiException } from '../common/api-exception.js';
 import { APP_CONFIG } from '../tokens.js';

@@ -113,7 +113,7 @@ describe('health lives beside the immutable version, never inside it', () => {
     await health.engage({
       sourceId,
       reason: 'Publisher complaint',
-      actor: 'ops@erly',
+      actor: 'ops@example.com',
       tenantId: TENANT,
       now: NOW,
     });
@@ -126,7 +126,7 @@ describe('health lives beside the immutable version, never inside it', () => {
       .collection<{ _id: string } & Record<string, unknown>>('sourceHealth')
       .findOne({ _id: sourceId });
     expect(stored).not.toBeNull();
-    expect(stored?.['killSwitch']).toMatchObject({ engagedBy: 'ops@erly' });
+    expect(stored?.['killSwitch']).toMatchObject({ engagedBy: 'ops@example.com' });
     // A reference to the version observed, not a copy of it.
     expect(stored?.['observedVersion']).toBe(4);
     expect(stored?.['sourceName']).toBeUndefined();
@@ -211,7 +211,7 @@ describe('the kill switch (T36, FI-18)', () => {
     await health.engage({
       sourceId,
       reason: 'Rights violation reported by the publisher',
-      actor: 'ops@erly',
+      actor: 'ops@example.com',
       tenantId: TENANT,
       now: new Date(NOW.getTime() + 1000),
     });
@@ -226,7 +226,7 @@ describe('the kill switch (T36, FI-18)', () => {
     expect(check.decision.refusal).toBe('KILL_SWITCH_ENGAGED');
     expect(check.coverageOutcome?.outcome).toBe('SUSPENDED');
     expect(check.coverageOutcome?.detail).toContain('Rights violation reported by the publisher');
-    expect(check.coverageOutcome?.detail).toContain('ops@erly');
+    expect(check.coverageOutcome?.detail).toContain('ops@example.com');
     // The refusal is never a silent skip: it says what it cost the run.
     expect(check.coverageOutcome?.queriesAffected).toBe(7);
   });
@@ -247,7 +247,7 @@ describe('the kill switch (T36, FI-18)', () => {
     await health.engage({
       sourceId,
       reason: 'Blocked us from three identities',
-      actor: 'ops@erly',
+      actor: 'ops@example.com',
       tenantId: TENANT,
       now: NOW,
     });
@@ -266,7 +266,7 @@ describe('the kill switch (T36, FI-18)', () => {
     await health.engage({
       sourceId,
       reason: 'first',
-      actor: 'ops@erly',
+      actor: 'ops@example.com',
       tenantId: TENANT,
       now: NOW,
     });
@@ -274,7 +274,7 @@ describe('the kill switch (T36, FI-18)', () => {
       health.engage({
         sourceId,
         reason: 'second',
-        actor: 'other@erly',
+        actor: 'other@example.com',
         tenantId: TENANT,
         now: NOW,
       }),
@@ -287,7 +287,7 @@ describe('the kill switch (T36, FI-18)', () => {
     await health.engage({
       sourceId,
       reason: 'r',
-      actor: 'ops@erly',
+      actor: 'ops@example.com',
       tenantId: TENANT,
       now: NOW,
     });
@@ -296,7 +296,7 @@ describe('the kill switch (T36, FI-18)', () => {
       health.release({
         sourceId,
         reason: 'resolved',
-        actor: 'ops@erly',
+        actor: 'ops@example.com',
         tenantId: TENANT,
         now: NOW,
       }),
@@ -305,7 +305,7 @@ describe('the kill switch (T36, FI-18)', () => {
     const released = await health.release({
       sourceId,
       reason: 'Publisher confirmed the complaint was withdrawn',
-      actor: 'legal@erly',
+      actor: 'legal@example.com',
       tenantId: TENANT,
       now: NOW,
     });
@@ -323,7 +323,7 @@ describe('the kill switch (T36, FI-18)', () => {
     await health.engage({
       sourceId,
       reason: 'Publisher withdrew permission',
-      actor: 'ops@erly',
+      actor: 'ops@example.com',
       tenantId: TENANT,
       now: NOW,
     });

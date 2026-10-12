@@ -37,7 +37,7 @@ import type {
   ExtractionModelPort,
   TextSpan,
 } from '../extraction-model.port.js';
-import type { AdverseCategory, PartyRole, StageValue } from '@erly/adverse-domain';
+import type { AdverseCategory, PartyRole, StageValue } from '@adverse-search/domain';
 
 export const MOCK_EXTRACTION_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'mock-extraction',
@@ -71,7 +71,7 @@ const STAGE_KEYWORDS: readonly { readonly term: string; readonly stage: StageVal
 /**
  * Keyword → taxonomy category. Only emitted when the tenant has the category enabled.
  *
- * The ids are the **real** `AdverseCategory` values from `@erly/adverse-domain`, not a local
+ * The ids are the **real** `AdverseCategory` values from `@adverse-search/domain`, not a local
  * spelling. An earlier version of this file invented kebab-case ids (`fraud-financial-crime`),
  * which typechecked because `categoryId` is a string and matched nothing because the taxonomy
  * uses `FRAUD_FINANCIAL_CRIME`. Every extraction was silently discarded as "category not

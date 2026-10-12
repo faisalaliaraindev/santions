@@ -56,11 +56,11 @@ import type {
   ActiveSourceVersion,
   SourceVersionReader,
 } from '../src/sources/source-version.service.js';
-import type { TaxonomyVersion } from '@erly/adverse-domain';
+import type { TaxonomyVersion } from '@adverse-search/domain';
 
 const NOW = new Date('2026-09-18T12:00:00.000Z');
 const GDELT_URL = 'https://api.gdeltproject.org/api/v2/doc/doc';
-const CONTACT = 'https://erlystage.com/bots/adverse-search';
+const CONTACT = 'https://example.com/bots/adverse-search';
 
 /**
  * A clock and a sleep that share one counter.

@@ -29,7 +29,7 @@ import { z } from 'zod';
 
 // The one role list, from the pure package. A second copy here would be a second thing to keep
 // in step with `permissionsForRoles`, and the copy that drifted would be the one minting keys.
-import { ROLES } from '@erly/adverse-domain';
+import { ROLES } from '@adverse-search/domain';
 
 /** The environment a key may act in. A key is bound to one and cannot be promoted. */
 export const keyEnvironmentSchema = z.enum(['sandbox', 'live']);

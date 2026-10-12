@@ -4,7 +4,7 @@
 
 > **Outline, not a brief.** Expand at the start of the phase.
 >
-> **Most of this phase happens in the `erly-sanction-service-frontend` repository**, which has
+> **Most of this phase happens in the `adverse-search-frontend` repository**, which has
 > its own `CLAUDE.md`. Read that repository's README before starting.
 
 ## Goal

@@ -1,4 +1,4 @@
-# Erly adverse-search service
+# Adverse Search Service service
 
 A standalone adverse-media search service. It retrieves published material about a subject,
 resolves whether that material refers to the subject, classifies what is reported and at what
@@ -6,7 +6,7 @@ procedural stage, and grades how well the evidence supports the connection.
 
 It is **not** a criminal record check, **not** a proof of identity, and **not** a
 determination of guilt. Findings support human review. A designation found in reporting is a
-lead to verify against the primary list, never a sanctions finding — Zquence keeps its
+lead to verify against the primary list, never a sanctions finding — Target Platform keeps its
 existing sanctions.io integration for that.
 
 Every source, library and model is free to use, open-source, or public data published by the
@@ -85,7 +85,7 @@ pnpm dev:worker                         # terminal 2 — runs them
 pnpm key:issue                          # prints a machine API key, once
 ```
 
-Then import `postman/erly-adverse-search.postman_collection.json` and
+Then import `postman/adverse-search-service.postman_collection.json` and
 `postman/local.postman_environment.json`, paste the key into the `apiKey` variable, and run the
 folders in order. Full walkthrough: [`postman/README.md`](./postman/README.md).
 
@@ -125,7 +125,7 @@ They will require configured access and owner authorisation. **Live mode default
 ## Repository layout
 
 This is the backend repository. The React control panel lives in
-`erly-sanction-service-frontend` — see decision D-001 for why the plan's single-monorepo
+`adverse-search-frontend` — see decision D-001 for why the plan's single-monorepo
 layout was split, and how the "one business API, no second matching engine in the browser"
 requirement is enforced across the two.
 

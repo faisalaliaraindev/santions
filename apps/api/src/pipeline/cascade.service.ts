@@ -48,7 +48,7 @@ import {
   type CascadeRung,
   type RungAttempt,
   type SourceCoverageOutcome,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import type { DiscoveryQuery, Lead } from '../sources/lead.js';
 import { hasData, type SourceOutcome } from '../sources/source-adapter.js';

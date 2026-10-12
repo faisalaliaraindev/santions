@@ -1,10 +1,10 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Erly adverse-search API",
+    "title": "Adverse Search Service API",
     "version": "0.1.0",
     "description": "Adverse-media screening. Free and open-source sources only.\n\nThree things about this API are unusual, and all three are deliberate:\n\n- **A result has three independent dimensions, not one status.** `execution`,\n  `findings` and `coverage` answer different questions: whether the run finished,\n  what was found, and whether everything promised was actually searched. A run that\n  succeeded with no findings and a run whose sources were all blocked are not the\n  same result, and no field collapses them.\n- **An entitlement denial is not throttling and not a coverage gap.** It is a 403\n  with a specific code, and it is never retryable.\n- **Sparse identity input is accepted and stays unresolved.** A missing date of birth\n  is never inferred, and a name is never split into given and family parts.",
-    "contact": { "name": "Erly" }
+    "contact": { "name": "Adverse Search" }
   },
   "servers": [
     { "url": "http://127.0.0.1:3000", "description": "Local development" },

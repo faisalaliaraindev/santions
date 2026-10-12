@@ -248,7 +248,7 @@ results page.
 
 | Gate | Focus                         | Notes                                                                                                                                                                                                                          |
 | :--- | :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G9   | Zquence contract              | Typed client, callback fixture with signature/replay/duplicate/out-of-order handling, entitlement denials. Zquence-side work needs separate workspace access                                                                   |
+| G9   | Target Platform contract              | Typed client, callback fixture with signature/replay/duplicate/out-of-order handling, entitlement denials. Target Platform-side work needs separate workspace access                                                                   |
 | G10  | Live free-source verification | **The first live calls.** Measure archive horizon, per-country and per-language coverage, officer completeness and end-to-end recall. Populate the coverage matrix. Disable every profile without an agreed measured threshold |
 | G11  | Hardening and handoff         | Security review, real AWS IAM/KMS under authorised staging, restore and deletion-replay, workload verification, readiness report                                                                                               |
 
@@ -267,7 +267,7 @@ From `docs/open-decisions.md`. A decision listed here blocks its gate's exit.
 
 | Gate | Decisions that must close                                                                    | Owner                                      |
 | :--- | :------------------------------------------------------------------------------------------- | :----------------------------------------- |
-| G3   | D10 minimum identity data                                                                    | Product + Zquence                          |
+| G3   | D10 minimum identity data                                                                    | Product + Target Platform                          |
 | G4   | D12 search index choice                                                                      | Engineering (by measurement)               |
 | G5   | D1 jurisdictions/languages · D3 default categories · D8 retention                            | Source/policy + taxonomy admin, compliance |
 | G6   | D6 robots exception approval                                                                 | Source admin                               |
@@ -323,5 +323,5 @@ reveal.
 5. Update `docs/implementation-status.md` to move G1 to complete — **only** once A5's evidence
    exists.
 
-In parallel, and not blocking: raise **D10** with product and Zquence, since it shapes the
+In parallel, and not blocking: raise **D10** with product and Target Platform, since it shapes the
 Phase B subject schema.

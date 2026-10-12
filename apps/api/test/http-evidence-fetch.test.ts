@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { classifyFailure, type FailureSignal } from '@erly/adverse-domain';
+import { classifyFailure, type FailureSignal } from '@adverse-search/domain';
 
 import { RequestPacer } from '../src/sources/request-pacer.js';
 import {

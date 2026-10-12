@@ -34,7 +34,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { SignupInput, SignupResult } from '@erly/adverse-contracts';
+import type { SignupInput, SignupResult } from '@adverse-search/contracts';
 
 import { AccountService } from '../auth/account.service.js';
 import { assessPassword } from '../auth/password.js';

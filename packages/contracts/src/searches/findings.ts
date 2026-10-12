@@ -26,7 +26,7 @@
 
 import { z } from 'zod';
 
-import { FINDING_CATEGORIES } from '@erly/adverse-domain';
+import { FINDING_CATEGORIES } from '@adverse-search/domain';
 
 import { findingCountsSchema } from './search.js';
 import { preciseDateSchema } from '../subjects/subject.js';

@@ -471,7 +471,7 @@ somebody to investigate at the wrong end.
 At-least-once and potentially out-of-order (REL-03). A crash after delivery and before recording
 it repeats the delivery; independent retries can arrive out of order.
 
-**Receiver-side rules, which the Zquence sample receiver demonstrates:** deduplicate on event ID,
+**Receiver-side rules, which the Target Platform sample receiver demonstrates:** deduplicate on event ID,
 and apply revisions safely — a delivery carrying a revision lower than the one already applied is
 discarded, not applied as an update. An out-of-order delivery that overwrote newer state would
 show a reviewer a result that the service has already superseded.

@@ -29,7 +29,7 @@
  * **No adapter here is written in Phase D.** Phase E, behind this seam.
  */
 
-import type { CountryCode, PreciseDate } from '@erly/adverse-domain';
+import type { CountryCode, PreciseDate } from '@adverse-search/domain';
 
 import type { AdapterDescriptor, SourceOutcome } from './source-adapter.js';
 

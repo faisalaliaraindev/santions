@@ -11,8 +11,8 @@ import {
   type IdentityName,
   type SourceCoverageOutcome,
   type SubjectIdentityEvidence,
-} from '@erly/adverse-domain';
-import type { SubjectVersion } from '@erly/adverse-contracts';
+} from '@adverse-search/domain';
+import type { SubjectVersion } from '@adverse-search/contracts';
 
 import type { FindingRecord } from '../../pipeline/findings.service.js';
 import { excludedBySourceFilter } from '../source-filter.js';

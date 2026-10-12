@@ -54,7 +54,7 @@ Goal: anyone can drive the whole API from Postman and get real responses with fa
       and the refusals worth seeing once. Ids are captured between requests, the search poll
       re-runs itself until terminal, and the test scripts warn when findings are empty **and**
       coverage is incomplete — which is not a clean result.
-      _File:_ `postman/erly-adverse-search.postman_collection.json`
+      _File:_ `postman/adverse-search-service.postman_collection.json`
 
 - [x] **A Postman environment file.**
       _File:_ `postman/local.postman_environment.json`

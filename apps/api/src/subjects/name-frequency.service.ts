@@ -16,7 +16,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import type { NormalisedName } from '@erly/adverse-domain';
+import type { NormalisedName } from '@adverse-search/domain';
 
 export interface NameFrequencyPrior {
   readonly decile: number;

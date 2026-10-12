@@ -24,7 +24,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { EvidenceBand, FindingCategory, PreciseDate } from '@erly/adverse-domain';
+import type { EvidenceBand, FindingCategory, PreciseDate } from '@adverse-search/domain';
 
 export interface FindingRecord {
   readonly findingId: string;

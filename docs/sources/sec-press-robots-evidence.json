@@ -4,7 +4,7 @@
   "sourceId": "sec-press-releases",
   "url": "https://www.sec.gov/robots.txt",
   "feedPathChecked": "/news/pressreleases.rss",
-  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
   "requestedAt": "2026-09-18T14:38:14.673Z",
   "httpStatus": 200,
   "wireBytes": 916,

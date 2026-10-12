@@ -63,7 +63,7 @@ import {
   type FailureSignal,
   type RobotsFile,
   type SourceCoverageOutcome,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { minIntervalMsFor, requestPacer, type RequestPacer } from './request-pacer.js';
 import {

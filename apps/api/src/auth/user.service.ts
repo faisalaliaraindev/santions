@@ -44,7 +44,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { Role } from '@erly/adverse-domain';
+import type { Role } from '@adverse-search/domain';
 
 import { AuditService } from '../persistence/audit.service.js';
 import { TransactionRunner } from '../persistence/transaction.runner.js';

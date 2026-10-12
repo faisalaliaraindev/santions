@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { SubjectVersion } from '@erly/adverse-contracts';
+import type { SubjectVersion } from '@adverse-search/contracts';
 
 import { IndexedSourceSearchService } from '../src/sources/indexed/indexed-source-search.service.js';
 import type {

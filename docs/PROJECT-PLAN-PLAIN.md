@@ -10,7 +10,7 @@ _Last updated: 16 September 2026_
 
 ## 1. What this product does
 
-A customer of ours — a compliance team, or a platform like Zquence — needs to know whether a
+A customer of ours — a compliance team, or a platform like Target Platform — needs to know whether a
 person has been reported in the news or in official records for something serious. Fraud, bribery,
 money laundering, that kind of thing.
 

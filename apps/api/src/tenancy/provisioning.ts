@@ -22,7 +22,7 @@
  * the copy that drifts is the one the customer gets.
  */
 
-import { ADVERSE_CATEGORIES, SEED_LEXICON } from '@erly/adverse-domain';
+import { ADVERSE_CATEGORIES, SEED_LEXICON } from '@adverse-search/domain';
 
 import {
   ADVERSE_MEDIA,

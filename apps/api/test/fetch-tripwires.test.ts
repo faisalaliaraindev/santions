@@ -49,7 +49,7 @@ import {
   type DomainHealth,
   type FailureSignal,
   type SourceHealth,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import {
   HttpEvidenceFetchAdapter,
@@ -68,7 +68,7 @@ import {
   SEC_STOP_CONDITIONS,
 } from '../src/sources/registry/sec-litigation-releases.js';
 
-const CONTACT = 'https://erlystage.com/bots/adverse-search';
+const CONTACT = 'https://example.com/bots/adverse-search';
 const FEED_URL = 'https://www.sec.gov/enforcement-litigation/litigation-releases/rss';
 const T0 = new Date('2026-09-15T12:00:00.000Z');
 
@@ -448,7 +448,7 @@ describe('trip-wire 7 — the kill switch stops a run already in flight', () => 
       ...source.health,
       killSwitch: {
         engagedAt: T0.toISOString(),
-        engagedBy: 'faisal@erlystage.com',
+        engagedBy: 'faisal@example.com',
         reason: 'The SEC webmaster emailed and asked us to stop.',
       },
     };

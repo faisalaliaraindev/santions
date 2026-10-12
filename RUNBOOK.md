@@ -120,11 +120,11 @@ Import **one collection** and **one environment**:
 
 | Import                | File                                                       |
 | :-------------------- | :--------------------------------------------------------- |
-| Collection            | `postman/erly-adverse-search-full.postman_collection.json` |
+| Collection            | `postman/adverse-search-service-full.postman_collection.json` |
 | Environment (sandbox) | `postman/sandbox.ready.postman_environment.json`           |
 | Environment (live)    | `postman/live.ready.postman_environment.json`              |
 
-Do **not** import `erly-adverse-search.postman_collection.json` — it is a short demo subset with
+Do **not** import `adverse-search-service.postman_collection.json` — it is a short demo subset with
 no signup flow, no admin and no live folder.
 
 **Re-import after pulling.** The collection and the environments are separate imports and Postman
@@ -233,7 +233,7 @@ domain breaker is checked separately — which is exactly what happened to `gdel
 > API by a named operator — and it changes nothing at the publisher.
 
 ```bash
-pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json \
+pnpm dlx newman@6 run postman/adverse-search-service-full.postman_collection.json \
   -e postman/live.ready.postman_environment.json \
   --folder "15 - Mixed Live E2E: SEC + GDELT" \
   --timeout-request 180000 --timeout-script 900000 --timeout 1800000

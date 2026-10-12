@@ -5,7 +5,7 @@
  * Run it against a local stack:
  *
  *   pnpm demo:api            # once, to prove the service works end to end
- *   node examples/zquence-integration.mjs --api-key <key> --name "María Fernanda Solís Rojas"
+ *   node examples/target-platform-integration.mjs --api-key <key> --name "María Fernanda Solís Rojas"
  *
  * It uses the same typed client that ships in `packages/client`, so this file is the
  * documentation of the integration rather than a parallel implementation of it.
@@ -29,7 +29,7 @@
  *
  * 4. **Adverse-media results and sanctions-list results are different things.** A designation
  *    reported in the media is a *lead to verify against the primary list*, never a sanctions
- *    hit. Zquence keeps its sanctions.io integration; these two must be rendered as separate,
+ *    hit. Target Platform keeps its sanctions.io integration; these two must be rendered as separate,
  *    clearly labelled sections and never merged into one list.
  */
 

@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Erly adverse-search API - full",
+    "name": "Adverse Search Service API - full",
     "description": "Every endpoint this service exposes, in the order you would meet them.\n\n## Before you start\n\n```\npnpm local:up && pnpm local:bootstrap\npnpm dev            # API + worker together\npnpm key:issue      # prints the key once\n```\n\nPaste the key into the `apiKey` environment variable. Admin folders need a key with the right role:\n\n```\npnpm key:issue --role source_admin --label \"postman admin\"\n```\n\n## What you are looking at\n\nMock mode. Every source is a fixture, every record is stamped `mode: \"MOCK\"`, and nothing leaves your machine. The shape of every response is real; the content is test data.\n\n## The one thing not to misread\n\nThree independent fields come back and must be read together: `execution` (did the job finish), `findingsState` (did we find anything) and `coverage` (did we search everything we said we would).\n\n`SUCCEEDED` + `NO_MATCHES_FOUND` + `INCOMPLETE` means the run finished, found nothing, **and did not search everything it promised**. That is not a clean result.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -6249,7 +6249,7 @@
                 "signup"
               ]
             },
-            "description": "A stranger becomes a customer. Nobody at Erly is involved, nothing is seeded, and every customer call after 17.8 authenticates with a key this tenant issued to itself.",
+            "description": "A stranger becomes a customer. Nobody at Adverse Search is involved, nothing is seeded, and every customer call after 17.8 authenticates with a key this tenant issued to itself.",
             "auth": {
               "type": "noauth"
             },
@@ -7302,7 +7302,7 @@
                   "    pm.expect(active.content.accessPolicy.endpointUrl).to.be.null;",
                   "  });",
                   "  pm.test('it names us as publisher, never an engine', function () {",
-                  "    pm.expect(active.content.publisher).to.contain('Erly');",
+                  "    pm.expect(active.content.publisher).to.contain('Adverse Search');",
                   "    ['Google', 'Bing', 'Brave', 'DuckDuckGo', 'Reuters'].forEach(function (e) {",
                   "      pm.expect(active.content.publisher).to.not.contain(e);",
                   "    });",
@@ -7334,7 +7334,7 @@
                 "signup"
               ]
             },
-            "description": "A stranger becomes a customer. Nobody at Erly is involved, nothing is seeded, and every customer call after 17.8 authenticates with a key this tenant issued to itself.",
+            "description": "A stranger becomes a customer. Nobody at Adverse Search is involved, nothing is seeded, and every customer call after 17.8 authenticates with a key this tenant issued to itself.",
             "auth": {
               "type": "noauth"
             },
@@ -8368,8 +8368,8 @@
       ]
     },
     {
-      "name": "19 - Zquence LIVE Google Diagnostic",
-      "description": "FINAL MANUAL ACCEPTANCE. One LIVE adverse search, by the real local Zquence tenant, through the normal tenant API, with GOOGLE_NEWS added for that one request by the local diagnostic header.\n\nGoogle stays REFUSED under D20 and defaults OFF: nothing here changes a setting. The API grants the diagnostic only when NODE_ENV is not production, the request is to and from loopback, ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true, the tenant is GOOGLE_DIAGNOSTIC_TENANT_ID, and the request carries X-Local-Discovery-Diagnostic: GOOGLE_NEWS. Publisher FetchGate is unchanged, so Google candidates from unapproved publishers are refused per candidate and the run continues.\n\nYou enter two values: zquenceApiKey and zquenceTenantId. Everything else is pre-set in the local environment. How to start the stack: docs/testing/google-live-local.md.",
+      "name": "19 - Target Platform LIVE Google Diagnostic",
+      "description": "FINAL MANUAL ACCEPTANCE. One LIVE adverse search, by the real local Target Platform tenant, through the normal tenant API, with GOOGLE_NEWS added for that one request by the local diagnostic header.\n\nGoogle stays REFUSED under D20 and defaults OFF: nothing here changes a setting. The API grants the diagnostic only when NODE_ENV is not production, the request is to and from loopback, ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true, the tenant is GOOGLE_DIAGNOSTIC_TENANT_ID, and the request carries X-Local-Discovery-Diagnostic: GOOGLE_NEWS. Publisher FetchGate is unchanged, so Google candidates from unapproved publishers are refused per candidate and the run continues.\n\nYou enter two values: zquenceApiKey and zquenceTenantId. Everything else is pre-set in the local environment. How to start the stack: docs/testing/google-live-local.md.",
       "event": [
         {
           "listen": "prerequest",
@@ -8384,8 +8384,8 @@
               "const problems = [];",
               "if (!/^https?:\\/\\/(127\\.0\\.0\\.1|localhost|\\[::1\\])(:\\d+)?\\/?$/i.test(baseUrl)) { problems.push('baseUrl must be a local API (http://127.0.0.1:<port>), it is: ' + baseUrl); }",
               "if (confirm !== 'yes-run-google-live-local') { problems.push('set googleDiagnosticConfirm = yes-run-google-live-local'); }",
-              "if (key === '' || /CHANGE ME|<|>/i.test(key)) { problems.push('set zquenceApiKey to the local Zquence LIVE tenant API key'); }",
-              "if (tenant === '' || /CHANGE ME|<|>/i.test(tenant)) { problems.push('set zquenceTenantId to the local Zquence tenant id'); }",
+              "if (key === '' || /CHANGE ME|<|>/i.test(key)) { problems.push('set zquenceApiKey to the local Target Platform LIVE tenant API key'); }",
+              "if (tenant === '' || /CHANGE ME|<|>/i.test(tenant)) { problems.push('set zquenceTenantId to the local Target Platform tenant id'); }",
               "if (problems.length > 0) {",
               "  postman.setNextRequest(null);",
               "  throw new Error('Folder 19 is not armed - nothing was sent. ' + problems.join('; '));",
@@ -8396,14 +8396,14 @@
       ],
       "item": [
         {
-          "name": "19.0 Guard: local, confirmed, and the real Zquence LIVE tenant",
+          "name": "19.0 Guard: local, confirmed, and the real Target Platform LIVE tenant",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('the Zquence key authenticates', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('the Target Platform key authenticates', () => pm.expect(pm.response.code).to.eql(200));",
                   "const b = pm.response.code === 200 ? pm.response.json() : {};",
                   "pm.test('the key belongs to zquenceTenantId', function () {",
                   "  pm.expect(b.tenantId, 'the key is for tenant ' + b.tenantId).to.eql(pm.environment.get('zquenceTenantId'));",
@@ -8460,7 +8460,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('the engine matrix is readable with the Zquence key', function () {",
+                  "pm.test('the engine matrix is readable with the Target Platform key', function () {",
                   "  pm.expect(pm.response.code, 'this key needs the tenant_admin role to read the control API').to.eql(200);",
                   "});",
                   "if (pm.response.code !== 200) { postman.setNextRequest(null); return; }",
@@ -8600,7 +8600,7 @@
           "response": []
         },
         {
-          "name": "19.3 Create the subject (stable Zquence externalSubjectRef)",
+          "name": "19.3 Create the subject (stable Target Platform externalSubjectRef)",
           "event": [
             {
               "listen": "prerequest",
@@ -8616,7 +8616,7 @@
                   "  aliases: [],",
                   "  countryContext: [country],",
                   "  knownCompanies: [],",
-                  "  externalSubjectRef: 'zquence-google-diagnostic:' + slug,",
+                  "  externalSubjectRef: 'target-platform-google-diagnostic:' + slug,",
                   "  purpose: 'CUSTOMER_ONBOARDING',",
                   "};",
                   "// Optional, and only in the shape the normal subject contract accepts.",
@@ -8634,8 +8634,8 @@
                   "pm.test('subject created', () => pm.expect(pm.response.code).to.eql(201));",
                   "if (pm.response.code !== 201) { postman.setNextRequest(null); return; }",
                   "const b = pm.response.json();",
-                  "pm.test('it carries the stable Zquence reference', function () {",
-                  "  pm.expect(b.externalSubjectRef).to.match(/^zquence-google-diagnostic:/);",
+                  "pm.test('it carries the stable Target Platform reference', function () {",
+                  "  pm.expect(b.externalSubjectRef).to.match(/^target-platform-google-diagnostic:/);",
                   "});",
                   "pm.environment.set('g19SubjectId', b.subjectId);",
                   "pm.environment.set('g19SubjectVersion', String(b.version));"
@@ -8765,7 +8765,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"subjectRef\": { \"subjectId\": \"{{g19SubjectId}}\", \"version\": {{g19SubjectVersion}} },\n  \"externalCaseRef\": \"zquence-google-diagnostic\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"{{g19Country}}\"],\n    \"languages\": [\"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
+              "raw": "{\n  \"subjectRef\": { \"subjectId\": \"{{g19SubjectId}}\", \"version\": {{g19SubjectVersion}} },\n  \"externalCaseRef\": \"target-platform-google-diagnostic\",\n  \"requestedScope\": {\n    \"jurisdictions\": [\"{{g19Country}}\"],\n    \"languages\": [\"en\"],\n    \"includeFormerDirectorships\": false,\n    \"fromDate\": null\n  },\n  \"environment\": \"live\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -40,10 +40,10 @@ Import both files from the `postman/` folder:
 
 | File                                               | What it is                        |
 | :------------------------------------------------- | :-------------------------------- |
-| `erly-adverse-search-full.postman_collection.json` | The requests                      |
+| `adverse-search-service-full.postman_collection.json` | The requests                      |
 | `local.ready.postman_environment.json`             | Keys and names, already filled in |
 
-Then **select the environment** in the top-right dropdown — "Erly adverse-search — local (ready)".
+Then **select the environment** in the top-right dropdown — "Adverse Search Service — local (ready)".
 Most "401 Unauthorized" reports are simply no environment selected.
 
 > That environment file contains working credentials. It is git-ignored deliberately. Do not commit

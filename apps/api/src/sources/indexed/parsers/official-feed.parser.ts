@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { FindingCategory } from '@erly/adverse-domain';
+import type { FindingCategory } from '@adverse-search/domain';
 
 import { decodeXml, parseFeed, type FeedItem } from '../../parse/xml.js';
 import type {

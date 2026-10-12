@@ -1,0 +1,128 @@
+/*
+ * Base styles.
+ *
+ * FR-14 requires WCAG 2.2 AA for implemented journeys: semantic controls, keyboard
+ * navigation, visible focus, and statuses that are never conveyed by colour alone.
+ * The focus ring below is deliberately not removable.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --colour-bg: #ffffff;
+  --colour-surface: #f6f7f9;
+  --colour-border: #d4d8dd;
+  --colour-text: #16191d;
+  --colour-text-muted: #545c66;
+  --colour-accent: #1c4fd8;
+  --colour-focus: #0b5cff;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-5: 2.5rem;
+
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --colour-bg: #101317;
+    --colour-surface: #191d23;
+    --colour-border: #333a44;
+    --colour-text: #eceef1;
+    --colour-text-muted: #a3abb6;
+    --colour-accent: #7ea3ff;
+    --colour-focus: #7ea3ff;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--colour-bg);
+  color: var(--colour-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  line-height: 1.55;
+}
+
+/* Never removed. A reviewer working by keyboard must always see where they are. */
+:focus-visible {
+  outline: 3px solid var(--colour-focus);
+  outline-offset: 2px;
+}
+
+.page {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-3);
+}
+
+.page__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--colour-border);
+}
+
+.page__nav a {
+  color: var(--colour-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.notice {
+  background: var(--colour-surface);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
+.notice__badge {
+  margin: 0 0 var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--colour-text-muted);
+}
+
+.notice__title {
+  margin: 0 0 var(--space-3);
+  font-size: 1.5rem;
+}
+
+.notice__body {
+  margin: 0 0 var(--space-3);
+}
+
+.notice__blocked {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--colour-accent);
+  background: var(--colour-bg);
+}
+
+.notice__footnote {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--colour-text-muted);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.9em;
+}

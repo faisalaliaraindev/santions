@@ -27,10 +27,10 @@ Say what you did about it.
 
 ---
 
-## 2026-10-12 — test UI built; adverse-search delivery plan for Zquence
+## 2026-10-12 — test UI built; adverse-search delivery plan for Target Platform
 
-**Asked:** Build a simple standalone test UI so the Zquence test team can search any name
-independently before the full Zquence integration goes live. Deliver adverse-search (news
+**Asked:** Build a simple standalone test UI so the Target Platform test team can search any name
+independently before the full Target Platform integration goes live. Deliver adverse-search (news
 sources only) today. Google News RSS to be activated. SearXNG (Bing, DuckDuckGo, Reuters,
 Brave, Wikinews) to be activated.
 
@@ -58,15 +58,15 @@ Brave, Wikinews) to be activated.
    real publisher URL, (c) four-eyes activation lifecycle. Do NOT edit `firstContactApproval`
    or `robotsPosition` directly — that bypasses the lifecycle.
 
-3. **Expose service** — backend only runs locally. For today's delivery to Zquence test team,
+3. **Expose service** — backend only runs locally. For today's delivery to Target Platform test team,
    use Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:3000`) or ngrok. Give the
    resulting URL to the test team as their server URL in the test UI.
 
-4. **Provision Zquence tenant** — create a tenant + API key (sandbox for testing, then live).
+4. **Provision Target Platform tenant** — create a tenant + API key (sandbox for testing, then live).
    Hand the key to the test team to paste into the test UI API Key field.
 
-5. **Zquence integration** — once test team validates, integrate `POST /v1/screen` into the
-   Zquence onboarding flow with `purpose: 'CUSTOMER_ONBOARDING'` and `environment: 'live'`.
+5. **Target Platform integration** — once test team validates, integrate `POST /v1/screen` into the
+   Target Platform onboarding flow with `purpose: 'CUSTOMER_ONBOARDING'` and `environment: 'live'`.
 
 **Not run this session:** no live requests made. User triggers first contact per memory rule.
 
@@ -133,16 +133,16 @@ The user runs it per the doc.
 4. Folder 19's test asserted it was the **last** folder; changed to "directly after 18".
 
 **Stopped:** no `dev.mjs`/`main.js`/`worker-main.js` node process; `pnpm local:down` run — no
-`erly-adverse-search-*` container. Volumes kept. `postgresDB` (not this project) left running.
+`adverse-search-service-*` container. Volumes kept. `postgresDB` (not this project) left running.
 
 **Next session should:** if the user reports a Folder 20 LIVE result, start from the per-source
 table in `docs/testing/live-test-sequence.md` Part 3. Otherwise nothing is queued.
 
 **Decisions touched:** D-066 added. D20 unchanged (Google still REFUSED, default off).
 
-## 2026-09-23 (twenty-ninth) — Zquence tenant Google acceptance flow (local diagnostic only)
+## 2026-09-23 (twenty-ninth) — Target Platform tenant Google acceptance flow (local diagnostic only)
 
-**Did:** a request-scoped, local-only override that lets the real local Zquence LIVE tenant run
+**Did:** a request-scoped, local-only override that lets the real local Target Platform LIVE tenant run
 one normal adverse search with `GOOGLE_NEWS` added, plus Postman Folder 19 to run it.
 
 - `apps/api/src/sources/searxng/local-diagnostic.ts` — the five conditions (not production;
@@ -161,7 +161,7 @@ one normal adverse search with `GOOGLE_NEWS` added, plus Postman Folder 19 to ru
   Contract fields optional; OpenAPI regenerated.
 - **Not changed:** D20, `governanceStatus`, `defaultEnabledForDiscovery`, `tenantEnabled`,
   `searxngEngineSettings`, FetchGate, any source.
-- Postman Folder `19 - Zquence LIVE Google Diagnostic` (12 requests, 19.0–19.10), folder-level
+- Postman Folder `19 - Target Platform LIVE Google Diagnostic` (12 requests, 19.0–19.10), folder-level
   guard, template env vars. Collection-level `apiKey` check exempts `19.*` requests only.
 - `docs/testing/google-live-local.md` — how to start the stack and run it.
 
@@ -172,7 +172,7 @@ one normal adverse search with `GOOGLE_NEWS` added, plus Postman Folder 19 to ru
 (23, executes the folder's scripts in a `pm` sandbox), `tests/security/local-google-diagnostic.test.ts`
 (5, real HTTP + Mongo).
 
-**Not run:** the live Google request. No Zquence credentials exist in this session, and the user
+**Not run:** the live Google request. No Target Platform credentials exist in this session, and the user
 drives it: start the stack per the doc, enter `zquenceApiKey` + `zquenceTenantId`, run Folder 19.
 
 **Found:** there is no worker health endpoint, so Folder 19 proves worker currency indirectly —
@@ -526,7 +526,7 @@ evidence does not support it. No flag overrides either.
 **Then, and only then:** re-run the adverse-media flow for the Madoff candidate already discovered
 by the `WIKINEWS` engine
 (`en.wikinews.org/wiki/Madoff_jailed_after_pleading_guilty_to_%2450_billion_fraud_scheme`), re-run
-folder 18, and report the real finding with exact Newman totals. The Zquence readiness verdict
+folder 18, and report the real finding with exact Newman totals. The Target Platform readiness verdict
 waits on that chain, because until one article is fetched the honest answer is that the last hop
 is unproven.
 
@@ -1088,12 +1088,12 @@ Registry read from Mongo and over the Admin API, agreeing: **11 ACTIVE real sour
 ### 9. Next session should
 
 1. **Run folder 17** (set `caEmail` first) and confirm 52 assertions still pass against today's
-   live SEC feed. That is the gate the user set before Zquence onboarding starts.
-2. Then **Zquence**, where the real distance is. Note in particular that
-   `docs/integration/zquence.md` still opens with *"the service runs end to end in mock mode. Every
+   live SEC feed. That is the gate the user set before Target Platform onboarding starts.
+2. Then **Target Platform**, where the real distance is. Note in particular that
+   `docs/integration/target-platform.md` still opens with *"the service runs end to end in mock mode. Every
    source is a fixture"* — **stale since 2026-09-16** and actively misleading to a first client.
-   Fix that header before the document is sent anywhere. There is also no Zquence tenant (203
-   tenants, none matching), and `pnpm demo:zquence` is still a stub that exits 1.
+   Fix that header before the document is sent anywhere. There is also no Target Platform tenant (203
+   tenants, none matching), and `pnpm demo:target-platform` is still a stub that exits 1.
 3. **F3** — the eight FR-07 validation rules — is still unwritten. `grep validateAssertion` still
    returns nothing.
 
@@ -1963,7 +1963,7 @@ brief.
 - **Folder 16 is unrun.** It needs `pnpm local:up && pnpm dev`, then:
 
   ```
-  pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json \
+  pnpm dlx newman@6 run postman/adverse-search-service-full.postman_collection.json \
     -e postman/local.ready.postman_environment.json \
     --folder "16 - Admin: indexed sources (local snapshots)"
   ```
@@ -2072,7 +2072,7 @@ serving pre-change code from `apps/api/dist`, which was rebuilt at 21:26 but not
 run needs: restart `pnpm dev:live`, then
 
 ```
-pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json \
+pnpm dlx newman@6 run postman/adverse-search-service-full.postman_collection.json \
   -e postman/live.ready.postman_environment.json \
   --folder "15 - Mixed Live E2E: SEC + GDELT" \
   --timeout-request 180000 --timeout-script 900000 --timeout 1500000
@@ -2093,7 +2093,7 @@ skipped; set it to `24` to exercise it.
 - **A cancelled run that found nothing must stay `NOT_EVALUATED`.** Routing cancellation through
   the new count-based mapping made it `NO_MATCHES_FOUND`, which claims a finished search. Caught
   by the existing domain test; the cancelled branch now maps only when findings exist.
-- **`postman/erly-adverse-search.postman_collection.json` was reformatted and then restored to
+- **`postman/adverse-search-service.postman_collection.json` was reformatted and then restored to
   HEAD** by this session. It is the demo subset the README marks "not kept up to date", but if it
   held uncommitted work before 2026-09-18 21:32, that work is gone.
 
@@ -2233,7 +2233,7 @@ more refusals.
 **Did.** No governance action was taken. Nothing was written to Mongo, no source version was
 proposed, approved or activated, and folder 15 was not run. What changed is Postman and its docs.
 
-`postman/erly-adverse-search-full.postman_collection.json`, folder 11:
+`postman/adverse-search-service-full.postman_collection.json`, folder 11:
 
 - Renamed `11 - SEC go-live (four eyes)` → `11 - Source go-live (four eyes)`.
 - All four requests had `sec-litigation-releases` hard-coded in the path. They now use
@@ -2867,7 +2867,7 @@ is the line it has to change, and the reason is in the comment at `signup.servic
    `signupAttempts` collection are gone; `signupOriginKey` is now `originKeyFor`.
 
 3. **The phase's loop is closed.** Sign up → confirm the address → sign in → issue your own API
-   key, with nobody at Erly involved at any point. There is a test that does exactly that, and
+   key, with nobody at Adverse Search involved at any point. There is a test that does exactly that, and
    Postman requests 1–9 walk it.
 
 **Verified.** The stack was already up; everything below actually ran.
@@ -3034,7 +3034,7 @@ becoming a second authentication system, and it must flatten `UNKNOWN_USER`, `BA
 those values exist for the audit trail and the counter, not for whoever is trying passwords.
 
 The standing prerequisite from two sessions ago is unchanged: the `FIXED_FEED` fetch (once per run,
-not once per planned query) should land before any live key reaches a tenant nobody at Erly has
+not once per planned query) should land before any live key reaches a tenant nobody at Adverse Search has
 spoken to. I2 makes that closer, because the verification flow it adds is the last thing that stood
 between a self-signed-up tenant and a live key.
 
@@ -3138,7 +3138,7 @@ argon2id (D-051). It owns password reset, lockout, rotation, and the **email ver
 writes `emailVerifiedAt`** — the flag I1 left unset, and the only thing standing between a
 self-signed-up tenant and a live key. Note the standing prerequisite from the session before: the
 `FIXED_FEED` fetch (once per run, not once per planned query) should land before any live key
-reaches a tenant nobody at Erly has spoken to.
+reaches a tenant nobody at Adverse Search has spoken to.
 
 **Decisions touched:** **D-055 and D-056 opened and accepted** in this session. D-051, D-052 and
 D-053 unchanged and still closed; D-007 unchanged — plans, metering and billing still deferred.
@@ -3226,7 +3226,7 @@ Each mutation was reverted immediately after.
   per-tenant budget, one self-signed-up tenant can spend the SEC's whole 120-request hour, and a
   single search currently spends about 41 of them because a `FIXED_FEED` is fetched once per
   planned query instead of once per run. This should land **before** live keys reach tenants
-  nobody at Erly has spoken to.
+  nobody at Adverse Search has spoken to.
 
 **Next session should:** build **I1** — `POST /v1/signup` creating `tenants`,
 `tenantEntitlementVersions`, `taxonomyVersions` and `policyVersions` in **one transaction** via
@@ -3251,7 +3251,7 @@ replacing seed-file tenant provisioning with self-service signup. Raised **D-051
 **D-053** in `open-decisions.md`.
 
 **The target, as instructed.** A customer signs up through the API, sets a password, logs in, gets
-a session, and issues their own **sandbox and live** keys with nobody at Erly involved. Keys can
+a session, and issues their own **sandbox and live** keys with nobody at Adverse Search involved. Keys can
 be disabled and re-enabled; newly created keys are active immediately; sandbox and live are
 separate credentials. Metering and payment gating come later — both key kinds are available now.
 
@@ -4210,7 +4210,7 @@ kill switch, because it is already effective immediately, effective mid-run, rea
 
 ### Did
 
-- `pnpm --filter @erly/adverse-api add -E fast-xml-parser@4.5.7`. Lockfile verified: two packages.
+- `pnpm --filter @adverse-search/api add -E fast-xml-parser@4.5.7`. Lockfile verified: two packages.
 - **`apps/api/src/sources/parse/xml.ts`** — the one XML module. `findMarkupDeclaration` (the gate),
   `parseXmlDocument`, `decodeXml` (honours a declared `ISO-8859-1`, which CR and ES publishers
   still serve — decoding one as UTF-8 silently costs recall on accented names), and `parseFeed`
@@ -4758,7 +4758,7 @@ mistake too: a genuine public IPv6 address with a dotted tail (`2001:db8::192.0.
 allowed.
 
 **Also found — a dead configuration placeholder, replaced.** `.env.example` carried
-`OUTBOUND_USER_AGENT="ErlyAdverseSearch/0.1 (+https://erlystage.com/bots/adverse-search)"`, written
+`OUTBOUND_USER_AGENT="ErlyAdverseSearch/0.1 (+https://example.com/bots/adverse-search)"`, written
 for exactly this purpose at some earlier point and **read by nothing**. It is now replaced by
 `FETCH_CONTACT_URL` rather than adopted, and the file says why: a free-text user agent can be set to
 a string with no contact URL in it at all, which is the dishonest case FR-06 forbids. Configuring the
@@ -5123,7 +5123,7 @@ in this entry changes that — both modules are pure and neither opens a socket.
 
 ---
 
-## 2026-09-14 (evening) — **Out of phase order, for a demo**: the search pipeline, the findings API, and the Zquence client
+## 2026-09-14 (evening) — **Out of phase order, for a demo**: the search pipeline, the findings API, and the Target Platform client
 
 **Read this first.** The phase order was broken deliberately. D5 and D6 are **not** done; this
 session jumped to a compressed slice of **Phase E** because a customer call needed something
@@ -5157,9 +5157,9 @@ API key, faking no step. It starts the API and worker if they are not running, i
 creates a subject, submits, polls, and prints findings, associations, rejected leads, coverage
 and a plain statement of what the run is and is not.
 
-**4. `@erly/adverse-client` + `examples/zquence-integration.mjs` + `docs/integration/zquence.md`.**
+**4. `@adverse-search/client` + `examples/target-platform-integration.mjs` + `docs/integration/target-platform.md`.**
 The G9 pull half: a typed Node client, a worked example, and the integration contract written
-down. Per the G9 brief these live in this repository until Zquence workspace access is granted.
+down. Per the G9 brief these live in this repository until Target Platform workspace access is granted.
 
 **Verified:**
 
@@ -5209,7 +5209,7 @@ queries in an unmeasured language find what exists.
 - **Syndicated copies are not clustered.** One story carried by two publishers currently produces
   **two findings**, each reporting `independenceCount: 1`. `decideClustering` and the FR-10 rules
   exist in the domain package and the pipeline does not call them. This is visible in the demo
-  and is documented as a known gap in `docs/integration/zquence.md`. It was left rather than
+  and is documented as a known gap in `docs/integration/target-platform.md`. It was left rather than
   rushed: a wrong independence count inflates bands, which is worse than a visible duplicate.
 - **Axis A is thin.** The pipeline builds a single identity factor from "the document names the
   subject". The real identifier extraction (dates of birth, roles, places in the text) is not
@@ -6818,7 +6818,7 @@ that, Phase C. See [`phase-b.md`](./phase-b.md).
   materially matters: the FR-01 subject schema is implemented as the permissive superset —
   full name required, everything else optional, sparse identity searchable but left
   unresolved. That is a defensible default and it is recorded here as an assumption, but it
-  should be confirmed by product and Zquence rather than hardened by silence.
+  should be confirmed by product and Target Platform rather than hardened by silence.
 - No other decision closed.
 
 ---
@@ -6901,7 +6901,7 @@ versioned schemas and the generated OpenAPI document. See [`phase-b.md`](./phase
 - **D1, D3, D8** have placeholder values seeded (GB only, eight categories, no retention
   rule), each carrying an `assumption` field on the record so the placeholder cannot quietly
   become the decision. They still need people outside engineering, and they close in Phase D.
-- **D10** still needs product and Zquence, and it shapes the Phase B subject schema.
+- **D10** still needs product and Target Platform, and it shapes the Phase B subject schema.
 
 ---
 
@@ -6940,7 +6940,7 @@ backend:   lint clean · typecheck clean
 frontend:  lint clean · typecheck clean · test:unit 27 passed · build clean
 ```
 
-The D-001 boundary test was verified by planting a violation: importing `@erly/adverse-domain`
+The D-001 boundary test was verified by planting a violation: importing `@adverse-search/domain`
 into a probe file fails the suite with an explanatory message; removing it passes again.
 
 **Left half-done:** Gate G1. The compose stack has **never been started**. `local:bootstrap`

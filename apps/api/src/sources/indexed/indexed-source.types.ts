@@ -1,6 +1,6 @@
 import type { ClientSession } from 'mongodb';
 
-import type { DesignationCategory, FindingCategory } from '@erly/adverse-domain';
+import type { DesignationCategory, FindingCategory } from '@adverse-search/domain';
 
 export const SCHEDULED_ARTIFACT_TRANSPORT = 'SCHEDULED_ARTIFACT_TRANSPORT';
 

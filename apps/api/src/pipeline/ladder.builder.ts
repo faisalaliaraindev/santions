@@ -28,7 +28,7 @@
 import { Logger } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import type { CascadeRung } from '@erly/adverse-domain';
+import type { CascadeRung } from '@adverse-search/domain';
 
 import type { EvidenceFetchPort } from '../sources/evidence-fetch.port.js';
 import type { FetchGateService } from '../sources/fetch-gate.service.js';

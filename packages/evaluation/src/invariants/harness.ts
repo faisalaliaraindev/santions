@@ -24,7 +24,7 @@ import {
   type BandingResult,
   type CalibratedProbability,
   type ClusterCandidate,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { SEED_RULES_VERSION } from '../dataset/scenario.js';
 import type { LabelledCase, LabelledDataset } from '../dataset/types.js';

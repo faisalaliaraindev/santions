@@ -21,7 +21,7 @@
  *
  * # What this service does not decide
  *
- * Every judgement is made by a pure function in `@erly/adverse-domain`: what to ask
+ * Every judgement is made by a pure function in `@adverse-search/domain`: what to ask
  * (`buildQueryPlan`), what to drop (`boundPlan`), whether the person matches (`gradeIdentity`),
  * whether the event attaches to them (`gradeAttribution`), whether it is a usable adverse event
  * (`classifyEvent`), how much authority stands behind it (`computeAuthority`), what band that
@@ -94,7 +94,7 @@ import {
   type EvidenceBand,
   type RungAttempt,
   type TaxonomyVersion,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { AssociationGraphService } from '../associations/association-graph.service.js';
 import {

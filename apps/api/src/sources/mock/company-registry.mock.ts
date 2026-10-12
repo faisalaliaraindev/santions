@@ -35,7 +35,7 @@ import type {
   OfficerSearchQuery,
   RegistryCompany,
 } from '../company-registry.port.js';
-import type { FailureSignal } from '@erly/adverse-domain';
+import type { FailureSignal } from '@adverse-search/domain';
 
 import {
   FIXTURE_COMPANIES,

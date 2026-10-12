@@ -1,6 +1,6 @@
 import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
 
-import type { DependencyHealth, HealthStatus } from '@erly/adverse-contracts';
+import type { DependencyHealth, HealthStatus } from '@adverse-search/contracts';
 
 import { Public, RequirePermission } from '../auth/auth.guard.js';
 

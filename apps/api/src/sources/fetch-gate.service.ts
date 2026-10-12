@@ -74,7 +74,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import { resolveEffectiveScope, screenUrl, type TaxonomyVersion } from '@erly/adverse-domain';
+import { resolveEffectiveScope, screenUrl, type TaxonomyVersion } from '@adverse-search/domain';
 
 import { buildEgressIdentity, type EgressIdentityOptions } from './egress-identity.js';
 import type { EgressIdentity, FetchAuthorisation } from './evidence-fetch.port.js';

@@ -26,7 +26,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { TaxonomyVersion } from '@erly/adverse-domain';
+import type { TaxonomyVersion } from '@adverse-search/domain';
 
 import { FetchGateService } from '../src/sources/fetch-gate.service.js';
 import type { DiscoveryQuery } from '../src/sources/lead.js';
@@ -70,7 +70,7 @@ import type {
 } from '../src/sources/source-version.service.js';
 
 const NOW = new Date('2026-09-22T12:00:00.000Z');
-const CONTACT = 'https://erlystage.com/bots/adverse-search';
+const CONTACT = 'https://example.com/bots/adverse-search';
 const BASE = 'http://127.0.0.1:28888';
 
 /**

@@ -34,7 +34,7 @@ import {
   type CountryCode,
   type FailurePolicy,
   type FailureSignal,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 /** Operating mode, matching `ADVERSE_SEARCH_MODE` and the `mode` field on every seeded record. */
 export type OperatingMode = 'MOCK' | 'LIVE';

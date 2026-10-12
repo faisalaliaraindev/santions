@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Erly adverse-search API",
+    "name": "Adverse Search Service API",
     "description": "End-to-end walkthrough of the adverse-search service.\n\n**Read this before running anything.**\n\n1. Start the stack: `pnpm local:up && pnpm local:bootstrap`\n2. Start the API: `pnpm dev:api`\n3. Issue a key: `pnpm key:issue` — it prints the secret once\n4. Put that secret in the `apiKey` environment variable\n5. Run the folders in order: Health → Subject → Search → Results\n\n**What you are looking at.** The service runs in mock mode. Every source is a fixture and every record is stamped `mode: \"MOCK\"`. The shape of every response is real; the content is test data. No request leaves your machine.\n\n**The one thing not to misread.** Three independent fields come back and they must be read together: `execution` (did the job finish), `findingsState` (did we find anything) and `coverage` (did we search everything we said we would). `SUCCEEDED` + `NO_MATCHES_FOUND` + `INCOMPLETE` means the run finished, found nothing, and did not search everything it promised. That is not a clean result.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },

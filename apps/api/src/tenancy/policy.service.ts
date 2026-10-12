@@ -20,7 +20,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import { resolveGraphBounds, type GraphBounds } from '@erly/adverse-domain';
+import { resolveGraphBounds, type GraphBounds } from '@adverse-search/domain';
 
 import { ApiException } from '../common/api-exception.js';
 

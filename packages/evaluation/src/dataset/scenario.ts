@@ -14,7 +14,7 @@ import type {
   AxisCInput,
   BandingRuleVersion,
   ClusteredSource,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 export interface CaseScenario {
   readonly axisA: AxisAInput;

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      # Includes the no-restricted-imports rule enforcing decision D-001.
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # src/app/boundaries.test.ts fails the build if domain logic is imported into the
+      # browser, if anything but the API client calls fetch, if evidence is rendered as
+      # HTML, or if sensitive data is written to browser storage.
+      - name: Unit tests and architectural boundaries
+        run: pnpm test:unit
+
+      - name: Production build
+        run: pnpm build

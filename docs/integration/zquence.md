@@ -1,7 +1,7 @@
 # Integrating with the adverse-search service
 
-For an application that calls this service machine-to-machine. Written for Zquence; nothing in
-it is Zquence-specific.
+For an application that calls this service machine-to-machine. Written for Target Platform; nothing in
+it is Target Platform-specific.
 
 **Status:** the service runs end to end in **mock mode**. Every source is a fixture, and every
 record carries `mode: "MOCK"`. What is proven today is the pipeline and the contract. Whether
@@ -20,8 +20,8 @@ GET  /v1/searches/{id}/findings     → findings AND coverage, together
 GET  /v1/searches/{id}/associations → the frozen FR-02 company graph
 ```
 
-Use `@erly/adverse-client` (in `packages/client`) rather than raw HTTP. A worked example is in
-[`examples/zquence-integration.mjs`](../../examples/zquence-integration.mjs). The client exists
+Use `@adverse-search/client` (in `packages/client`) rather than raw HTTP. A worked example is in
+[`examples/target-platform-integration.mjs`](../../examples/target-platform-integration.mjs). The client exists
 because four things are easy to get wrong and expensive when wrong; each is listed below.
 
 Authentication is a machine API key: `Authorization: ApiKey erly_<env>_<id>_<secret>`. A key is
@@ -85,7 +85,7 @@ naming the person.
 A designation reported in the media is a **lead to verify against the primary list** — never a
 sanctions hit, and never merged into one.
 
-Zquence keeps its sanctions.io integration for the primary check. Render adverse-search results
+Target Platform keeps its sanctions.io integration for the primary check. Render adverse-search results
 and sanctions results as separate, clearly labelled sections. A finding whose
 `proceduralStage` is `DESIGNATION_SANCTION` is still an adverse-media finding about a report of
 a designation; it is not the designation.

@@ -35,7 +35,7 @@ import https from 'node:https';
 import type { LookupFunction } from 'node:net';
 import zlib from 'node:zlib';
 
-import { screenResolvedAddress, type FailureSignal } from '@erly/adverse-domain';
+import { screenResolvedAddress, type FailureSignal } from '@adverse-search/domain';
 
 export interface TransportRequest {
   readonly url: string;

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { failurePolicy, NON_RETRYABLE_CLASSES, type FailureSignal } from '@erly/adverse-domain';
+import { failurePolicy, NON_RETRYABLE_CLASSES, type FailureSignal } from '@adverse-search/domain';
 
 import {
   classifyAttempt,

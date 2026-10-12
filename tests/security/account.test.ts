@@ -144,7 +144,7 @@ async function tenantAdminKey(tenantId: string): Promise<IssuedApiKey> {
     label: 'tenant admin, account tests',
     roles: ['tenant_admin'],
     scopes: ['search:read', 'admin:read', 'admin:write'],
-    createdBy: 'operator@erly.test',
+    createdBy: 'operator@example.com',
     expiresAt: null,
   });
 }

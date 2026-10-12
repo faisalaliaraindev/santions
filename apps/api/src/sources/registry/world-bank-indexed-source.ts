@@ -1,4 +1,4 @@
-import { sourceContentSchema, type SourceAccessPolicy } from '@erly/adverse-contracts';
+import { sourceContentSchema, type SourceAccessPolicy } from '@adverse-search/contracts';
 
 export const WORLD_BANK_DEBARRED_SOURCE_ID = 'world-bank-debarred';
 export const WORLD_BANK_DEBARRED_API_URL =

@@ -24,7 +24,7 @@ import type {
 } from '../src/sources/source-version.service.js';
 import type { SourceAdapterSet } from '../src/sources/sources.registry.js';
 
-const CONTACT = 'https://erlystage.com/bots/adverse-search';
+const CONTACT = 'https://example.com/bots/adverse-search';
 
 /** The SEC record, as `sec-litigation-releases.ts` writes it and the registry would hold it. */
 const SEC_VERSION_DOCUMENT = {

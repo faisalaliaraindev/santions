@@ -90,7 +90,7 @@ flowchart LR
 | Audit trail      | Hash-chained per tenant                                                       | Every action is attributable                                             |
 | HTTP hardening   | Helmet, CORS allowlist, 256 kb body cap                                       | Already done                                                             |
 | Outbound safety  | URL screening, DNS screening, robots, two byte budgets, breakers, kill switch | The service cannot be tricked into fetching internal addresses           |
-| Typed client     | `@erly/adverse-client`                                                        | Use it. It stops four common mistakes                                    |
+| Typed client     | `@adverse-search/client`                                                        | Use it. It stops four common mistakes                                    |
 
 ### 1.4 The API you will actually call
 
@@ -722,15 +722,15 @@ GET /v1/searches/{searchId}/findings
         "rejectedLeads": [...], "sourceOutcomes": [...] }
 ```
 
-Use `@erly/adverse-client` rather than raw HTTP. `waitForSearch` handles step 3 and **throws on
+Use `@adverse-search/client` rather than raw HTTP. `waitForSearch` handles step 3 and **throws on
 timeout** instead of returning a half-finished run as though it were finished.
 
 ## Appendix B — Files worth reading first
 
 | File                               | Why                                   |
 | :--------------------------------- | :------------------------------------ |
-| `docs/integration/zquence.md`      | The four things integrators get wrong |
-| `examples/zquence-integration.mjs` | A working end-to-end call sequence    |
+| `docs/integration/target-platform.md`      | The four things integrators get wrong |
+| `examples/target-platform-integration.mjs` | A working end-to-end call sequence    |
 | `packages/client/`                 | The typed client                      |
 | `openapi/openapi.json`             | The contract. Import into Postman     |
 | `docs/SIMPLE-STATUS.md`            | Where the project is, in plain words  |

@@ -14,7 +14,7 @@
  * with — rather than the seam being reverse-engineered from the first adapter that works.
  */
 
-import type { CountryCode } from '@erly/adverse-domain';
+import type { CountryCode } from '@adverse-search/domain';
 
 import type { DiscoveryQuery, Lead } from './lead.js';
 import type { AdapterDescriptor, SourceOutcome } from './source-adapter.js';

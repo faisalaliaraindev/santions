@@ -6,7 +6,7 @@
  * "correlationId does not exist" in exactly the modules that never imported the middleware.
  */
 
-import type { Principal } from '@erly/adverse-domain';
+import type { Principal } from '@adverse-search/domain';
 
 declare module 'express' {
   interface Request {

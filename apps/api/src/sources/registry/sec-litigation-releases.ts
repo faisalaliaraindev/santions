@@ -44,8 +44,8 @@
  *   roughly a thousandth of the ceiling. Most polls return **304** and no body.
  */
 
-import { sourceContentSchema, type SourceAccessPolicy } from '@erly/adverse-contracts';
-import type { StopConditionPolicy } from '@erly/adverse-domain';
+import { sourceContentSchema, type SourceAccessPolicy } from '@adverse-search/contracts';
+import type { StopConditionPolicy } from '@adverse-search/domain';
 
 /** The registry id. Stable, because it is written into every stored provenance record. */
 export const SEC_LITIGATION_RELEASES_SOURCE_ID = 'sec-litigation-releases';

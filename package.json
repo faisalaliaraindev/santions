@@ -1,5 +1,5 @@
 {
-  "name": "erly-adverse-search",
+  "name": "adverse-search-service",
   "version": "0.1.0",
   "private": true,
   "description": "Standalone adverse-media search service. Free and open-source sources only.",
@@ -39,7 +39,7 @@
     "sec:live-smoke": "pnpm build && node scripts/sec-live-smoke.mjs",
     "dev": "node scripts/dev.mjs",
     "demo:api": "pnpm build && node scripts/demo-api.mjs",
-    "demo:zquence": "echo \"[pending G9] zquence demo not implemented\" && exit 1",
+    "demo:target-platform": "echo \"[pending G9] target-platform demo not implemented\" && exit 1",
     "lexicon:audit": "vitest run --project unit packages/domain/test/taxonomy/lexicon-audit.test.ts",
     "dev:api": "node scripts/dev.mjs --only api",
     "dev:worker": "node scripts/dev.mjs --only worker",

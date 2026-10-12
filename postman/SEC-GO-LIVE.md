@@ -1,7 +1,7 @@
 # Source go-live Postman steps
 
 This is the operator checklist for folder **11 - Source go-live (four eyes)** in
-`erly-adverse-search-full.postman_collection.json`. The folder is generic: it acts on
+`adverse-search-service-full.postman_collection.json`. The folder is generic: it acts on
 `{{recordId}}` version `{{recordVersion}}`. The worked example below is the SEC litigation feed,
 which is what the environments still default to. For `sec-press-releases` and `gdelt-doc-v2` see
 [`../docs/sources/mixed-live-go-live.md`](../docs/sources/mixed-live-go-live.md); the only

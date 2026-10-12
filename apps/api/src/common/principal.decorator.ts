@@ -1,7 +1,7 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 
-import type { Principal } from '@erly/adverse-domain';
+import type { Principal } from '@adverse-search/domain';
 
 import { ApiException } from './api-exception.js';
 

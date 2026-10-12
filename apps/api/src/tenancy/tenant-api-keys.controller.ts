@@ -55,8 +55,8 @@ import {
   type EnableApiKeyInput,
   type IssuedApiKeyResponse,
   type RevokeApiKeyInput,
-} from '@erly/adverse-contracts';
-import { scopesForRoles, type MachineScope, type Principal, type Role } from '@erly/adverse-domain';
+} from '@adverse-search/contracts';
+import { scopesForRoles, type MachineScope, type Principal, type Role } from '@adverse-search/domain';
 
 import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { ApiException } from '../common/api-exception.js';

@@ -18,7 +18,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
-import type { ApiErrorBody } from '@erly/adverse-contracts';
+import type { ApiErrorBody } from '@adverse-search/contracts';
 
 import { ApiException } from './api-exception.js';
 

@@ -1,8 +1,8 @@
 /**
- * `@erly/adverse-client` — the typed client an integrating application uses.
+ * `@adverse-search/client` — the typed client an integrating application uses.
  *
- * Written for Zquence and for anything else that calls this service machine-to-machine. It
- * lives in this repository rather than theirs because Zquence-side workspace access has not
+ * Written for Target Platform and for anything else that calls this service machine-to-machine. It
+ * lives in this repository rather than theirs because Target Platform-side workspace access has not
  * been granted (gate G9 says so explicitly); when it is, this package moves or is published,
  * and nothing about the contract changes.
  *
@@ -36,7 +36,7 @@ import type {
   FindingsPage,
   SearchSummary,
   SubjectVersion,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 
 /** The error codes a caller is most likely to branch on. Not exhaustive — see `code`. */
 export type AdverseErrorCode = string;

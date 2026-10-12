@@ -17,7 +17,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
-import { decideAccess, type Permission } from '@erly/adverse-domain';
+import { decideAccess, type Permission } from '@adverse-search/domain';
 
 import { ApiException } from '../common/api-exception.js';
 import { ApiKeyError, ApiKeyService } from '../tenancy/api-key.service.js';
@@ -235,7 +235,7 @@ function readBearerToken(request: Request): string | undefined {
 }
 
 /**
- * `Authorization: ApiKey erly_live_…`.
+ * `Authorization: ApiKey asvc_live_…`.
  *
  * A distinct scheme rather than reusing `Bearer`, so a key is never fed to the JWT verifier and
  * a token is never fed to the key store. Sharing one scheme means every failed verification has

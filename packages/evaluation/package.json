@@ -1,5 +1,5 @@
 {
-  "name": "@erly/adverse-evaluation",
+  "name": "@adverse-search/evaluation",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,6 +15,6 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@erly/adverse-domain": "workspace:*"
+    "@adverse-search/domain": "workspace:*"
   }
 }

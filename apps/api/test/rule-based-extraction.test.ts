@@ -15,7 +15,7 @@ import {
 } from '../src/sources/rule-based-extraction.adapter.js';
 import type { ExtractedAssertion, ExtractionInput } from '../src/sources/extraction-model.port.js';
 import type { SourceOutcome } from '../src/sources/source-adapter.js';
-import { ADVERSE_CATEGORIES } from '@erly/adverse-domain';
+import { ADVERSE_CATEGORIES } from '@adverse-search/domain';
 
 const CLOCK = (): Date => new Date('2026-09-16T00:00:00.000Z');
 

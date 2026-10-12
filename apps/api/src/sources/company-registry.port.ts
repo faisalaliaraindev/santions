@@ -24,7 +24,7 @@
  * does *not* mean the directorship is current.
  */
 
-import type { CountryCode, PreciseDate, Tenure } from '@erly/adverse-domain';
+import type { CountryCode, PreciseDate, Tenure } from '@adverse-search/domain';
 
 import type { AdapterDescriptor, SourceOutcome } from './source-adapter.js';
 

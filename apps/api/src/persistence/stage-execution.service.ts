@@ -23,7 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { FailureClass } from '@erly/adverse-domain';
+import type { FailureClass } from '@adverse-search/domain';
 
 import { isDuplicateKeyError } from './inbox-receipt.service.js';
 

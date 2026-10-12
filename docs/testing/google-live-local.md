@@ -1,6 +1,6 @@
-# Google live, local — Zquence tenant acceptance (Postman Folder 19)
+# Google live, local — Target Platform tenant acceptance (Postman Folder 19)
 
-One LIVE adverse search, run by the real local Zquence tenant through the normal tenant API, with
+One LIVE adverse search, run by the real local Target Platform tenant through the normal tenant API, with
 `GOOGLE_NEWS` added **for that one request only**. Local diagnostic testing only.
 
 Google stays `REFUSED` under D20 and `defaultEnabledForDiscovery: false`. Nothing here changes an
@@ -70,7 +70,7 @@ PowerShell:
 
 ```powershell
 $env:ALLOW_LOCAL_GOOGLE_DIAGNOSTIC = 'true'
-$env:GOOGLE_DIAGNOSTIC_TENANT_ID   = '<actual local Zquence tenant id>'
+$env:GOOGLE_DIAGNOSTIC_TENANT_ID   = '<actual local Target Platform tenant id>'
 pnpm dev:live
 ```
 
@@ -78,7 +78,7 @@ Git Bash:
 
 ```bash
 ALLOW_LOCAL_GOOGLE_DIAGNOSTIC=true \
-GOOGLE_DIAGNOSTIC_TENANT_ID='<actual local Zquence tenant id>' \
+GOOGLE_DIAGNOSTIC_TENANT_ID='<actual local Target Platform tenant id>' \
 pnpm dev:live
 ```
 
@@ -94,7 +94,7 @@ worker gets the job.
 
 Import (or re-import) the current files from `postman/`:
 
-- collection: `erly-adverse-search-full.postman_collection.json`
+- collection: `adverse-search-service-full.postman_collection.json`
 - environment: `local.ready.postman_environment.json` (or the template, `local.postman_environment.json`)
 
 Environment values. The first four are already set. Enter the last two:
@@ -107,16 +107,16 @@ Environment values. The first four are already set. Enter the last two:
 | `googleSubjectDob`        | `1938-04-29` (optional; clear it to search by name only)            |
 | `googleSubjectCountry`    | `US`                                                                |
 | `searxngUrl`              | `http://127.0.0.1:28888`                                            |
-| **`zquenceApiKey`**       | **the existing local Zquence LIVE tenant API key**                  |
-| **`zquenceTenantId`**     | **the Zquence tenant id**; must equal `GOOGLE_DIAGNOSTIC_TENANT_ID` |
+| **`zquenceApiKey`**       | **the existing local Target Platform LIVE tenant API key**                  |
+| **`zquenceTenantId`**     | **the Target Platform tenant id**; must equal `GOOGLE_DIAGNOSTIC_TENANT_ID` |
 
 The key must be a LIVE key with the `tenant_admin` role, because 19.1 and 19.10 read the
 discovery-engine control API.
 
-Run the folder **`19 - Zquence LIVE Google Diagnostic`** with the Collection Runner.
+Run the folder **`19 - Target Platform LIVE Google Diagnostic`** with the Collection Runner.
 
 A folder-level guard runs before every request. If `baseUrl` is not local, the confirmation value
-is wrong, or either Zquence value is empty, nothing is sent. Request 19.0 also stops the folder if
+is wrong, or either Target Platform value is empty, nothing is sent. Request 19.0 also stops the folder if
 the key belongs to a different tenant or is not a LIVE key.
 
 | Step  | What it does                                                                                                                                                             |
@@ -125,7 +125,7 @@ the key belongs to a different tenant or is not a LIVE key.
 | 19.1  | Google normal state: `integrated`, `REFUSED`, default off, not effective                                                                                                 |
 | 19.2a | API ready                                                                                                                                                                |
 | 19.2b | SearXNG `/healthz`                                                                                                                                                       |
-| 19.3  | Create the subject, with a stable `externalSubjectRef` (`zquence-google-diagnostic:bernard-madoff`)                                                                      |
+| 19.3  | Create the subject, with a stable `externalSubjectRef` (`target-platform-google-diagnostic:bernard-madoff`)                                                                      |
 | 19.4  | `POST /v1/searches`, `environment: live`, with `X-Local-Discovery-Diagnostic: GOOGLE_NEWS`                                                                               |
 | 19.5  | Poll `GET /v1/searches/{id}` until the search reaches a terminal state                                                                                                   |
 | 19.6  | `GET /v1/searches/{id}/findings`                                                                                                                                         |
@@ -151,7 +151,7 @@ Every test in Folder 19 is green, which proves:
 - **The engine diagnostics show `GOOGLE_NEWS`.** `diagnosticOverride: true`, `diagnosticOnly: true`,
   `effectiveEnabled: true`, and `governanceStatus` is still `REFUSED` (19.7). Candidates list
   `GOOGLE_NEWS` in `discoveryEngines` / `discoveredByEngines` (19.8).
-- **The request used the real Zquence tenant.** `/auth/session` returns `zquenceTenantId`, in
+- **The request used the real Target Platform tenant.** `/auth/session` returns `zquenceTenantId`, in
   `live` (19.0).
 - **The normal adverse-search API was used.** `POST /v1/subjects`, `POST /v1/searches`,
   `GET /v1/searches/{id}` and `/findings`. No Google-specific endpoint exists or was called.

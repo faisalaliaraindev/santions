@@ -39,7 +39,7 @@ export const createSearchSchema = z
   .object({
     /**
      * Either an existing service-owned subject, or an identity snapshot to create one from.
-     * Zquence sends an explicit permitted snapshot, or first creates a subject (section 4.1).
+     * Target Platform sends an explicit permitted snapshot, or first creates a subject (section 4.1).
      */
     subjectRef: z
       .object({

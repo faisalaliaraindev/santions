@@ -32,7 +32,7 @@ import {
   type CapabilityStatus,
   type CoverageOutcome,
   type EmptyResultMeaning,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 interface CoverageRecord extends Omit<CapabilityCoverage, 'assessedAt'> {
   readonly assessedAt: Date;

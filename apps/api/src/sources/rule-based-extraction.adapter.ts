@@ -78,7 +78,7 @@ import {
   type AdverseCategory,
   type PartyRole,
   type StageValue,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 export const RULE_BASED_EXTRACTION_DESCRIPTOR: AdapterDescriptor = {
   adapterId: 'rule-based-extraction',

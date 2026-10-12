@@ -19,7 +19,7 @@ import { RequestMethod, VERSION_NEUTRAL } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA, VERSION_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 
-import { buildOpenApiDocument } from '@erly/adverse-contracts';
+import { buildOpenApiDocument } from '@adverse-search/contracts';
 
 import { AdminController } from '../src/admin/admin.controller.js';
 import { AccountController } from '../src/auth/account.controller.js';

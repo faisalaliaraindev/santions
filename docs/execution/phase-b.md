@@ -163,7 +163,7 @@ error typing stay hand-written. Only operations and types are generated.
 ## Decision to close
 
 **D10 — the minimum identity data an integrating application must supply.** Owner: product
-plus Zquence. It hardens into the B6 subject schema, so it cannot slide past this phase. If
+plus Target Platform. It hardens into the B6 subject schema, so it cannot slide past this phase. If
 the answer has not arrived when you reach B6, implement the permissive superset, record the
 assumption prominently in `docs/decisions.md`, and flag it in the handoff — do not let the
 schema quietly become the decision.

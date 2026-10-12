@@ -71,8 +71,8 @@ explicit `scopes` list only when you want a key that can do **less** than its ro
 
 | File                                                   | What it is                                                                                                                           |
 | :----------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| **`erly-adverse-search-full.postman_collection.json`** | **Import this one.** 80 requests, 15 folders, sandbox **and** live. It is the only collection kept up to date                        |
-| `erly-adverse-search.postman_collection.json`          | A short happy-path subset kept for demos. It has no signup flow, no live folder and no admin. Do not use it to test sandbox and live |
+| **`adverse-search-service-full.postman_collection.json`** | **Import this one.** 80 requests, 15 folders, sandbox **and** live. It is the only collection kept up to date                        |
+| `adverse-search-service.postman_collection.json`          | A short happy-path subset kept for demos. It has no signup flow, no live folder and no admin. Do not use it to test sandbox and live |
 
 **One environment** — these are mutually exclusive, so import the one you want and select it:
 
@@ -223,7 +223,7 @@ request at all. 16.5 halts before 16.6 unless `indexedRefreshConfirm` is exactly
 megabytes for OFAC SDN. Leave it unset and the rest of the folder still runs.
 
 ```bash
-pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json   -e postman/local.postman_environment.json   --folder "16 - Global Indexed Sources E2E"   --env-var "baseUrl=http://127.0.0.1:3000"   --env-var "operatorKey=$OPERATOR_KEY"   --env-var "approverKey=$APPROVER_KEY"   --env-var "apiKey=$ANALYST_KEY"
+pnpm dlx newman@6 run postman/adverse-search-service-full.postman_collection.json   -e postman/local.postman_environment.json   --folder "16 - Global Indexed Sources E2E"   --env-var "baseUrl=http://127.0.0.1:3000"   --env-var "operatorKey=$OPERATOR_KEY"   --env-var "approverKey=$APPROVER_KEY"   --env-var "apiKey=$ANALYST_KEY"
 ```
 
 It needs a populated stack. If 16.4 reports no usable snapshots, the sources have not been
@@ -508,7 +508,7 @@ established why the publisher refused; the domain cooldown is separate and is wa
 cleared. `docs/sources/mixed-live-go-live.md` section F has the commands.
 
 ```bash
-pnpm dlx newman@6 run postman/erly-adverse-search-full.postman_collection.json   -e postman/live.ready.postman_environment.json   --folder "15 - Mixed Live E2E: SEC + GDELT"   --timeout-request 180000 --timeout-script 900000 --timeout 1500000
+pnpm dlx newman@6 run postman/adverse-search-service-full.postman_collection.json   -e postman/live.ready.postman_environment.json   --folder "15 - Mixed Live E2E: SEC + GDELT"   --timeout-request 180000 --timeout-script 900000 --timeout 1500000
 ```
 
 ## Keeping the collection honest
@@ -537,5 +537,5 @@ disagrees with `openapi/openapi.json`, the OpenAPI document is right.
 | `docs/SIMPLE-STATUS.md`            | Where the project is, in plain words          |
 | `docs/SIMPLE-FLOW.md`              | The same, as diagrams                         |
 | `docs/TODO-E2E.md`                 | What is left to build                         |
-| `docs/integration/zquence.md`      | The four things machine integrators get wrong |
-| `examples/zquence-integration.mjs` | The same walkthrough in code                  |
+| `docs/integration/target-platform.md`      | The four things machine integrators get wrong |
+| `examples/target-platform-integration.mjs` | The same walkthrough in code                  |

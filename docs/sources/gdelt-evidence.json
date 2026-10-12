@@ -1,6 +1,6 @@
 {
   "sourceId": "gdelt-doc-v2",
-  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
   "steps": {
     "apiRobots": {
       "url": "https://api.gdeltproject.org/robots.txt",

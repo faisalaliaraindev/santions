@@ -8,16 +8,16 @@ the evidence supports the connection.
 
 It is **not** a criminal record check, **not** a proof of identity, **not** a determination
 of guilt, and **not** a sanctions-list engine. A designation found in reporting is a lead to
-verify against the primary list, never a finding. Zquence keeps its sanctions.io integration
+verify against the primary list, never a finding. Target Platform keeps its sanctions.io integration
 and makes the final compliance decision.
 
 ## Repository split
 
 Two repositories, per decision D-001:
 
-- `erly-sanction-service-backend` — this repository. API, worker, domain, providers,
+- `adverse-search-service` — this repository. API, worker, domain, providers,
   persistence, evaluation, infrastructure.
-- `erly-sanction-service-frontend` — the React control panel.
+- `adverse-search-frontend` — the React control panel.
 
 The panel reaches the domain only through the versioned HTTP API, using a client generated
 from the OpenAPI document this repository produces. There is no second matching engine in
@@ -37,7 +37,7 @@ packages/
   providers/       Discovery, registry, fetch and extraction adapters
   persistence/     Tenant-scoped repositories, transactions, indexes, outbox, S3 metadata
   observability/   Correlation context, redaction, metric conventions
-  client/          Typed Node client and Zquence integration examples
+  client/          Typed Node client and Target Platform integration examples
   evaluation/      PURE. Labelled dataset, metrics, I1-I10 invariant harness
 infra/
   local/           Compose, emulator bootstrap, OIDC realm, SearXNG, model runtime, fixtures
@@ -103,7 +103,7 @@ that the convicted person is the customer.
 
 ```
         ┌─────────────┐  signed, scoped token   ┌──────────────┐
-Zquence │  integrator │ ──────────────────────▶ │  apps/api    │
+Target Platform │  integrator │ ──────────────────────▶ │  apps/api    │
         └─────────────┘                          └──────┬───────┘
                                                         │ tenant-scoped commands
         ┌─────────────┐  OIDC + BFF session             ▼

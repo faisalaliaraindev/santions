@@ -35,8 +35,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 
-import type { CreateSearchInput, ScreenRequest, ScreenResult } from '@erly/adverse-contracts';
-import type { Principal } from '@erly/adverse-domain';
+import type { CreateSearchInput, ScreenRequest, ScreenResult } from '@adverse-search/contracts';
+import type { Principal } from '@adverse-search/domain';
 
 import { JOB_ENVELOPE_VERSION, type JobEnvelope } from '../jobs/queue.port.js';
 import { SearchJobHandler, SEARCH_QUEUED_EVENT } from '../pipeline/search-job.handler.js';

@@ -21,13 +21,13 @@ import { chai, describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '../../..');
 const COLLECTION = JSON.parse(
-  readFileSync(resolve(ROOT, 'postman/erly-adverse-search-full.postman_collection.json'), 'utf8'),
+  readFileSync(resolve(ROOT, 'postman/adverse-search-service-full.postman_collection.json'), 'utf8'),
 ) as Collection;
 const TEMPLATE_ENV = JSON.parse(
   readFileSync(resolve(ROOT, 'postman/local.postman_environment.json'), 'utf8'),
 ) as { values: { key: string; value: string }[] };
 
-const FOLDER_NAME = '19 - Zquence LIVE Google Diagnostic';
+const FOLDER_NAME = '19 - Target Platform LIVE Google Diagnostic';
 
 interface Script {
   listen: 'prerequest' | 'test';
@@ -132,8 +132,8 @@ function run(
 const ARMED = {
   baseUrl: 'http://127.0.0.1:3000',
   googleDiagnosticConfirm: 'yes-run-google-live-local',
-  zquenceApiKey: 'erly_live_abc_def',
-  zquenceTenantId: 'tenant-zquence',
+  zquenceApiKey: 'asvc_live_abc_def',
+  zquenceTenantId: 'tenant-target-platform',
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -204,7 +204,7 @@ describe('Folder 19 structure', () => {
     }
   });
 
-  it('authenticates every tenant request with the Zquence key, never the default apiKey', () => {
+  it('authenticates every tenant request with the Target Platform key, never the default apiKey', () => {
     for (const item of requests) {
       const auth = item.request?.auth;
       if (item.name.startsWith('19.2')) {
@@ -311,7 +311,7 @@ describe('Folder 19 guard', () => {
   });
 
   it('refuses a non-local baseUrl', () => {
-    expect(() => run(guard, { env: { ...ARMED, baseUrl: 'https://api.erlystage.com' } })).toThrow(
+    expect(() => run(guard, { env: { ...ARMED, baseUrl: 'https://api.example.com' } })).toThrow(
       /baseUrl must be a local API/,
     );
   });
@@ -330,18 +330,18 @@ describe('Folder 19 guard', () => {
     expect(other.failed.length).toBeGreaterThan(0);
     const sandbox = run(source, {
       env: ARMED,
-      json: { tenantId: 'tenant-zquence', environment: 'sandbox' },
+      json: { tenantId: 'tenant-target-platform', environment: 'sandbox' },
     });
     expect(sandbox.nextRequest).toBeNull();
     const good = run(source, {
       env: ARMED,
-      json: { tenantId: 'tenant-zquence', environment: 'live' },
+      json: { tenantId: 'tenant-target-platform', environment: 'live' },
     });
     expect(good.failed).toEqual([]);
     expect(good.nextRequest).toBeUndefined();
   });
 
-  it('19.3 builds a normal subject body with a stable Zquence reference and the optional DOB', () => {
+  it('19.3 builds a normal subject body with a stable Target Platform reference and the optional DOB', () => {
     const result = run(scriptOf(byPrefix('19.3'), 'prerequest'), {
       env: { ...ARMED, googleSubjectName: 'Bernard Madoff', googleSubjectDob: '1938-04-29' },
     });
@@ -351,7 +351,7 @@ describe('Folder 19 guard', () => {
       aliases: [],
       countryContext: ['US'],
       knownCompanies: [],
-      externalSubjectRef: 'zquence-google-diagnostic:bernard-madoff',
+      externalSubjectRef: 'target-platform-google-diagnostic:bernard-madoff',
       purpose: 'CUSTOMER_ONBOARDING',
       dateOfBirth: { value: '1938-04-29', precision: 'DAY' },
     });

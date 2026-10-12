@@ -79,7 +79,7 @@
 
 import { Logger } from '@nestjs/common';
 
-import { canonicalise, screenUrl, type CountryCode } from '@erly/adverse-domain';
+import { canonicalise, screenUrl, type CountryCode } from '@adverse-search/domain';
 
 import { endpointDigest, hostOf, type DiscoveryRequestLog } from '../discovery-request-log.js';
 import { leadsFrom, type RawCandidate } from '../discovery/lead-mapping.js';

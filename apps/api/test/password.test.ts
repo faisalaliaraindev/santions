@@ -8,7 +8,7 @@
 import { parseOptions } from '@node-rs/argon2';
 import { describe, expect, it } from 'vitest';
 
-import { PASSWORD_MIN_LENGTH } from '@erly/adverse-contracts';
+import { PASSWORD_MIN_LENGTH } from '@adverse-search/contracts';
 
 import {
   ARGON2_OPTIONS,

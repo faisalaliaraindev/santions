@@ -56,7 +56,7 @@ import type {
   OfficerSearchQuery,
   RegistryCompany,
 } from './company-registry.port.js';
-import type { FailureSignal, PreciseDate } from '@erly/adverse-domain';
+import type { FailureSignal, PreciseDate } from '@adverse-search/domain';
 
 export const COMPANIES_HOUSE_BASE_URL = 'https://api.company-information.service.gov.uk';
 

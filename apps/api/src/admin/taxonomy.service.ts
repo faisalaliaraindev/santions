@@ -14,7 +14,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import type { TaxonomyVersion } from '@erly/adverse-domain';
+import type { TaxonomyVersion } from '@adverse-search/domain';
 
 import { ApiException } from '../common/api-exception.js';
 

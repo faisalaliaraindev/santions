@@ -34,7 +34,7 @@ import type {
   PrimarySourcePort,
   PrimarySourceQuery,
 } from '../primary-source.port.js';
-import type { FailureSignal } from '@erly/adverse-domain';
+import type { FailureSignal } from '@adverse-search/domain';
 
 import { SHARED_NAME } from './registry-fixtures.js';
 

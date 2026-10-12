@@ -27,7 +27,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'Erly adverse-search API',
+      title: 'Adverse Search Service API',
       version: OPENAPI_VERSION,
       description: [
         'Adverse-media screening. Free and open-source sources only.',
@@ -44,7 +44,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
         '- **Sparse identity input is accepted and stays unresolved.** A missing date of birth',
         '  is never inferred, and a name is never split into given and family parts.',
       ].join('\n'),
-      contact: { name: 'Erly' },
+      contact: { name: 'Adverse Search' },
     },
     servers: [
       { url: 'http://127.0.0.1:3000', description: 'Local development' },

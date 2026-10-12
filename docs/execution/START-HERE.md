@@ -16,7 +16,7 @@ of previous sessions. It is deliberately short.
 > **Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-running the
 > bootstrap.** That is provisioning by redeploy. This phase replaces it with signup through the
 > API: a customer registers, sets a password, logs in, and issues their own **sandbox and live**
-> keys with nobody at Erly involved.
+> keys with nobody at Adverse Search involved.
 >
 > **Done (2026-09-16): I4.** `POST /v1/tenant/api-keys/{keyId}/disable` and `.../enable` move a
 > reversible `disabledAt`, separate from the one-way `revokedAt` that `DELETE` sets. Recorded as
@@ -46,7 +46,7 @@ of previous sessions. It is deliberately short.
 > derived from `decideLiveAccess` rather than requested; attempts are bounded per origin by a
 > limiter now shared with signup. Recorded as **D-059**.
 >
-> **Signup → confirm → sign in → issue your own key now runs end to end**, with nobody at Erly
+> **Signup → confirm → sign in → issue your own key now runs end to end**, with nobody at Adverse Search
 > involved. `tests/security/login.test.ts` does exactly that.
 >
 > **Done (2026-09-17): the flow closes.** Signup now grants the first user
@@ -469,6 +469,6 @@ Inside `apps/api/src`, the four directories Phase C added:
 | `associations/` | The FR-02 graph (D3): officer resolution, the `DIRECTOR_OF` edges, and the snapshot frozen to the run                                                                                                                                                                               |
 | `pipeline/`     | The search pipeline, the job handler that runs it, and the findings store (Phase E slice)                                                                                                                                                                                           |
 
-The control panel is a separate repository: `../erly-sanction-service-frontend`. It has its
+The control panel is a separate repository: `../adverse-search-frontend`. It has its
 own `CLAUDE.md`. It must never import the domain packages — decision D-001, enforced by lint
 and by `src/app/boundaries.test.ts`.

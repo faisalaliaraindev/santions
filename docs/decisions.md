@@ -15,8 +15,8 @@ repositories:
 
 | Repository                       | Contents                                                                |
 | :------------------------------- | :---------------------------------------------------------------------- |
-| `erly-sanction-service-backend`  | `apps/api`, `apps/worker`, all `packages/*`, `infra/*`, `tests`, `docs` |
-| `erly-sanction-service-frontend` | the React control panel (plan's `apps/control-panel`)                   |
+| `adverse-search-service`  | `apps/api`, `apps/worker`, all `packages/*`, `infra/*`, `tests`, `docs` |
+| `adverse-search-frontend` | the React control panel (plan's `apps/control-panel`)                   |
 
 **Why:** the repositories already exist with their own remotes and are how the team has
 chosen to split ownership and deployment. Collapsing them into one repository would discard
@@ -32,7 +32,7 @@ deliberately:
   route to the API.
 - The frontend depends on no domain package. Banding, identity resolution and stage logic
   live only in `packages/domain` and reach the browser only as API responses. A lint rule in
-  the frontend forbids importing `@erly/adverse-domain`.
+  the frontend forbids importing `@adverse-search/domain`.
 - The G9 contract tests run against the generated client, so a backend contract change that
   breaks the panel fails the backend build rather than being discovered in the browser.
 
@@ -293,7 +293,7 @@ Two consequences worth planning for:
    treated as no more common than rare ones, and the FR-08 frequency penalty that exists to
    catch exactly this will never fire. Sourcing that distribution is a Phase D work item.
 
-Anything beyond a name that Zquence _can_ supply materially improves resolution and should be
+Anything beyond a name that Target Platform _can_ supply materially improves resolution and should be
 sent when available, even though it is not required.
 
 ---
@@ -1983,7 +1983,7 @@ existed carry no `createdVia` and no `emailVerifiedAt`. Reading that absence as 
 would take live access away from every hand-onboarded customer on deploy — with no verification
 email to re-send, because the address was never collected. The gate therefore applies to tenants
 marked `createdVia: 'SIGNUP'`, which is exactly the population D-052 was reasoning about: nobody
-at Erly has spoken to them. Same shape, and same reason, as `disabledAtOf` in D-054.
+at Adverse Search has spoken to them. Same shape, and same reason, as `disabledAtOf` in D-054.
 
 **Entitlement is checked first.** A tenant that was never sold live is told that, not told to
 check their email — the second describes a route to live access that verifying will not open.

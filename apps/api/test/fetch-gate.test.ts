@@ -16,7 +16,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import type { TaxonomyVersion } from '@erly/adverse-domain';
+import type { TaxonomyVersion } from '@adverse-search/domain';
 
 import {
   FETCH_GATE_ISSUER,
@@ -120,7 +120,7 @@ function gateFor(
   return new FetchGateService(readerFor(version), mode, {
     mode,
     contactUrl:
-      options.contactUrl === undefined ? 'https://erlystage.com/bots' : options.contactUrl,
+      options.contactUrl === undefined ? 'https://example.com/bots' : options.contactUrl,
   });
 }
 
@@ -197,7 +197,7 @@ describe('every gate refuses on its own fact', () => {
         },
       },
       'LIVE',
-      { mode: 'LIVE', contactUrl: 'https://erlystage.com/bots' },
+      { mode: 'LIVE', contactUrl: 'https://example.com/bots' },
     );
 
     const decision = await gate.authorise(inputFor({ url: 'http://169.254.169.254/latest/meta' }));
@@ -398,7 +398,7 @@ describe('one honest egress identity (E3 minimum)', () => {
 
   it('names a real identity whose user agent carries the contact URL', async () => {
     const decision = await gateFor(NEWS_SOURCE, {
-      contactUrl: 'https://erlystage.com/bots/adverse-search',
+      contactUrl: 'https://example.com/bots/adverse-search',
     }).authorise(inputFor());
 
     if (!decision.authorised) {
@@ -408,7 +408,7 @@ describe('one honest egress identity (E3 minimum)', () => {
     expect(decision.egressIdentity.identityId).toBe(PRIMARY_EGRESS_IDENTITY_ID);
     expect(decision.egressIdentity.identityId).not.toBe('mock-egress-1');
     expect(decision.egressIdentity.userAgent).toContain(
-      'https://erlystage.com/bots/adverse-search',
+      'https://example.com/bots/adverse-search',
     );
   });
 

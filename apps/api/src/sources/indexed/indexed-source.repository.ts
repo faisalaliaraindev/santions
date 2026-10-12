@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import { normaliseName } from '@erly/adverse-domain';
+import { normaliseName } from '@adverse-search/domain';
 
 import type {
   IndexedSnapshotPruneSummary,

@@ -34,7 +34,7 @@
  * question to ask is whether it really does.
  */
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
+import { sourceContentSchema } from '@adverse-search/contracts';
 
 /**
  * The stop conditions a discovery source gets by default.

@@ -40,7 +40,7 @@ import {
   type RungAttempt,
   type SourceCoverageOutcome,
   type TaxonomyVersion,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import { CascadeService, type CascadeHealthPort } from '../src/pipeline/cascade.service.js';
 import { LadderBuilder } from '../src/pipeline/ladder.builder.js';
@@ -69,7 +69,7 @@ import type {
 import type { SourceAdapterSet } from '../src/sources/sources.registry.js';
 
 const NOW = new Date('2026-09-18T12:00:00.000Z');
-const CONTACT = 'https://erlystage.com/bots/adverse-search';
+const CONTACT = 'https://example.com/bots/adverse-search';
 
 const SEC_LITIGATION_URL = 'https://www.sec.gov/enforcement-litigation/litigation-releases/rss';
 const SEC_PRESS_URL = 'https://www.sec.gov/news/pressreleases.rss';

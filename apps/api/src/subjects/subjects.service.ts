@@ -12,8 +12,8 @@ import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { ClientSession, Collection, Db } from 'mongodb';
 
-import type { CreateSubjectInput, SubjectVersion } from '@erly/adverse-contracts';
-import { normaliseName, phoneticKeys } from '@erly/adverse-domain';
+import type { CreateSubjectInput, SubjectVersion } from '@adverse-search/contracts';
+import { normaliseName, phoneticKeys } from '@adverse-search/domain';
 
 import { ApiException } from '../common/api-exception.js';
 import { NameFrequencyService } from './name-frequency.service.js';

@@ -29,7 +29,7 @@ import {
   type SignupResult,
   type VerifyEmailInput,
   type VerifyEmailResult,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 
 import { ACCEPTED_DETAIL, AccountService, toTokenRefusal } from '../auth/account.service.js';
 import { Public } from '../auth/auth.guard.js';

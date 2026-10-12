@@ -229,7 +229,7 @@ describe('the kill switch takes effect at the point of use (T36)', () => {
     const suspended = engageKillSwitch({
       health: health(),
       reason: 'Rights violation reported by the publisher',
-      engagedBy: 'ops@erly',
+      engagedBy: 'ops@example.com',
       now: new Date(T0.getTime() + 1000),
     });
 
@@ -241,7 +241,7 @@ describe('the kill switch takes effect at the point of use (T36)', () => {
     expect(useTime.allowed).toBe(false);
     expect(useTime.refusal).toBe('KILL_SWITCH_ENGAGED');
     expect(useTime.detail).toContain('Rights violation reported by the publisher');
-    expect(useTime.detail).toContain('ops@erly');
+    expect(useTime.detail).toContain('ops@example.com');
   });
 
   it('reports the suspension even when the breaker is open and the budget is spent', () => {
@@ -251,7 +251,7 @@ describe('the kill switch takes effect at the point of use (T36)', () => {
     current = engageKillSwitch({
       health: current,
       reason: 'Licence under review',
-      engagedBy: 'legal@erly',
+      engagedBy: 'legal@example.com',
       now: T0,
     });
 
@@ -390,7 +390,7 @@ describe('a result produced before a suspension reads as since-suspended (T36)',
     const suspended = engageKillSwitch({
       health: health(),
       reason: 'Publisher withdrew permission',
-      engagedBy: 'ops@erly',
+      engagedBy: 'ops@example.com',
       now: T0,
     });
     const note = sinceSuspendedNote({ health: suspended, producedAt: produced, asOf: T0 });

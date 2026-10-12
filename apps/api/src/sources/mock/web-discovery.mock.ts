@@ -26,7 +26,7 @@ import {
 } from '../source-adapter.js';
 import type { Lead } from '../lead.js';
 import type { EngineMixQuery, SiteSearchQuery, WebDiscoveryPort } from '../web-discovery.port.js';
-import type { FailureSignal } from '@erly/adverse-domain';
+import type { FailureSignal } from '@adverse-search/domain';
 
 import { FIXTURE_LEADS, queryMatchesFixture } from './discovery-fixtures.js';
 import { withinWindow } from './news-discovery.mock.js';

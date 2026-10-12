@@ -7,7 +7,7 @@
  * number that says nothing about whether the product finds things.
  */
 
-import type { EvidenceBand, IdentityGrade, PartyRole } from '@erly/adverse-domain';
+import type { EvidenceBand, IdentityGrade, PartyRole } from '@adverse-search/domain';
 
 import type { LabelledCase } from '../dataset/types.js';
 

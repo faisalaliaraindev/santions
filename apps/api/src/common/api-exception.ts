@@ -13,7 +13,7 @@ import {
   statusForErrorCode,
   type ApiErrorBody,
   type ErrorCode,
-} from '@erly/adverse-contracts';
+} from '@adverse-search/contracts';
 
 export class ApiException extends HttpException {
   readonly code: ErrorCode;

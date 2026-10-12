@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { classifyFailure, failurePolicy, shouldRetry } from '@erly/adverse-domain';
+import { classifyFailure, failurePolicy, shouldRetry } from '@adverse-search/domain';
 
 import { classifyAttempt } from '../src/jobs/job-consumer.js';
 import { JobFailure } from '../src/jobs/job-handler.js';

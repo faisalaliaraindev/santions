@@ -20,7 +20,7 @@
  * decision (D-012). Enforcing an invented schema on them now would be enforcing a guess.
  */
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
+import { sourceContentSchema } from '@adverse-search/contracts';
 
 import { ApiException } from '../common/api-exception.js';
 

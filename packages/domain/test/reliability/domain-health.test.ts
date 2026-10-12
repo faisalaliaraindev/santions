@@ -204,10 +204,10 @@ describe('an operator suspending by hand', () => {
     const health = suspendDomain({
       health: fresh(),
       reason: 'The publisher emailed and asked us to stop.',
-      suspendedBy: 'faisal@erlystage.com',
+      suspendedBy: 'faisal@example.com',
       now: T0,
     });
-    expect(health.suspension?.suspendedBy).toBe('faisal@erlystage.com');
+    expect(health.suspension?.suspendedBy).toBe('faisal@example.com');
     expect(decideDomainAccess({ health, now: at(1) }).refusal).toBe('DOMAIN_SUSPENDED');
   });
 

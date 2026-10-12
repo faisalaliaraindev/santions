@@ -7,7 +7,7 @@ Today a tenant is created by editing `scripts/bootstrap/seed-data.mjs` and re-ru
 bootstrap. That is provisioning by redeploy, and it is not an onboarding process.
 
 This phase replaces it: a customer signs up through the API, sets a password, logs in, and issues
-their own sandbox and live keys without anyone at Erly being involved.
+their own sandbox and live keys without anyone at Adverse Search being involved.
 
 ---
 
@@ -156,7 +156,7 @@ consumers — but **without** becoming a second authentication system:
   attempt by design and an unbounded login route spends that with nothing but a socket.
 
 **What this completes.** Signup → confirm → sign in → issue your own key now runs end to end with
-nobody at Erly involved. There is a test that does exactly that.
+nobody at Adverse Search involved. There is a test that does exactly that.
 
 `POST /auth/login` exists as an OIDC redirect for the panel. Machine-driven signup needs a session
 the customer's own backend can obtain and use. Either:

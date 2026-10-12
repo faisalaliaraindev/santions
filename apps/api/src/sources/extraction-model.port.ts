@@ -25,7 +25,7 @@
  * wires a real extractor and Phase F chooses the model.
  */
 
-import type { PartyRole, PreciseDate, StageValue } from '@erly/adverse-domain';
+import type { PartyRole, PreciseDate, StageValue } from '@adverse-search/domain';
 
 import type { AdapterDescriptor, SourceOutcome } from './source-adapter.js';
 

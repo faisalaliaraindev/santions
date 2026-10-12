@@ -2,7 +2,7 @@
   "sourceId": "unsc-consolidated",
   "sourceName": "UN Security Council Consolidated List",
   "publisher": "United Nations Security Council",
-  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
   "authorisingDecision": {
     "decision": "D19",
     "approvedBy": "Faisal Ali",

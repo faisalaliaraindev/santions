@@ -15,8 +15,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
-import { registrableDomain } from '@erly/adverse-domain';
+import { sourceContentSchema } from '@adverse-search/contracts';
+import { registrableDomain } from '@adverse-search/domain';
 
 import {
   GDELT_DOC_V2_CONTENT,
@@ -257,7 +257,7 @@ describe('searxng-adverse-media is an internal service, not a publisher', () => 
   it('names us as the publisher, never an engine', () => {
     // The single confusion this whole milestone is written against. A record naming Google as
     // the publisher would put a search engine on the provenance line of a finding about a person.
-    expect(SEARXNG_CONTENT.publisher).toContain('Erly');
+    expect(SEARXNG_CONTENT.publisher).toContain('Adverse Search');
     for (const engine of ['Google', 'Bing', 'Brave', 'DuckDuckGo', 'Reuters']) {
       expect(SEARXNG_CONTENT.publisher).not.toContain(engine);
       expect(SEARXNG_CONTENT.sourceName).not.toContain(engine);

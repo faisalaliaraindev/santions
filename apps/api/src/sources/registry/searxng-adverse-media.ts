@@ -71,7 +71,7 @@
  * useless source, and exactly what it should be until somebody decides on an engine.
  */
 
-import { sourceContentSchema } from '@erly/adverse-contracts';
+import { sourceContentSchema } from '@adverse-search/contracts';
 
 /** The registry id. Stable, because it is written into every stored provenance record. */
 export const SEARXNG_SOURCE_ID = 'searxng-adverse-media';
@@ -102,7 +102,7 @@ export const SEARXNG_CONTENT = {
   sourceName: 'SearXNG adverse-media discovery (self-hosted)',
   // Us. Not Google, not Bing, not any engine — naming one here would be the exact confusion the
   // whole engine-governance arrangement exists to prevent.
-  publisher: 'Erly (self-hosted SearXNG instance)',
+  publisher: 'Adverse Search (self-hosted SearXNG instance)',
   connectorType: 'NEWS_DISCOVERY_SEARXNG',
   canonicalDomains: [SEARXNG_CANONICAL_DOMAIN],
   // Lead-only. See the file header.

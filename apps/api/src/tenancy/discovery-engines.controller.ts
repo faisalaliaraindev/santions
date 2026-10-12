@@ -45,8 +45,8 @@ import {
   type DiscoveryEngineList,
   type DiscoveryEngineSetting,
   type SetDiscoveryEngine,
-} from '@erly/adverse-contracts';
-import type { Principal } from '@erly/adverse-domain';
+} from '@adverse-search/contracts';
+import type { Principal } from '@adverse-search/domain';
 
 import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { ApiException } from '../common/api-exception.js';

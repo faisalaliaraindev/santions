@@ -2,7 +2,7 @@
   "sourceId": "ofac-sdn",
   "sourceName": "OFAC Specially Designated Nationals List",
   "publisher": "US Department of the Treasury, Office of Foreign Assets Control",
-  "userAgent": "ErlyAdverseSearch/1.0 (+https://erlystage.com/bots/adverse-search)",
+  "userAgent": "ErlyAdverseSearch/1.0 (+https://example.com/bots/adverse-search)",
   "authorisingDecision": {
     "decision": "D19",
     "approvedBy": "Faisal Ali",

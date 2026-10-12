@@ -5,8 +5,8 @@ import {
   screenRequestSchema,
   type ScreenRequest,
   type ScreenResult,
-} from '@erly/adverse-contracts';
-import type { Principal } from '@erly/adverse-domain';
+} from '@adverse-search/contracts';
+import type { Principal } from '@adverse-search/domain';
 
 import { RequirePermission, RequireScope } from '../auth/auth.guard.js';
 import { CurrentPrincipal } from '../common/principal.decorator.js';

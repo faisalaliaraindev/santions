@@ -18,7 +18,7 @@ import type {
   ClusteredSource,
   IdentityFactor,
   PreciseDate,
-} from '@erly/adverse-domain';
+} from '@adverse-search/domain';
 
 import type { LabelledCase, LabelledDataset, LabelledDocument } from './types.js';
 

@@ -1,7 +1,7 @@
-# Erly adverse-search service
+# Adverse Search Service service
 
 Standalone adverse-media search service. Node/TypeScript backend, React control panel in a
-separate repository (`erly-sanction-service-frontend`). Free and open-source sources only —
+separate repository (`adverse-search-frontend`). Free and open-source sources only —
 zero paid data subscriptions.
 
 ## If you are starting a fresh session

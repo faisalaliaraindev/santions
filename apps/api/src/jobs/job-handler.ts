@@ -18,7 +18,7 @@
  *    The consumer classifies; the handler observes.
  */
 
-import type { FailureSignal } from '@erly/adverse-domain';
+import type { FailureSignal } from '@adverse-search/domain';
 
 import type { JobEnvelope } from './queue.port.js';
 

@@ -7,7 +7,7 @@
  * - **The same article at two rungs.** `lead-duplicate-*` is one story syndicated to two
  *   domains, so a relevance filter that counts sightings as independent corroboration is
  *   caught here rather than in Phase F, where it would look like a banding bug. The clustering
- *   rules in `@erly/adverse-domain` already handle syndication; this gives them something to
+ *   rules in `@adverse-search/domain` already handle syndication; this gives them something to
  *   handle.
  * - **A headline with no snippet.** Sources frequently omit the description. Code that
  *   synthesises one from the title scores a sentence the publisher never wrote.

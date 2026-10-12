@@ -16,7 +16,7 @@ import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Collection, Db } from 'mongodb';
 
-import type { Principal, Role } from '@erly/adverse-domain';
+import type { Principal, Role } from '@adverse-search/domain';
 
 /** Idle and absolute expiry are both enforced (section 4.2). */
 export const SESSION_IDLE_MS = 30 * 60 * 1000;

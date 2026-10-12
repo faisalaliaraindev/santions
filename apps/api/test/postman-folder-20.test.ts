@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '../../..');
 const COLLECTION = JSON.parse(
-  readFileSync(resolve(ROOT, 'postman/erly-adverse-search-full.postman_collection.json'), 'utf8'),
+  readFileSync(resolve(ROOT, 'postman/adverse-search-service-full.postman_collection.json'), 'utf8'),
 ) as { item: Item[] };
 const TEMPLATE_ENV = JSON.parse(
   readFileSync(resolve(ROOT, 'postman/local.postman_environment.json'), 'utf8'),
